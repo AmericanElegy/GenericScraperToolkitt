@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
-const source = await readFile(new URL('../src/worker.js', import.meta.url), 'utf8');
+const source = await readFile(new URL('../worker-code.txt', import.meta.url), 'utf8');
 // Synthetic structural fixture: runtime regression coverage, not proof of live Wikipedia extraction.
 function fixture({implicit = false, columns = 16} = {}) {
   const endCell = implicit ? '' : '</td>';
@@ -23,7 +23,7 @@ test('serves UI, CSV, JSON and cached validated results', async()=>{
   let calls=0;
   const mf=await runtime(null,async()=>{calls++;return new Response(fixture(),{headers:{'content-type':'text/html'}})});
   try {
-    const page=await mf.dispatchFetch('https://demo.test/');assert.equal(page.status,200);assert.match(await page.text(),/Search name, symbol or atomic number/);
+    const page=await mf.dispatchFetch('https://demo.test/example');assert.equal(page.status,200);assert.match(await page.text(),/Search name, symbol or atomic number/);
     const r=await mf.dispatchFetch('https://demo.test/api/elements');const data=await r.json();assert.equal(data.count,118);
     // Allow waitUntil's cache write to complete before asserting cache reuse.
     await new Promise(resolve=>setTimeout(resolve,100));

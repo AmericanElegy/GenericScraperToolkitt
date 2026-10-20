@@ -1,14 +1,19 @@
 {
   "name": "genericscrapertoolkitt",
   "version": "1.0.0",
-  "description": "Standalone free-tier Wikipedia element extraction Worker",
+  "description": "Standalone public HTML table extraction toolkit",
   "scripts": {
     "test": "node --test",
     "dev": "node scripts/dev.mjs",
     "deploy": "wrangler deploy",
     "check": "wrangler deploy --dry-run",
     "dev:wrangler": "wrangler dev",
-    "test:live": "node scripts/verify-live.mjs"
+    "test:live": "node scripts/verify-live.mjs",
+    "build": "esbuild src/worker.js --bundle --format=esm --platform=browser --outfile=worker-code.txt",
+    "pretest": "npm run build",
+    "predev": "npm run build",
+    "pretest:live": "npm run build",
+    "check:browser": "npm run build && node scripts/check-browser.mjs"
   },
   "repository": {
     "type": "git",
@@ -23,8 +28,12 @@
   },
   "homepage": "https://github.com/AmericanElegy/GenericScraperToolkitt#readme",
   "devDependencies": {
+    "esbuild": "0.28.2",
     "miniflare": "5.20261019.1-beta",
     "wrangler": "4.151.3"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "entities": "8.1.0"
+  }
 }

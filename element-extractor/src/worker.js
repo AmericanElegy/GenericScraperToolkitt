@@ -1,3 +1,5 @@
+import { decodeHTML } from 'entities';
+
 const SOURCE = 'https://en.wikipedia.org/wiki/List_of_chemical_elements';
 const FIELDS = ['atomic_number', 'symbol', 'name', 'group', 'period'];
 
@@ -72,11 +74,155 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), {status, headers: {...SECURITY, 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store'}});
 }
 
+// Stage 1 bounds: reject oversized or ambiguous data instead of silently truncating it.
+const LIMITS = {bytes: 2 * 1024 * 1024, tables: 20, rows: 5000, columns: 100, cells: 50000, text: 10000};
+class InputError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
+function publicURL(input) {
+  if (!input || input.length > 2048) throw new InputError('Enter a public HTTPS URL (up to 2048 characters).');
+  let url;
+  try { url = new URL(input); } catch { throw new InputError('Enter a valid public HTTPS URL.'); }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443') ||
+      host.length > 253 || host.endsWith('.') || !host.includes('.') || !/^[a-z0-9.-]+$/.test(host) ||
+      host.split('.').some(label => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) ||
+      /^[0-9.]+$/.test(host) || /(?:^|\.)(localhost|local|internal|test|invalid|example|onion|home|lan)$/.test(host)) {
+    throw new InputError('Use a public HTTPS hostname without credentials, IP addresses, or custom ports.');
+  }
+  url.hash = '';
+  return url;
+}
+function publicAddress(ip) {
+  if (ip.includes(':')) {
+    // Conservative global-unicast policy: also exclude transition and special-use ranges.
+    return /^[23][0-9a-f]{3}:/i.test(ip) && !/^200[12]:|^3fff:/i.test(ip);
+  }
+  const octets = ip.split('.').map(Number);
+  if (octets.length !== 4 || octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a,b,c] = octets;
+  return !(a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) || (a === 192 && (b === 168 || b === 0 || (b === 88 && c === 99))) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+    (a === 203 && b === 0 && c === 113));
+}
+async function checkPublicDNS(hostname, signal) {
+  const answers = await Promise.all(['A', 'AAAA'].map(async type => {
+    const url = new URL('https://cloudflare-dns.com/dns-query');
+    url.searchParams.set('name', hostname); url.searchParams.set('type', type);
+    const r = await fetch(url, {headers: {Accept: 'application/dns-json'}, redirect: 'manual', signal});
+    if (!r.ok) throw new InputError('Public DNS verification is unavailable. Try again later.', 502);
+    const body = await r.json();
+    if (body.Status !== 0) throw new InputError('The source hostname could not be resolved publicly.');
+    return (body.Answer || []).filter(a => a.type === 1 || a.type === 28).map(a => a.data);
+  }));
+  const addresses = answers.flat();
+  if (!addresses.length || addresses.some(ip => !publicAddress(ip))) throw new InputError('Private, reserved, and unresolved network destinations are not supported.');
+}
+async function readBounded(response) {
+  if (Number(response.headers.get('content-length')) > LIMITS.bytes) { await response.body?.cancel(); throw new InputError('Page exceeds the 2 MiB size limit.', 422); }
+  if (!response.body) throw new InputError('The source returned an empty page.', 422);
+  const reader = response.body.getReader(), chunks = []; let size = 0;
+  try {
+    while (true) {
+      const {value, done} = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > LIMITS.bytes) { await reader.cancel(); throw new InputError('Page exceeds the 2 MiB size limit.', 422); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  return new Blob(chunks, {type: 'text/html'});
+}
+async function fetchPublicPage(input, ownHost) {
+  let url = publicURL(input);
+  const signal = AbortSignal.timeout(15000);
+  for (let redirects = 0; redirects <= 3; redirects++) {
+    if (url.hostname === ownHost) throw new InputError('Choose a source page outside this toolkit.');
+    await checkPublicDNS(url.hostname, signal);
+    const r = await fetch(url.href, {redirect: 'manual', signal, headers: {Accept: 'text/html', 'User-Agent': 'GenericScraperToolkit/1.0 (public HTML tables)'}});
+    if ([301,302,303,307,308].includes(r.status)) {
+      const location = r.headers.get('location'); await r.body?.cancel();
+      if (!location || redirects === 3) throw new InputError('Source redirected too many times or omitted its destination.', 422);
+      url = publicURL(new URL(location, url).href); continue;
+    }
+    if (!r.ok) { await r.body?.cancel(); throw new InputError(`Source returned HTTP ${r.status}. Login-protected or blocked pages are not supported.`, 422); }
+    if (!/^text\/html(?:;|$)/i.test(r.headers.get('content-type') || '')) { await r.body?.cancel(); throw new InputError('The source must return an HTML webpage.', 422); }
+    const charset = (r.headers.get('content-type') || '').match(/charset\s*=\s*[\"']?([^;\s\"']+)/i)?.[1];
+    if (charset && !/^(utf-?8|us-ascii)$/i.test(charset)) {await r.body?.cancel(); throw new InputError('This first version supports UTF-8 HTML pages only.',422);}
+    return {source: url.href, page: await readBounded(r)};
+  }
+}
+async function discoverTables(page) {
+  const tables = [], stack = []; let totalRows = 0, totalCells = 0, ignored = 0;
+  const current = () => stack[stack.length - 1];
+  const rewrite = new HTMLRewriter()
+    .on('table', {element(el) {
+      if (tables.length >= LIMITS.tables) throw new InputError('Page exceeds the limit of 20 tables.', 422);
+      const parent = current(); if (parent) parent.unsupported = 'Nested tables are not supported yet.';
+      const table = {rows: [], caption: '', unsupported: parent ? 'Nested tables are not supported yet.' : null};
+      tables.push(table); stack.push(table);
+      el.onEndTag(() => { if (current() === table) stack.pop(); });
+    }})
+    .on('tr', {element(el) {
+      const table = current(); if (!table) return;
+      if (++totalRows > LIMITS.rows) throw new InputError('Page exceeds the limit of 5000 total rows.', 422);
+      const row = []; table.rows.push(row); table.row = row; table.cell = undefined;
+      el.onEndTag(() => { if (table.row === row) {table.row = undefined; table.cell = undefined;} });
+    }})
+    .on('td, th', {element(el) {
+      const table = current(); if (!table?.row) return;
+      if (table.row.length >= LIMITS.columns || ++totalCells > LIMITS.cells) throw new InputError('Page exceeds the cell or column limit.', 422);
+      if (['rowspan','colspan'].some(k => el.hasAttribute(k) && el.getAttribute(k) !== '1')) table.unsupported = 'Merged cells are not supported yet.';
+      const cell = {text: '', header: el.tagName === 'th'}; table.row.push(cell); table.cell = cell;
+      el.onEndTag(() => {if (table.cell === cell) table.cell = undefined;});
+    }})
+    .on('caption', {element(el) {const table = current(); if (!table) return; table.inCaption = true; el.onEndTag(() => {table.inCaption = false;});}})
+    .on('script, style, template', {element(el) {ignored++; el.onEndTag(() => {ignored--;});}})
+    .on('br', {element() {const t = current(); if (t?.cell) t.cell.text += ' ';}})
+    .onDocument({text(chunk) {
+      const table = current(); if (!table || ignored) return;
+      if (table.inCaption) {table.caption += chunk.text; if (table.caption.length > LIMITS.text) throw new InputError('Table caption is too long.', 422);}
+      else if (table.cell) {table.cell.text += chunk.text; if (table.cell.text.length > LIMITS.text) throw new InputError('A table cell exceeds the text limit.', 422);}
+    }});
+  await rewrite.transform(new Response(page)).arrayBuffer();
+  return tables.filter(t => t.rows.some(r => r.length)).map((t, id) => {
+    const rows = t.rows.filter(r => r.length), width = Math.max(...rows.map(r => r.length));
+    const heading = rows[0]?.every(c => c.header);
+    if (rows.slice(heading ? 1 : 0).some(r => r.some(c => c.header) && r.every(c => c.header))) t.unsupported ||= 'Multiple header rows are not supported yet.';
+    if (rows.some(r => r.length !== width)) t.unsupported ||= 'Rows have inconsistent column counts.';
+    const normalize = text => decodeHTML(text).replace(/\s+/g, ' ').trim();
+    return {id, title: normalize(t.caption) || `Table ${id + 1}`, headers: heading ? rows[0].map(c => normalize(c.text)) : Array.from({length: width}, (_,i) => `Column ${i + 1}`),
+      rows: rows.slice(heading ? 1 : 0).map(r => r.map(c => normalize(c.text))), unsupported: t.unsupported};
+  });
+}
+async function tablesAPI(request, url) {
+  if (request.method !== 'POST') return new Response('Method not allowed', {status:405, headers:{...SECURITY, Allow:'POST'}});
+  // Do not provide a cross-origin scraping proxy; no CORS headers are emitted.
+  const origin = request.headers.get('origin');
+  if (origin && origin !== url.origin) return json({error:'Cross-origin extraction is not supported.'},403);
+  if (!/^application\/json(?:;|$)/i.test(request.headers.get('content-type') || '')) return json({error:'Send a JSON request.'},415);
+  try {
+    if (Number(request.headers.get('content-length')) > 4096) throw new InputError('Request is too large.',413);
+    const reader = request.body?.getReader(); const chunks = []; let bytes = 0;
+    if (reader) {try {while (true) {const {value, done} = await reader.read(); if (done) break; bytes += value.byteLength; if (bytes > 4096) {await reader.cancel(); throw new InputError('Request is too large.',413);} chunks.push(value);}} finally {reader.releaseLock();}}
+    const text = await new Blob(chunks).text();
+    let body; try {body = JSON.parse(text);} catch {throw new InputError('Invalid JSON request.');}
+    if (!body || typeof body.url !== 'string') throw new InputError('Provide a public HTTPS URL.');
+    const {source, page} = await fetchPublicPage(body.url, url.hostname);
+    const tables = await discoverTables(page);
+    if (!tables.length) throw new InputError('No HTML tables found. JavaScript-rendered tables and login-protected pages are not supported.',422);
+    return json({source, retrieved_at:new Date().toISOString(), tables});
+  } catch (error) {
+    return json({error: error.name === 'TimeoutError' || error.name === 'AbortError' ? 'The source exceeded the 15-second request limit.' : error.message || 'Table extraction failed.'}, error.status || 502);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/tables') return tablesAPI(request, url);
     if (request.method !== 'GET') return new Response('Method not allowed', {status:405, headers:{Allow:'GET'}});
-    if (url.pathname === '/') return new Response(PAGE, {headers:{...SECURITY, 'Content-Type':'text/html; charset=utf-8'}});
+    if (url.pathname === '/example') return new Response(PAGE, {headers:{...SECURITY, 'Content-Type':'text/html; charset=utf-8'}});
+    if (url.pathname === '/') return new Response(TABLE_PAGE, {headers:{...SECURITY, 'Content-Type':'text/html; charset=utf-8'}});
     if (!['/api/elements', '/elements.csv'].includes(url.pathname)) return json({error:'Not found'},404);
     try {
       const key = new Request(new URL('/_cache/elements-v1', url.origin));
@@ -107,3 +253,41 @@ const PAGE = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="v
 <section id="results" hidden><div class="bar"><input id="search" type="search" aria-label="Search by name, symbol or atomic number" placeholder="Search name, symbol or atomic number"><a class="button" href="/elements.csv">Download CSV</a><button id="download">Download JSON</button></div><p id="count"></p><div id="wrap"><table><caption class="tag">Chemical elements</caption><thead><tr><th scope="col">Atomic no.</th><th scope="col">Symbol</th><th scope="col">Element</th><th scope="col">Group</th><th scope="col">Period</th></tr></thead><tbody id="rows"></tbody></table></div></section>
 <footer>Source: <a href="https://en.wikipedia.org/wiki/List_of_chemical_elements">Wikipedia contributors — List of chemical elements</a> · <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. Columns selected and formatting normalized. Missing group values stay blank in exports.<br>Validated responses are cached for up to 24 hours per Cloudflare location. No AI or browser service is used.</footer></main>
 <script>let dataset;const $=id=>document.getElementById(id);function render(){const q=$('search').value.trim().toLowerCase();const items=dataset.elements.filter(e=>[e.name,e.symbol,e.atomic_number].some(v=>String(v).toLowerCase().includes(q)));$('rows').replaceChildren(...items.map(e=>{const tr=document.createElement('tr');for(const k of ['atomic_number','symbol','name','group','period']){const td=document.createElement('td');td.textContent=e[k]??'—';tr.append(td)}return tr}));$('count').textContent=items.length+' of '+dataset.count+' elements'}$('load').onclick=async()=>{$('load').disabled=true;$('status').textContent='Fetching and validating…';try{const r=await fetch('/api/elements');const d=await r.json();if(!r.ok)throw Error(d.error);dataset=d;render();$('results').hidden=false;$('status').textContent='Validated '+d.count+' elements · Source retrieved '+new Date(d.retrieved_at).toLocaleString();$('load').textContent='Reload dataset'}catch(e){$('status').textContent=e.message}finally{$('load').disabled=false}};$('search').oninput=()=>{if(dataset)render()};$('download').onclick=()=>{const u=URL.createObjectURL(new Blob([JSON.stringify(dataset,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download='chemical-elements.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)};</script></html>`;
+
+const TABLE_PAGE = String.raw`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Table Toolkit</title>
+<style>*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17283c;font:16px system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 22px}h1{font-size:clamp(30px,5vw,48px);margin:12px 0}p{line-height:1.6}a{color:#18568b}.bar{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}input,select{padding:12px;border:1px solid #8596a8;border-radius:8px;font:inherit;max-width:100%}input{flex:1;min-width:200px}button,.button{padding:12px 18px;border:0;border-radius:8px;background:#173b59;color:white;font:inherit;cursor:pointer;text-decoration:none}button:disabled{opacity:.5;cursor:wait}label{display:block;font-weight:600;margin:12px 0 6px}.hint,footer{font-size:14px;color:#47607a}#status{min-height:28px}#wrap{overflow:auto;background:white;border:1px solid #d7dfe6;border-radius:10px;max-height:65vh}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:12px 16px;border-bottom:1px solid #e7edf2;max-width:420px;overflow-wrap:anywhere;min-width:100px}th{background:#e8eff5;position:sticky;top:0}footer{margin-top:28px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #bc6b10;outline-offset:3px}[hidden]{display:none!important}</style></head>
+<body><main><h1>Web Table Toolkit</h1><p>Turn tables on public webpages into searchable data. Preview a table, then download CSV or JSON.</p>
+<form id="extract"><label for="url">Public webpage URL</label><div class="bar"><input id="url" type="url" maxlength="2048" required placeholder="https://www.w3schools.com/html/html_tables.asp"><button id="submit" type="submit">Find tables</button></div></form>
+<p class="hint">Public HTTPS pages only. HTML tables must be present in the page source. Maximum 2 MiB, 20 tables, and 5,000 total rows. Complex tables are marked unsupported.</p>
+<p><button id="try" type="button">Try a sample table</button> <a href="/example">Open the validated 118-element example</a></p>
+<p id="status" role="status" aria-live="polite">Enter a URL to begin.</p>
+<section id="results" hidden><label for="tables">Choose a table</label><select id="tables"></select><p id="source" class="hint"></p><p id="notice" role="status"></p>
+<div class="bar"><input id="search" type="search" aria-label="Search table rows" placeholder="Search table rows"><button id="csv" type="button">Download CSV</button><button id="json" type="button">Download JSON</button></div>
+<p id="count"></p><p class="hint">Exports include all rows in the selected table. Search filters the preview only.</p><div id="wrap"><table><caption id="caption"></caption><thead id="head"></thead><tbody id="rows"></tbody></table></div></section>
+<footer>Only extract sources you are authorized to use and respect their terms. Source content stays text, never executable HTML. Extraction data is not saved by this application. No AI or browser service is used.</footer></main>
+<script>
+const $=id=>document.getElementById(id);let dataset;
+function selected(){return dataset.tables[Number($('tables').value)]}
+function render(){
+ const table=selected();const q=$('search').value.trim().toLowerCase();const rows=table.rows.filter(r=>r.some(c=>c.toLowerCase().includes(q)));
+ $('notice').textContent=table.unsupported||'';for(const id of ['csv','json','search'])$(id).disabled=Boolean(table.unsupported);
+ $('wrap').hidden=Boolean(table.unsupported);$('caption').textContent=table.title;
+ const heading=document.createElement('tr');for(const name of table.headers){const th=document.createElement('th');th.scope='col';th.textContent=name;heading.append(th)}$('head').replaceChildren(heading);
+ $('rows').replaceChildren(...rows.map(row=>{const tr=document.createElement('tr');for(const value of row){const td=document.createElement('td');td.textContent=value;tr.append(td)}return tr}));
+ $('count').textContent=table.unsupported?'Choose another table to preview or export.':rows.length+' of '+table.rows.length+' rows · '+table.headers.length+' columns';
+}
+$('extract').onsubmit=async event=>{
+ event.preventDefault();$('submit').disabled=true;$('try').disabled=true;$('results').hidden=true;dataset=undefined;$('status').textContent='Fetching page and finding tables…';
+ try{const r=await fetch('/api/tables',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('url').value.trim()})});const d=await r.json();if(!r.ok)throw Error(d.error||'Extraction failed.');dataset=d;
+ $('tables').replaceChildren(...d.tables.map((t,i)=>{const option=document.createElement('option');option.value=i;option.textContent=t.title+' · '+t.rows.length+' rows × '+t.headers.length+' columns'+(t.unsupported?' · unsupported':'');return option}));
+ const first=d.tables.findIndex(t=>!t.unsupported);$('tables').value=String(first<0?0:first);$('search').value='';
+ const link=document.createElement('a');link.href=d.source;link.rel='noreferrer';link.target='_blank';link.textContent=d.source;$('source').replaceChildren('Source: ',link,' · Retrieved '+new Date(d.retrieved_at).toLocaleString());
+ render();$('results').hidden=false;$('status').textContent='Found '+d.tables.length+' tables. Choose one to preview.';
+ }catch(e){$('status').textContent=e.message}finally{$('submit').disabled=false;$('try').disabled=false}
+};
+$('try').onclick=()=>{$('url').value='https://www.w3schools.com/html/html_tables.asp';$('extract').requestSubmit()};
+$('tables').onchange=()=>{$('search').value='';render()};$('search').oninput=()=>{if(dataset)render()};
+function download(text,type,extension){const u=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=u;a.download='table-'+(Number($('tables').value)+1)+extension;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+$('csv').onclick=()=>{const t=selected();if(t.unsupported)return;const quote=value=>{let s=String(value);if(/^[\s\u0000-\u001f]*[=+@-]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'};download([t.headers,...t.rows].map(r=>r.map(quote).join(',')).join('\r\n')+'\r\n','text/csv;charset=utf-8','.csv')};
+$('json').onclick=()=>{const t=selected();if(t.unsupported)return;download(JSON.stringify({source:dataset.source,retrieved_at:dataset.retrieved_at,table:t},null,2),'application/json','.json')};
+</script></body></html>`;

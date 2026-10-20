@@ -1,0 +1,36 @@
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {spawn} from 'node:child_process';
+import {mkdtemp,readFile,readdir,rm} from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
+const dir=await mkdtemp(join(tmpdir(),'table-browser-'));
+const html='<table><caption>Products</caption><tr><th>Name</th><th>Price</th></tr><tr><td>Widget</td><td>12</td></tr><tr><td>Gadget</td><td>=1+1</td></tr></table><table><tr><td>&lt;img src=x onerror=alert(1)&gt;</td></tr></table>';
+const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile(new URL('../worker-code.txt',import.meta.url),'utf8'),compatibilityDate:'2026-10-01',host:'127.0.0.1',port:8790,outboundService:r=>new URL(r.url).hostname==='cloudflare-dns.com'?Response.json({Status:0,Answer:new URL(r.url).searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]}):new Response(html,{headers:{'content-type':'text/html'}})}));
+await mf.ready;
+const chrome=spawn(process.env.CHROMIUM_PATH || 'chromium',['--headless','--no-sandbox','--disable-gpu','--remote-debugging-port=9223','--user-data-dir='+dir+'/profile','about:blank'],{stdio:'ignore'});
+let ws;const pending=new Map();let id=0;
+async function waitFor(fn){for(let i=0;i<100;i++){try{const r=await fn();if(r)return r}catch{}await new Promise(r=>setTimeout(r,100))}throw Error('Timed out')}
+try {
+ const targets=await waitFor(async()=>{const r=await fetch('http://127.0.0.1:9223/json');return r.json()});
+ ws=new WebSocket(targets.find(x=>x.type==='page').webSocketDebuggerUrl);await new Promise(resolve=>ws.addEventListener('open',resolve,{once:true}));
+ ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result)}});
+ const send=(method,params={})=>new Promise((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});ws.send(JSON.stringify({id:n,method,params}))});
+ const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};
+ await send('Page.enable');await send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:dir});await send('Page.navigate',{url:'http://127.0.0.1:8790/'});
+ await waitFor(()=>evaluate('Boolean(document.getElementById("extract"))'));
+ await evaluate('document.getElementById("url").value="https://tables.example.org/";document.getElementById("extract").requestSubmit()');
+ await waitFor(()=>evaluate('!document.getElementById("results").hidden'));
+ assert.equal(await evaluate('document.getElementById("tables").options.length'),2);
+ assert.equal(await evaluate('document.querySelectorAll("#rows tr").length'),2);
+ await evaluate('document.getElementById("search").value="widget";document.getElementById("search").dispatchEvent(new Event("input"))');
+ assert.equal(await evaluate('document.querySelectorAll("#rows tr").length'),1);
+ await evaluate('document.getElementById("csv").click()');
+ await waitFor(async()=> (await readdir(dir)).includes('table-1.csv'));
+ const csv=await readFile(dir+'/table-1.csv','utf8');assert.equal(csv,'"Name","Price"\r\n"Widget","12"\r\n"Gadget","\'=1+1"\r\n');
+ await evaluate('document.getElementById("json").click()');await waitFor(async()=> (await readdir(dir)).includes('table-1.json'));
+ const json=JSON.parse(await readFile(dir+'/table-1.json','utf8'));assert.equal(json.table.rows.length,2);assert.equal(json.source,'https://tables.example.org/');
+ await evaluate('document.getElementById("tables").value="1";document.getElementById("tables").dispatchEvent(new Event("change"))');
+ assert.equal(await evaluate('document.getElementById("rows").textContent'),'<img src=x onerror=alert(1)>');assert.equal(await evaluate('document.querySelectorAll("#rows img").length'),0);
+ console.log('PASS: Chromium discovery, table selection, search, real CSV/JSON downloads, formula protection and inert HTML text.');
+} finally {ws?.close();const exited = new Promise(resolve=>chrome.once('exit',resolve));chrome.kill('SIGTERM');await exited;await mf.dispose();await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100})}
