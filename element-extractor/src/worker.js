@@ -194,6 +194,48 @@ async function discoverTables(page) {
       rows: rows.slice(heading ? 1 : 0).map(r => r.map(c => normalize(c.text))), unsupported: t.unsupported};
   });
 }
+// DCI publishes its score grid as divs, not a semantic HTML table.
+// Scope this adapter to DCI final-score pages and their explicit grid classes.
+async function discoverDCIScores(page) {
+  const sections = []; let section, row, field;
+  const normalize = text => decodeHTML(text).replace(/\s+/g, ' ').trim();
+  const capture = (selector, key, destination) => ({selector, handler:{
+    element(el) {
+      const target = destination(); if (!target) return;
+      if (key === 'title' && target.title) throw new InputError('Multiple DCI divisions in one grid are not supported yet.',422);
+      const current = {target, key, text:''}; field = current;
+      el.onEndTag(() => {target[key] = normalize(current.text); if (field === current) field = undefined;});
+    },
+    text(chunk) {if (field?.key === key) {field.text += chunk.text; if (field.text.length > LIMITS.text) throw new InputError('A score field exceeds the text limit.',422);}}
+  }});
+  let rewriter = new HTMLRewriter()
+    .on('.score-tbl.finalscores', {element(el) {
+      if (sections.length >= LIMITS.tables) throw new InputError('Page exceeds the table limit.',422);
+      const current = {title:'', headers:{}, rows:[]}; sections.push(current); section=current;
+      el.onEndTag(() => {if(section===current) {section=undefined; row=undefined; field=undefined;}});
+    }})
+    .on('.score-tbl.finalscores .tbl-row:not(.poweredby-row)', {element(el) {
+      if(!section)return;
+      if (sections.reduce((n,s)=>n+s.rows.length,0) >= LIMITS.rows) throw new InputError('Page exceeds the row limit.',422);
+      const current={};section.rows.push(current);row=current;
+      el.onEndTag(()=>{if(row===current)row=undefined;});
+    }});
+  for (const [selector,key,destination] of [
+    ['.score-tbl.finalscores .score-division-name','title',()=>section],
+    ...[['.col-2','place'],['.col-7','corps'],['.col-3','score']].flatMap(([column,key])=>[
+      ['.score-tbl.finalscores .filter-cards .row > '+column+' > span',key,()=>section?.headers],
+      ['.score-tbl.finalscores .tbl-row:not(.poweredby-row) .row > '+column+' > span',key,()=>row]
+    ])
+  ]) {const {handler}=capture(selector,key,destination);rewriter=rewriter.on(selector,handler);}
+  await rewriter.transform(new Response(page)).arrayBuffer();
+  return sections.filter(s=>s.rows.length).map((s,id)=>{
+    if(s.headers.place!=='Place'||s.headers.corps!=='Corps'||s.headers.score!=='Score') throw new InputError('DCI score headings changed; extraction stopped.',422);
+    const rows=s.rows.map(r=>[r.place,r.corps,r.score]);
+    if(rows.some(([place,corps,score])=>!/^\d+$/.test(place||'')||!corps||!/^\d{1,3}\.\d{3}$/.test(score||'')||Number(score)>100)) throw new InputError('DCI score layout or values changed; extraction stopped.',422);
+    return {id,title:s.title||'DCI final scores',headers:['Place','Corps','Score'],rows,unsupported:null,extraction_method:'dci-final-scores'};
+  });
+}
+
 async function tablesAPI(request, url) {
   if (request.method !== 'POST') return new Response('Method not allowed', {status:405, headers:{...SECURITY, Allow:'POST'}});
   // Do not provide a cross-origin scraping proxy; no CORS headers are emitted.
@@ -208,8 +250,13 @@ async function tablesAPI(request, url) {
     let body; try {body = JSON.parse(text);} catch {throw new InputError('Invalid JSON request.');}
     if (!body || typeof body.url !== 'string') throw new InputError('Provide a public HTTPS URL.');
     const {source, page} = await fetchPublicPage(body.url, url.hostname);
-    const tables = await discoverTables(page);
-    if (!tables.length) throw new InputError('No HTML tables found. JavaScript-rendered tables and login-protected pages are not supported.',422);
+    let tables = await discoverTables(page);
+    const sourceURL = new URL(source);
+    if (['www.dci.org','dci.org'].includes(sourceURL.hostname) && sourceURL.pathname.startsWith('/scores/final-scores/')) {
+      const scores = await discoverDCIScores(page);
+      tables = [...tables, ...scores].map((table,id)=>({...table,id}));
+    }
+    if (!tables.length) throw new InputError('No supported table or score grid found. This page may use an unsupported layout, JavaScript rendering, or restricted access.',422);
     return json({source, retrieved_at:new Date().toISOString(), tables});
   } catch (error) {
     return json({error: error.name === 'TimeoutError' || error.name === 'AbortError' ? 'The source exceeded the 15-second request limit.' : error.message || 'Table extraction failed.'}, error.status || 502);
@@ -258,7 +305,7 @@ const TABLE_PAGE = String.raw`<!doctype html><html lang="en"><head><meta charset
 <style>*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17283c;font:16px system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 22px}h1{font-size:clamp(30px,5vw,48px);margin:12px 0}p{line-height:1.6}a{color:#18568b}.bar{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}input,select{padding:12px;border:1px solid #8596a8;border-radius:8px;font:inherit;max-width:100%}input{flex:1;min-width:200px}button,.button{padding:12px 18px;border:0;border-radius:8px;background:#173b59;color:white;font:inherit;cursor:pointer;text-decoration:none}button:disabled{opacity:.5;cursor:wait}label{display:block;font-weight:600;margin:12px 0 6px}.hint,footer{font-size:14px;color:#47607a}#status{min-height:28px}#wrap{overflow:auto;background:white;border:1px solid #d7dfe6;border-radius:10px;max-height:65vh}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:12px 16px;border-bottom:1px solid #e7edf2;max-width:420px;overflow-wrap:anywhere;min-width:100px}th{background:#e8eff5;position:sticky;top:0}footer{margin-top:28px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #bc6b10;outline-offset:3px}[hidden]{display:none!important}</style></head>
 <body><main><h1>Web Table Toolkit</h1><p>Turn tables on public webpages into searchable data. Preview a table, then download CSV or JSON.</p>
 <form id="extract"><label for="url">Public webpage URL</label><div class="bar"><input id="url" type="url" maxlength="2048" required placeholder="https://www.w3schools.com/html/html_tables.asp"><button id="submit" type="submit">Find tables</button></div></form>
-<p class="hint">Public HTTPS pages only. HTML tables must be present in the page source. Maximum 2 MiB, 20 tables, and 5,000 total rows. Complex tables are marked unsupported.</p>
+<p class="hint">Public HTTPS pages only. HTML tables or supported DCI final-score grids must be present in the page source. Maximum 2 MiB, 20 tables, and 5,000 total rows. Complex tables are marked unsupported.</p>
 <p><button id="try" type="button">Try a sample table</button> <a href="/example">Open the validated 118-element example</a></p>
 <p id="status" role="status" aria-live="polite">Enter a URL to begin.</p>
 <section id="results" hidden><label for="tables">Choose a table</label><select id="tables"></select><p id="source" class="hint"></p><p id="notice" role="status"></p>

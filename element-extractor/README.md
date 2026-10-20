@@ -23,11 +23,12 @@ Useful public examples:
 
 - `https://www.w3schools.com/html/html_tables.asp` — two simple tables.
 - `https://en.wikipedia.org/wiki/ISO_3166-1` — includes a 249-row country-code table.
+- `https://www.dci.org/scores/final-scores/2026-dci-all-age-world-championship-finals/` — a verified 12-row div-based score grid.
 - `/example` — the preserved, specialized chemical-elements demo with 118-element validation and cached exports. Its `/api/elements` and `/elements.csv` endpoints are unchanged.
 
 ## Supported in Stage 1
 
-UTF-8 HTML tables returned directly by public HTTPS webpages. Tables with a single header row or no explicit header row are supported; headerless tables receive positional column names. Text entities are decoded and whitespace collapsed. Scripts, styles and templates are ignored.
+UTF-8 HTML tables returned directly by public HTTPS webpages. DCI final-score pages also have a targeted adapter for their single-division div-based score grid (Place / Corps / Score); it validates headings and score formatting and excludes sponsor/recap rows. This does not imply arbitrary div layouts are supported. Multiple divisions in one score grid are rejected rather than combined incorrectly. Tables with a single header row or no explicit header row are supported; headerless tables receive positional column names. Text entities are decoded and whitespace collapsed. Scripts, styles and templates are ignored.
 
 Merged cells, nested tables, multiple full header rows, and inconsistent row widths are marked unsupported and cannot be exported from the UI. JavaScript rendering, authenticated pages, anti-bot bypasses, saved jobs, batch extraction, scheduling, videos, accounts and billing are outside this stage. Access denial or no tables produces an actionable message; no automatic retry is made.
 
@@ -63,3 +64,5 @@ Live general table discovery was also checked against W3Schools and Wikipedia IS
 `src/worker.js` is canonical. `npm run build` bundles its small HTML-entity decoder dependency into **worker-code.txt**, a standalone ES module suitable for pasting into Cloudflare's editor. The bundle is generated; edit the source and rebuild rather than editing both files. Wrangler deploys the source and bundles its dependencies automatically.
 
 `npm run deploy` updates the `genericscrapertoolkit` Worker using your authenticated account. This project does not enable paid services or change your subscription. Deploying and saving a Codex environment snapshot are separate operations.
+
+DCI support requires outbound access to `www.dci.org` (and `dci.org` if using its alternate hostname). The score adapter uses the already returned HTML; it does not execute page JavaScript or use a paid browser.
