@@ -1,0 +1,30 @@
+{
+  "name": "genericscrapertoolkitt",
+  "version": "1.0.0",
+  "description": "Standalone free-tier Wikipedia element extraction Worker",
+  "scripts": {
+    "test": "node --test",
+    "dev": "node scripts/dev.mjs",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run",
+    "dev:wrangler": "wrangler dev",
+    "test:live": "node scripts/verify-live.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AmericanElegy/GenericScraperToolkitt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/AmericanElegy/GenericScraperToolkitt/issues"
+  },
+  "homepage": "https://github.com/AmericanElegy/GenericScraperToolkitt#readme",
+  "devDependencies": {
+    "miniflare": "5.20261019.1-beta",
+    "wrangler": "4.151.3"
+  },
+  "private": true
+}
