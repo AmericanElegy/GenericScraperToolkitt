@@ -1,0 +1,259 @@
+
+Occupational Employment and Wages in Jacksonville, FL — May 2025
+
+Workers in the Jacksonville, FL Metropolitan Statistical Area had an average (mean) hourly wage of $31.59 in May 2025, compared to the nationwide average of $33.54, the U.S. Bureau of Labor Statistics reported today. Regional Commissioner Victoria G. Lee noted that higher paying major occupational groups included management ($65.97), legal ($54.16), and computer and mathematical ($51.30). Lower paying occupational groups included food preparation and serving related ($17.57), personal care and service ($18.61), and building and grounds cleaning and maintenance ($18.71). (See table A.)
+
+Office and administrative support occupations accounted for 12.6 percent of Jacksonville area employment, followed by transportation and material moving occupations (9.9 percent), sales and related occupations (9.8 percent), and food preparation and serving related occupations (9.4 percent). Major occupational groups on the lower end of local employment included life, physical, and social science (0.5 percent) and legal (0.9 percent).
+Table A. Occupational employment and wages by major occupational group, United States and the Jacksonville metropolitan area, May 2025Major occupational group	Percent of total employment	Mean hourly wage ($)
+United States	Jacksonville	United States	Jacksonville
+
+Total, all occupations
+	100.0	100.0	33.54	31.59
+
+Management
+	7.2	7.4	69.84	65.97
+
+Business and financial operations
+	6.8	7.6	45.78	43.08
+
+Computer and mathematical
+	3.4	3.2	57.73	51.30
+
+Architecture and engineering
+	1.7	1.3	51.36	48.04
+
+Life, physical, and social science
+	0.9	0.5	45.48	40.84
+
+Community and social service
+	1.7	1.3	30.49	27.68
+
+Legal
+	0.8	0.9	67.07	54.16
+
+Educational instruction and library
+	5.9	4.4	32.47	27.89
+
+Arts, design, entertainment, sports, and media
+	1.3	1.2	38.36	31.28
+
+Healthcare practitioners and technical
+	6.3	6.9	52.26	48.97
+
+Healthcare support
+	5.1	3.6	19.62	20.20
+
+Protective service
+	2.4	2.5	29.19	26.86
+
+Food preparation and serving related
+	8.8	9.4	17.86	17.57
+
+Building and grounds cleaning and maintenance
+	2.9	2.9	19.66	18.71
+
+Personal care and service
+	2.1	1.9	19.74	18.61
+
+Sales and related
+	8.6	9.8	26.43	24.92
+
+Office and administrative support
+	11.4	12.6	24.79	23.89
+
+Farming, fishing, and forestry
+	0.3	0.1	19.96	21.17
+
+Construction and extraction
+	4.1	4.8	31.42	26.78
+
+Installation, maintenance, and repair
+	3.9	4.5	30.44	28.75
+
+Production
+	5.5	3.2	24.81	23.58
+
+Transportation and material moving
+	8.8	9.9	23.96	23.43
+
+One occupational group—office and administrative support—was chosen to illustrate the diversity of data available for any of the 22 major occupational categories. Jacksonville had 96,850 jobs in office and administrative support, accounting for 12.6 percent of local area employment, compared to the 11.4-percent share nationally. The average hourly wage for this occupational group locally was $23.89, compared to the national wage of $24.79.
+
+Some of the larger detailed occupations within the office and administrative support group included customer service representatives (17,030) and general office clerks (13,430). Among the higher paying jobs in this group were first-line supervisors of office and administrative support workers ($34.69) and executive secretaries and executive administrative assistants ($34.19). At the lower end of the wage scale were hotel, motel, and resort desk clerks ($16.80); clerical library assistants ($17.33); and switchboard operators, including answering service ($17.49). (Detailed data for the office and administrative support occupations are presented in table 1; for a complete listing of detailed occupations available go to data.bls.gov/oes/#/area/0027260/2025.)
+
+Location quotients allow us to explore the occupational make-up of a metropolitan area by comparing the composition of jobs in an area relative to the national average. (See table 1.) For example, a location quotient of 2.00 indicates that an occupation accounts for twice the share of employment in the area than it does nationally. In the Jacksonville area, above-average concentrations of employment were found in some of the occupations within the office and administrative support group. For instance, postal service mail sorters, processors, and processing machine operators were employed at 2.82 times the national rate in Jacksonville, and bill and account collectors, at 1.68 times the U.S. average. Bookkeeping, accounting, and auditing clerks had a location quotient of 1.00 in Jacksonville, indicating that this particular occupation’s local and national employment shares were similar.
+
+The statistics in this release are from the Occupational Employment and Wage Statistics (OEWS) survey, a cooperative effort between BLS and the State Workforce Agencies (SWAs). BLS funds the survey and provides the procedures and technical support. State Workforce Agencies collect most of the data: in this case, the Florida Department of Commerce.
+Federal Government Shutdown
+
+Because of the lapse in federal appropriations from October 1 through November 12, 2025, additional collection and processing time were required for the May 2025 OEWS survey panel once appropriations resumed. The response rate for the May 2025 survey panel was within the normal range and no additional modifications to the OEWS methodology and procedures were necessary as a result of the shutdown.
+
+
+Technical Note
+
+The Occupational Employment and Wage Statistics (OEWS) survey is a semiannual survey measuring occupational employment and wage rates for wage and salary workers in nonfarm establishments in the United States. The OEWS data available from BLS include cross-industry occupational employment and wage estimates for the nation; over 530 areas, including states and the District of Columbia, metropolitan statistical areas (MSAs), nonmetropolitan areas, and territories; national industry-specific estimates at the NAICS sector, 3-digit, most 4-digit, and selected 5- and 6-digit industry levels; and national estimates by ownership across all industries and for schools and hospitals. Full OEWS data tables are available online.
+
+Additional information about the OEWS estimates and methodology is available in the national Technical Notes. The overall national response rate for the six panels, based on the 50 states and the District of Columbia, is 66.2 percent based on establishments and 67.2 percent based on weighted sampled employment. Sample sizes and response rates by metropolitan and nonmetropolitan area are available on the Additional OEWS data sets page.
+
+Metropolitan area definitions
+
+The substate area data published in this release reflect the standards and definitions established by the U.S. Office of Management and Budget.
+
+The Jacksonville, FL Metropolitan Statistical Area includes Baker County, Clay County, Duval County, Nassau County, and St. Johns County.
+
+For more information
+
+Answers to frequently asked questions about the OEWS data, as well as general program documentation, are available on the OEWS website.
+
+If you are deaf, hard of hearing, or have a speech disability, please dial 7-1-1 to access telecommunications relay services.
+Table 1. Employment and wage data for office and administrative support occupations, Jacksonville metropolitan area, May 2025Occupation(1)	Employment	Mean wages ($)
+Level(2)	Location quotient(3)	Hourly	Annual(4)
+
+Office and administrative support occupations
+	96,850	1.11	23.89	49,690
+
+First-line supervisors of office and administrative support workers
+	7,640	1.08	34.69	72,150
+
+Switchboard operators, including answering service
+	180	1.06	17.49	36,380
+
+Bill and account collectors
+	1,310	1.68	23.26	48,390
+
+Billing and posting clerks
+	2,330	1.17	23.88	49,660
+
+Bookkeeping, accounting, and auditing clerks
+	6,780	1.00	26.26	54,620
+
+Payroll and timekeeping clerks
+	880	1.17	26.15	54,380
+
+Procurement clerks
+	210	0.77	24.59	51,150
+
+Tellers
+	1,320	0.81	21.86	45,470
+
+Financial clerks, all other
+	240	1.32	29.62	61,610
+
+Brokerage clerks
+	260	1.49	30.83	64,120
+
+Correspondence clerks
+	50	2.38	18.35	38,170
+
+Court, municipal, and license clerks
+	810	0.92	22.31	46,400
+
+Credit authorizers, checkers, and clerks
+	70	1.21	22.24	46,260
+
+Customer service representatives
+	17,030	1.33	21.77	45,270
+
+Eligibility interviewers, government programs
+	1,170	1.53	24.89	51,780
+
+File clerks
+	430	1.18	21.09	43,860
+
+Hotel, motel, and resort desk clerks
+	1,330	1.03	16.80	34,940
+
+Interviewers, except eligibility and loan
+	740	1.01	22.89	47,600
+
+Library assistants, clerical
+	290	0.70	17.33	36,050
+
+Loan interviewers and clerks
+	1,320	1.63	26.96	56,070
+
+New accounts clerks
+	140	0.76	22.97	47,780
+
+Order clerks
+	170	0.46	23.42	48,710
+
+Human resources assistants, except payroll and timekeeping
+	270	0.60	24.38	50,700
+
+Receptionists and information clerks
+	4,380	0.98	18.13	37,700
+
+Reservation and transportation ticket agents and travel clerks
+	250	0.43	20.95	43,570
+
+Information and record clerks, all other
+	490	0.74	24.73	51,430
+
+Cargo and freight agents
+	720	1.51	26.62	55,370
+
+Couriers and messengers
+	450	1.32	17.97	37,390
+
+Public safety telecommunicators
+	480	0.95	23.66	49,200
+
+Dispatchers, except police, fire, and ambulance
+	1,120	1.12	25.00	52,000
+
+Meter readers, utilities
+	140	1.46	29.90	62,180
+
+Postal service clerks
+	220	0.60	29.39	61,120
+
+Postal service mail carriers
+	1,440	0.89	29.88	62,160
+
+Postal service mail sorters, processors, and processing machine operators
+	1,460	2.82	27.26	56,700
+
+Production, planning, and expediting clerks
+	1,590	0.83	27.48	57,150
+
+Shipping, receiving, and inventory clerks
+	4,110	1.02	22.79	47,410
+
+Weighers, measurers, checkers, and samplers, recordkeeping
+	350	1.35	22.61	47,020
+
+Executive secretaries and executive administrative assistants
+	1,230	0.54	34.19	71,110
+
+Legal secretaries and administrative assistants
+	600	0.78	25.87	53,810
+
+Medical secretaries and administrative assistants
+	7,710	1.63	21.11	43,910
+
+Secretaries and administrative assistants, except legal, medical, and executive
+	6,930	0.82	22.86	47,550
+
+Data entry keyers
+	680	1.09	19.45	40,450
+
+Word processors and typists
+	70	0.41	18.85	39,200
+
+Insurance claims and policy processing clerks
+	1,580	1.50	23.94	49,800
+
+Mail clerks and mail machine operators, except postal service
+	170	0.64	24.13	50,200
+
+Office clerks, general
+	13,430	1.11	22.48	46,760
+
+Office machine operators, except computer
+	50	0.41	20.09	41,800
+
+Footnotes:
+​(1) For a complete listing of all detailed occupations in the Jacksonville, FL Metropolitan Statistical Area, see data.bls.gov/oes/#/area/0027260/2025.
+​(2) Estimates for detailed occupations may not sum to the totals due to rounding, and because the totals may include occupations that are not shown separately. Estimates do not include self-employed workers.
+​(3) The location quotient is the ratio of the area concentration of occupational employment to the national average concentration. A location quotient greater than one indicates the occupation has a higher share of employment than average, and a location quotient less than one indicates the occupation is less prevalent in the area than average.
+​(4) Annual wages have been calculated by multiplying the hourly mean wage by a 'year-round, full-time' hours figure of 2,080 hours; for those occupations where there is not an hourly mean wage published, the annual wage has been directly calculated from the reported survey data.

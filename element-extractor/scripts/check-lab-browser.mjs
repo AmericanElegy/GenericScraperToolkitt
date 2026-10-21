@@ -376,6 +376,29 @@ try {
   assert.equal(await evaluate('document.querySelectorAll("#evidence blockquote").length'), 2);
   assert.match(await evaluate('document.getElementById("evidence").textContent'), /Mean hourly wage/);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
+  const fullPage = await readFile(new URL("../test/fixtures/bls-full-page.txt", import.meta.url), "utf8");
+  await evaluate('document.getElementById("source-text").value=' + JSON.stringify(fullPage) + ';document.getElementById("extract").click()');
+  await waitFor(() => evaluate('!document.getElementById("page-sections").hidden && document.getElementById("counts").textContent.includes("23 candidates") && !document.getElementById("load").disabled'));
+  assert.equal(await evaluate('document.querySelectorAll("#dataset option").length'), 4);
+  assert.equal(await evaluate('document.getElementById("full-page").textContent.length'), fullPage.replace(/\r\n?/g, '\n').length);
+  await evaluate('document.getElementById("dataset").value="section-2";document.getElementById("open-section").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("24 candidates") && !document.getElementById("load").disabled'));
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=employment_count]").textContent'), '96,850');
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=annual_wage_dollars]").textContent'), '$49,690.00');
+  await evaluate('document.querySelector("button[data-record=row-1][data-field=annual_wage_dollars]").click()');
+  assert.match(await evaluate('document.getElementById("evidence").textContent'), /original page offsets/);
+  await evaluate('document.getElementById("note").value="Confirmed annual wage and table header.";document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"));document.getElementById("approve").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled'));
+  await evaluate('document.getElementById("dataset").value="section-3";document.getElementById("open-section").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("24 candidates") && document.getElementById("counts").textContent.includes("0 approved") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("interpretation-summary").textContent'), /25–48/);
+  assert.equal(await evaluate('document.querySelectorAll("#history li").length'), 0);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
+  assert.equal(await evaluate('document.getElementById("source-text").hasAttribute("maxlength")'), false);
+  await evaluate('document.getElementById("source-text").value="x".repeat(64001);document.getElementById("extract").click()');
+  await waitFor(() => evaluate('document.getElementById("status").textContent.includes("nothing was submitted or truncated")'));
+  assert.equal(await evaluate('document.getElementById("source-text").value.length'), 64001);
+  assert.match(await evaluate('document.getElementById("counts").textContent'), /24 candidates/);
   await send("Page.reload");
   await waitFor(() =>
     evaluate(
@@ -389,7 +412,7 @@ try {
   assert.equal(errors.length, 0, JSON.stringify(errors));
   assert.equal(outboundCalls, 0);
   console.log(
-    "PASS: lab evidence highlighting, review guards, approve/reject/pending history, offline revalidation, real CSV/JSON downloads, inert review text, mobile layout, custom text, manual addition, candidate correction and session reset; no outbound calls.",
+    "PASS: lab evidence highlighting, review guards, approve/reject/pending history, offline revalidation, real CSV/JSON downloads, inert review text, mobile layout, custom text, manual addition, candidate correction, full-page section switching, grouped numbers and session reset; no outbound calls.",
   );
 } finally {
   ws?.close();

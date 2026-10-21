@@ -242,7 +242,7 @@ test("lab rejects changed fixtures, modified history, cross-origin posts and exc
     assert.equal(
       (
         await post(mf, "/api/interpretation/start", {
-          example_id: "x".repeat(131073),
+          example_id: "x".repeat(1048577),
         })
       ).status,
       413,
@@ -433,5 +433,78 @@ test('pasted wage mapping needs unambiguous repeated header and complete four-va
     assert.equal((await autoText(mf, header + '\n\n' + header)).status, 400);
     value = await (await autoText(mf, 'Management 7.2 7.4 69.84 65.97')).json();
     assert.equal(value.counts.candidates, 0);
+  } finally { await mf.dispose(); }
+});
+
+test('full copied page is split into bounded independent table batches and prose with original-page evidence', async () => {
+  const { mf, calls } = await setup();
+  try {
+    const text = (await readFile(new URL('./fixtures/bls-full-page.txt', import.meta.url), 'utf8')).replace(/\r?\n/g, '\r\n');
+    const response = await autoText(mf, text);
+    assert.equal(response.status, 200);
+    const first = await response.json();
+    assert.equal(first.counts.candidates, 23);
+    assert.equal(first.job.packet.passages.length, 24);
+    assert.equal(first.document.datasets.length, 4);
+    assert.equal(first.document.text, text.replace(/\r\n?/g, '\n'));
+    assert.notEqual(first.document.original_text_hash, first.document.text_hash);
+    assert.match(first.document.notice, /Only the selected section/);
+    const selectedViews = [];
+    for (const d of first.document.datasets) {
+      const r = await post(mf, '/api/interpretation/start', { example_id: 'custom-text', mode: 'auto', source: { text, url: null }, dataset_id: d.id });
+      assert.equal(r.status, 200);
+      const v = await r.json(); selectedViews.push(v);
+      assert.ok(v.job.packet.source.text.length <= 16000);
+      assert.ok(v.job.packet.passages.length <= 32);
+      for (const row of v.validation.records) for (const field of Object.values(row.fields)) {
+        assert.equal(field.issues.length, 0);
+        for (const e of field.evidence) {
+          assert.equal(v.document.text.slice(e.document_start, e.document_end), e.quote);
+          assert.equal(e.document_hash, v.document.text_hash);
+        }
+      }
+    }
+    const [shares, jobs1, jobs2, prose] = selectedViews;
+    assert.equal(jobs1.counts.candidates, 24);
+    assert.equal(jobs2.counts.candidates, 24);
+    assert.equal(shares.counts.candidates + jobs1.counts.candidates + jobs2.counts.candidates, 71);
+    assert.equal(jobs1.validation.records[0].fields.employment_count.value, 96850);
+    assert.equal(jobs1.validation.records[0].fields.location_quotient.value, 1.11);
+    assert.equal(jobs1.validation.records[0].fields.hourly_wage_dollars.value, 23.89);
+    assert.equal(jobs1.validation.records[0].fields.annual_wage_dollars.value, 49690);
+    assert.equal(jobs1.validation.validator_version, 'evidence-grouped-v1');
+    assert.ok(prose.validation.records.some(r => r.fields.value.value === 66.2));
+    // Every non-whitespace character is retained in at least one selectable range.
+    const covered = new Set();
+    for (const v of selectedViews) for (const r of v.document.source_map)
+      for (let i = r.document_start; i < r.document_start + r.length; i++) covered.add(i);
+    for (let i = 0; i < first.document.text.length; i++) if (/\S/.test(first.document.text[i])) assert.ok(covered.has(i), 'Unretained source at ' + i);
+    const reviewed = await (await action(mf, jobs1.job, 'review', { decision })).json();
+    assert.equal(reviewed.counts.approved, 1);
+    const exported = await (await action(mf, reviewed.job, 'export', { format: 'json' })).json();
+    assert.equal(exported.document.selected_id, jobs1.document.selected_id);
+    assert.equal(exported.document.text, first.document.text);
+    assert.equal(exported.validation.records.length, 1);
+    assert.equal((await action(mf, reviewed.job, 'revalidate')).status, 200);
+    const tampered = structuredClone(reviewed.job);
+    tampered.document.dataset_id = first.document.datasets[2].id;
+    assert.equal((await action(mf, tampered, 'revalidate')).status, 400);
+    assert.equal(calls(), 0);
+  } finally { await mf.dispose(); }
+});
+test('full-page intake rejects oversize input and invalid section selection without truncating or substituting records', async () => {
+  const { mf } = await setup();
+  try {
+    const oversized = await autoText(mf, 'x'.repeat(64001));
+    assert.equal(oversized.status, 400);
+    assert.equal((await oversized.json()).code, 'page_limit');
+    const text = Array.from({ length: 70 }, (_, i) => 'Item' + i + ': 1').join('\n\n');
+    const response = await autoText(mf, text);
+    assert.equal(response.status, 200);
+    const v = await response.json();
+    assert.equal(v.document.datasets.length, 3);
+    assert.equal(v.counts.candidates, 24);
+    const wrong = await post(mf, '/api/interpretation/start', { example_id: 'custom-text', mode: 'auto', source: { text }, dataset_id: 'missing' });
+    assert.equal(wrong.status, 400);
   } finally { await mf.dispose(); }
 });

@@ -20,7 +20,21 @@ The `pasted-wage-table-v1` schema separates occupational group, national employm
 
 For the supplied Jacksonville table, 23 rows are recognized. The first row has employment shares of 100% / 100% and hourly wages of $33.54 / $31.59. The screen displays percentage and dollar symbols; CSV/JSON retain numeric values in clearly named percent/dollar columns, allowing numeric sorting/calculation. This is not a formatted Excel workbook. The source dollar sign is retained; the tool does not perform currency conversion or infer an ISO currency code.
 
-Rows currently require exactly four ungrouped decimal values, optionally with dollar signs on the two wage cells. Thousands separators, locale-specific currency formatting, other grouped headings and multiple tables in one paste are unsupported in this layout. Table percentages are checked against 0–100 and wages against zero; all associations still require review. The prose parser itself has not acquired general currency understanding.
+Rows currently require exactly four ungrouped decimal values, optionally with dollar signs on the two wage cells. This single-table layout does not support thousands separators, locale-specific currency formatting or other grouped headings. The separate full-page intake below handles recognized multiple tables and comma grouping in explicitly tagged employment/annual-wage columns. Table percentages are checked against 0–100 and wages against zero; all associations still require review. The prose parser itself has not acquired general currency understanding.
+
+## Whole-page intake and section selection
+
+Automatic mode accepts up to **64,000 UTF-16 characters** and **512 source paragraphs**. A paste is not clipped by the textarea; an oversized paste stays in the box with an error instead of being silently truncated. The URL is still only attribution and is never fetched.
+
+Pages exceeding one packet, or containing multiple recognized table headers, enter full-page intake. The complete normalized source is retained. The UI lists sections; the first recognized table is previewed automatically. Use **Open selected section** to review another table batch or the surrounding prose. Each section gets its own schema, candidate cache, review and export. Switching starts a new review session: download its review/export before leaving. Decisions do not transfer between sections and are not saved to a durable workspace. Current approved exports cover only the selected section, never the entire document.
+
+The supplied Jacksonville page contains 89 paragraphs and 71 table rows. Intake produces four selections: the 23-row employment-share/hourly-wage table; two 24-row batches of the employment/location-quotient/hourly/annual table; and the surrounding article, headings and footnotes. The table parser handles row labels followed by a newline and tab-delimited values. Unrecognized text outside table blocks remains selectable; it is not discarded or silently parsed as the other table type. This is still limited recognition of supported layouts and quantitative prose, not a universal webpage interpreter.
+
+Each table batch repeats its **own** header as evidence and stays within the core packet's 16,000-character / 32-paragraph / 50-record limits. The second table uses separate `employment_count`, `location_quotient`, `hourly_wage_dollars` and `annual_wage_dollars` fields. It does not use the first table's employment percentages or national/local columns. Strict comma grouping is enabled only for explicitly tagged numeric columns: `96,850` becomes the numeric value `96850`, and `$49,690` becomes `49690`, with the original quotation retained. Malformed grouping, comma suffix matches and locale-specific conversions are rejected. Other existing numeric schemas keep their ungrouped behavior. Grouped columns use validator identity `evidence-grouped-v1`; unchanged legacy schemas retain their prior validator identity.
+
+JSON includes the whole retained normalized page, its hash, the original pasted-text hash, the selected section ID, the section list and the mapping from packet offsets to full-page offsets. Every validated quotation also has server-computed original-page offsets and document hash. Intake/revalidation rederive the selected source from the full page, so replacing a section ID while keeping another packet is rejected. The source is normalized only from CRLF/CR to LF; whitespace/sections are not silently deleted. JSON therefore contains text outside the approved/selected records and is **not** a redacted delivery.
+
+Intake currently allows at most 32 sections, with up to 24 table rows per batch. Very long single paragraphs (>12,000 characters), malformed/ambiguous table headers and unsupported table shapes receive an explanation rather than a guessed mapping. Large prose is batched, but supported quote-length and per-section candidate limits still apply; extraction is not guaranteed for every section. The API request limit is now 1 MiB to allow a retained page plus its selected review job; candidate raw responses remain capped at 128 KiB by the core contract.
 
 ## Manual pair mode
 
@@ -55,7 +69,7 @@ Both JSON export types contain the full source snapshot, passage outcomes and or
 
 ## Session limits and trust boundaries
 
-- Text: at most 16,000 UTF-16 code units, 32 paragraphs, 50 candidates. No silent truncation. Evidence quotations: at most 2,048 characters each. API body: at most 128 KiB; repeated evidence/history can reach this limit before other limits.
+- Core packet: at most 16,000 UTF-16 code units, 32 paragraphs, 50 candidates. Automatic page intake can retain up to 64,000 characters and 512 paragraphs, splitting selections into core packets. No silent truncation. Evidence quotations: at most 2,048 characters each. API body: at most 1 MiB; repeated evidence/history can reach this limit before other limits.
 - Maximum 8 candidate revisions and 64 review decisions per version. On a limit, download diagnostic JSON before starting a smaller session. History is not silently discarded.
 - Browser memory only: new extraction, new example or page reload clears the session. Download JSON to retain it. Browser import/restore and durable server storage are not implemented.
 - Names and correction reasons are self-declared. The API rederives rule/fixture candidates, replays corrections, independently validates evidence and verifies review journals. It is not authenticated approval, a protected audit database or tamper-proof storage; a caller controlling all client state can construct a different self-consistent session.
@@ -64,13 +78,14 @@ Both JSON export types contain the full source snapshot, passage outcomes and or
 
 ## Developer entry points
 
+- `src/interpretation/page-intake.js`: full-page section planning, typed table extraction and original-document evidence mapping.
 - `src/interpretation/wage-table.js`: grouped pasted wage-table detection, mapping and row/header evidence.
 - `src/interpretation/prose-rules.js`: versioned automatic quantitative suggestions and schema.
 - `src/interpretation/text-rules.js`: bounded `name-number-v1` grammar. Change its version when changing replay semantics.
 - `src/interpretation/lab-api.js`: stateless source/fixture handling, correction replay, independent validation/review/export.
 - `src/interpretation/lab-page.js` and `lab-client.txt`: UI; `.txt` is a source JavaScript text module.
 - `GET /interpretation`, `GET /interpretation-client.js`.
-- `POST /api/interpretation/start`: automatic mode uses `{example_id:"custom-text",mode:"auto",source:{text,url:null}}` without a client schema. Manual mode uses `mode:"pair"` plus a two-column schema (omitting mode preserves older clients). Examples use `{example_id:"scores-and-correction"}` (also `missing-evidence`, `ambiguous-association`), or `{example_id:"custom-text",source:{text,url:null},schema:{fields:[{name:"entity_name",type:"string",required:true},{name:"score",type:"number",required:true}]}}`.
+- `POST /api/interpretation/start`: automatic mode uses `{example_id:"custom-text",mode:"auto",source:{text,url:null}}` without a client schema; pass the returned `dataset_id` to open another full-page section. Manual mode uses `mode:"pair"` plus a two-column schema (omitting mode preserves older clients). Examples use `{example_id:"scores-and-correction"}` (also `missing-evidence`, `ambiguous-association`), or `{example_id:"custom-text",source:{text,url:null},schema:{fields:[{name:"entity_name",type:"string",required:true},{name:"score",type:"number",required:true}]}}`.
 - `POST /api/interpretation/action`: returned job plus `action`: `revalidate`, `review`, `correct`, `export`. Review needs `decision`; correction needs `{record_id:null|id,fields,reviewer,note}`. Null adds a record; supplied field evidence uses the core quotation contract. Export needs `format:"csv"|"json"` and optional `diagnostic:true`.
 
 `npm test` exercises the backend in workerd, including the full BLS prose fixture, automatic schema suggestions, units/qualifiers, URL/year exclusion, custom rules, no-result accounting, correction/review history, tampering and approval guards. `npm run check:lab-browser` checks real browser paste, manual addition, correction, approval, exports, inert markup, mobile layout and session reset. Chromium is required (optional `CHROMIUM_PATH`); the browser test temporarily uses ports 8794 and 9225. `npm run check:browser` covers the separate table UI. `npm run check` is a Wrangler deployment dry run; none of these commands deploys.

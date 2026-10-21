@@ -80,7 +80,7 @@ function schemaOf(schema) {
   const names = /* @__PURE__ */ new Set();
   for (const f of schema.fields) {
     check(
-      keys(f, ["name", "type", "required", "min", "max"]) && typeof f.name === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(f.name) && ![
+      keys(f, ["name", "type", "required", "min", "max", "number_format"]) && typeof f.name === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(f.name) && ![
         "constructor",
         "prototype",
         "__proto__",
@@ -95,6 +95,11 @@ function schemaOf(schema) {
       ["string", "number"].includes(f.type) && typeof f.required === "boolean",
       "invalid_schema",
       "Each field requires a string/number type and a required boolean."
+    );
+    check(
+      f.number_format === void 0 || f.type === "number" && f.number_format === "en-US-grouped",
+      "invalid_schema",
+      "number_format is only supported for numeric en-US-grouped fields."
     );
     for (const k of ["min", "max"])
       if (Object.hasOwn(f, k))
@@ -330,16 +335,16 @@ function evidenceFor(candidate, field, packet) {
     const supported = field.type === "string" ? evidence.some((e) => e.quote.includes(value)) : evidence.some(
       (e) => Array.from(
         e.quote.matchAll(
-          /(?<![\w.,])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?!\w|\.\d|,\d)/g
+          field.number_format === "en-US-grouped" ? /(?<![\w.,])[-+]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?!\w|\.\d|,\d)/g : /(?<![\w.,])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?!\w|\.\d|,\d)/g
         ),
-        (m) => Number(m[0])
+        (m) => Number(field.number_format === "en-US-grouped" ? m[0].replaceAll(",", "") : m[0])
       ).includes(value)
     );
     if (!supported)
       issues.push(
         issue(
           "literal_support_missing",
-          "The literal value is not supported by the retained quotations. Numeric formatting is limited to signed, ungrouped decimal notation."
+          field.number_format === "en-US-grouped" ? "The literal value is not supported by a strict en-US-grouped number in the retained quotations." : "The literal value is not supported by the retained quotations. Numeric formatting is limited to signed, ungrouped decimal notation."
         )
       );
   }
@@ -468,7 +473,7 @@ async function validateResponse(packet, response) {
         issue("unaccounted_record", "No passage outcome accounts for " + r.id)
       );
   return freeze({
-    validator_version: VALIDATOR_VERSION,
+    validator_version: packet.schema.fields.some((f) => f.number_format) ? "evidence-grouped-v1" : VALIDATOR_VERSION,
     packet_hash: packet.hash,
     source_hash: packet.source.text_hash,
     status: issues.length ? "incomplete" : records.length ? "candidates_require_review" : "interpreter_reported_no_result",
@@ -711,72 +716,6 @@ async function exportInterpretation(packet, entry, events = [], { approvedOnly =
   return { json: json2, csv };
 }
 
-// src/interpretation/wage-table.js
-var WAGE_VERSION = "pasted-wage-table-v1";
-var WAGE_SCHEMA = { fields: [
-  { name: "occupational_group", type: "string", required: true },
-  { name: "employment_percent_national", type: "number", required: true, min: 0, max: 100 },
-  { name: "employment_percent_local", type: "number", required: true, min: 0, max: 100 },
-  { name: "hourly_wage_national_dollars", type: "number", required: true, min: 0 },
-  { name: "hourly_wage_local_dollars", type: "number", required: true, min: 0 }
-] };
-function wageHeader(packet) {
-  const matches = packet.passages.map((p) => {
-    const normalized = p.text.replace(/\s+/g, " ").trim();
-    const m = normalized.match(/^Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
-    return m ? { passage: p, national: "United States", local: m[2] } : null;
-  }).filter(Boolean);
-  if (matches.length > 1) throw new ContractError("ambiguous_table_header", "More than one wage-table header was found. Paste one table at a time.");
-  return matches[0] || null;
-}
-function extractWageTable(packet) {
-  const header = wageHeader(packet);
-  if (!header || canonical(packet.schema) !== canonical(WAGE_SCHEMA))
-    throw new ContractError("wage_table_schema", "The pasted wage table needs its explicit grouped percentage and hourly-dollar headers.");
-  const records = [], outcomes = [];
-  const names = WAGE_SCHEMA.fields.map((f) => f.name);
-  for (const p of packet.passages) {
-    const ids = [];
-    if (p.id !== header.passage.id) {
-      let cursor = 0;
-      for (const line of p.text.split("\n")) {
-        const quote = line.trim();
-        const pos = p.text.indexOf(quote, cursor);
-        cursor = pos + quote.length;
-        const m = quote.match(/^(.+?)[ \t]+(\d+(?:\.\d+)?)[ \t]+(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)$/);
-        if (!m || !/[\p{L}]/u.test(m[1]) || /\d$/.test(m[1]) || /https?:\/\//i.test(quote)) continue;
-        if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 table rows. Paste a smaller table.");
-        if (quote.length > LIMITS.quote || header.passage.text.length > LIMITS.quote) throw new ContractError("quote_limit", "Table row or header exceeds the evidence limit.");
-        let occurrence = 0, found = p.text.indexOf(quote);
-        while (found >= 0 && found < pos) {
-          occurrence++;
-          found = p.text.indexOf(quote, found + 1);
-        }
-        const span = { passage_id: p.id, quote, occurrence };
-        const fields = Object.fromEntries(names.map((name, i) => [name, {
-          value: i === 0 ? m[1] : Number(m[i + 1]),
-          evidence: i === 0 ? [span] : [span, { passage_id: header.passage.id, quote: header.passage.text, occurrence: 0 }]
-        }]));
-        const id = "row-" + (records.length + 1);
-        records.push({ id, fields });
-        ids.push(id);
-      }
-    }
-    outcomes.push({
-      passage_id: p.id,
-      status: ids.length ? "records" : "no_result",
-      record_ids: ids,
-      reason: p.id === header.passage.id ? "Grouped header supplies column meanings and currency units; it is retained as evidence, not a data row." : ids.length ? "Four numeric cells mapped to the explicit grouped header. Confirm row alignment and units before approval." : "No complete four-value row recognized. This text was retained, not guessed or discarded."
-    });
-  }
-  const h = outcomes.find((o) => o.passage_id === header.passage.id);
-  if (records.length) {
-    h.status = "records";
-    h.record_ids = records.map((r) => r.id);
-  }
-  return { version: "candidates-v1", records, outcomes };
-}
-
 // src/interpretation/text-rules.js
 function extractTextRules(packet) {
   if (packet.schema.fields.length !== 2 || packet.schema.fields[0].type !== "string" || packet.schema.fields[1].type !== "number")
@@ -904,6 +843,243 @@ function extractProseRules(packet) {
   return { version: "candidates-v1", records, outcomes };
 }
 
+// src/interpretation/wage-table.js
+var WAGE_VERSION = "pasted-wage-table-v1";
+var WAGE_SCHEMA = { fields: [
+  { name: "occupational_group", type: "string", required: true },
+  { name: "employment_percent_national", type: "number", required: true, min: 0, max: 100 },
+  { name: "employment_percent_local", type: "number", required: true, min: 0, max: 100 },
+  { name: "hourly_wage_national_dollars", type: "number", required: true, min: 0 },
+  { name: "hourly_wage_local_dollars", type: "number", required: true, min: 0 }
+] };
+function wageHeader(packet) {
+  const matches = packet.passages.map((p) => {
+    const normalized = p.text.replace(/\s+/g, " ").trim();
+    const m = normalized.match(/^Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
+    return m ? { passage: p, national: "United States", local: m[2] } : null;
+  }).filter(Boolean);
+  if (matches.length > 1) throw new ContractError("ambiguous_table_header", "More than one wage-table header was found. Paste one table at a time.");
+  return matches[0] || null;
+}
+function extractWageTable(packet) {
+  const header = wageHeader(packet);
+  if (!header || canonical(packet.schema) !== canonical(WAGE_SCHEMA))
+    throw new ContractError("wage_table_schema", "The pasted wage table needs its explicit grouped percentage and hourly-dollar headers.");
+  const records = [], outcomes = [];
+  const names = WAGE_SCHEMA.fields.map((f) => f.name);
+  for (const p of packet.passages) {
+    const ids = [];
+    if (p.id !== header.passage.id) {
+      let cursor = 0;
+      for (const line of p.text.split("\n")) {
+        const quote = line.trim();
+        const pos = p.text.indexOf(quote, cursor);
+        cursor = pos + quote.length;
+        const m = quote.match(/^(.+?)[ \t]+(\d+(?:\.\d+)?)[ \t]+(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)$/);
+        if (!m || !/[\p{L}]/u.test(m[1]) || /\d$/.test(m[1]) || /https?:\/\//i.test(quote)) continue;
+        if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 table rows. Paste a smaller table.");
+        if (quote.length > LIMITS.quote || header.passage.text.length > LIMITS.quote) throw new ContractError("quote_limit", "Table row or header exceeds the evidence limit.");
+        let occurrence = 0, found = p.text.indexOf(quote);
+        while (found >= 0 && found < pos) {
+          occurrence++;
+          found = p.text.indexOf(quote, found + 1);
+        }
+        const span = { passage_id: p.id, quote, occurrence };
+        const fields = Object.fromEntries(names.map((name, i) => [name, {
+          value: i === 0 ? m[1] : Number(m[i + 1]),
+          evidence: i === 0 ? [span] : [span, { passage_id: header.passage.id, quote: header.passage.text, occurrence: 0 }]
+        }]));
+        const id = "row-" + (records.length + 1);
+        records.push({ id, fields });
+        ids.push(id);
+      }
+    }
+    outcomes.push({
+      passage_id: p.id,
+      status: ids.length ? "records" : "no_result",
+      record_ids: ids,
+      reason: p.id === header.passage.id ? "Grouped header supplies column meanings and currency units; it is retained as evidence, not a data row." : ids.length ? "Four numeric cells mapped to the explicit grouped header. Confirm row alignment and units before approval." : "No complete four-value row recognized. This text was retained, not guessed or discarded."
+    });
+  }
+  const h = outcomes.find((o) => o.passage_id === header.passage.id);
+  if (records.length) {
+    h.status = "records";
+    h.record_ids = records.map((r) => r.id);
+  }
+  return { version: "candidates-v1", records, outcomes };
+}
+
+// src/interpretation/page-intake.js
+var PAGE_TABLE_VERSION = "pasted-page-table-v1";
+var PAGE_LIMIT = 64e3;
+var grouped = { type: "number", required: true, min: 0, number_format: "en-US-grouped" };
+var EMPLOYMENT_SCHEMA = { fields: [
+  { name: "occupation", type: "string", required: true },
+  { name: "employment_count", ...grouped },
+  { name: "location_quotient", type: "number", required: true, min: 0 },
+  { name: "hourly_wage_dollars", type: "number", required: true, min: 0 },
+  { name: "annual_wage_dollars", ...grouped }
+] };
+var plain = "\\d+(?:\\.\\d+)?";
+var group = "(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?";
+var rowPatterns = {
+  shares: new RegExp("^(.+?)\\s+(" + plain + ")\\s+(" + plain + ")\\s+\\$?(" + plain + ")\\s+\\$?(" + plain + ")$"),
+  employment: new RegExp("^(.+?)\\s+(" + group + ")\\s+(" + plain + ")\\s+\\$?(" + plain + ")\\s+\\$?(" + group + ")$")
+};
+function rowMatch(text, kind) {
+  const m = text.trim().replace(/\s+/g, " ").match(rowPatterns[kind]);
+  return m && /[\p{L}]/u.test(m[1]) && !/\d$/.test(m[1]) && !/https?:\/\//i.test(m[1]) ? m : null;
+}
+function paragraphs(text, start = 0, end = text.length) {
+  const result = [];
+  let at = start;
+  const add = (stop) => {
+    const raw = text.slice(at, stop), trimmed = raw.trim();
+    if (trimmed) {
+      const lead = raw.length - raw.trimStart().length;
+      result.push({ start: at + lead, end: at + lead + trimmed.length, text: trimmed });
+    }
+  };
+  for (const m of text.slice(start, end).matchAll(/\n[ \t]*\n+/g)) {
+    add(start + m.index);
+    at = start + m.index + m[0].length;
+  }
+  add(end);
+  return result;
+}
+function pageHeaders(text) {
+  const found = [];
+  const specs = [
+    ["shares", /Major occupational group[ \t]+Percent of total employment[ \t]+Mean hourly wage \(\$\)[ \t\n]+(United States[ \t]+([^\n]+?))[ \t]+\1(?=\n|$)/gi],
+    ["employment", /Occupation(?:\(1\))?[ \t]+Employment[ \t]+Mean wages \(\$\)[ \t\n]+Level(?:\(2\))?[ \t]+Location quotient(?:\(3\))?[ \t]+Hourly[ \t]+Annual(?:\(4\))?(?=\n|$)/gi]
+  ];
+  for (const [kind, re] of specs) for (const m of text.matchAll(re)) {
+    found.push({ kind, start: text.lastIndexOf("\n", m.index - 1) + 1, end: m.index + m[0].length, local: kind === "shares" ? m[2] : null });
+  }
+  return found.sort((a, b) => a.start - b.start);
+}
+function needsPageIntake(source) {
+  if (typeof source?.text !== "string") return false;
+  const text = source.text.replace(/\r\n?/g, "\n");
+  return text.length > LIMITS.text || paragraphs(text).length > LIMITS.passages || pageHeaders(text).length > 1;
+}
+function planPage(source) {
+  if (!source || Object.keys(source).some((k) => !["text", "url"].includes(k)) || typeof source.text !== "string" || !source.text.trim() || source.text.length > PAGE_LIMIT)
+    throw new ContractError("page_limit", "Paste nonempty page text up to 64,000 characters. Nothing is silently truncated.");
+  const text = source.text.replace(/\r\n?/g, "\n");
+  if (paragraphs(text).length > 512) throw new ContractError("page_limit", "The page exceeds 512 paragraphs. Use a smaller page.");
+  const headers2 = pageHeaders(text), datasets = [], consumed = [];
+  const add = (label, ranges, schema, parser_version, kind, row_count = null) => {
+    if (datasets.length >= 32) throw new ContractError("section_limit", "More than 32 bounded sections. Use a smaller page.");
+    let selected = "";
+    const source_map = [];
+    for (const r of ranges) {
+      if (selected) selected += "\n\n";
+      source_map.push({ packet_start: selected.length, document_start: r.start, length: r.end - r.start });
+      selected += text.slice(r.start, r.end);
+    }
+    if (selected.length > LIMITS.text || paragraphs(selected).length > LIMITS.passages)
+      throw new ContractError("section_limit", "One section exceeds a bounded packet. Paste a smaller section.");
+    datasets.push({ id: "section-" + (datasets.length + 1), label, text: selected, schema, parser_version, kind, row_count, source_map });
+  };
+  for (let i = 0; i < headers2.length; i++) {
+    const h = headers2[i], end = headers2[i + 1]?.start ?? text.length;
+    const rows = [];
+    for (const p of paragraphs(text, h.end, end)) {
+      if (!rowMatch(p.text, h.kind)) break;
+      rows.push(p);
+    }
+    if (!rows.length) continue;
+    consumed.push({ start: h.start, end: rows.at(-1).end });
+    for (let at2 = 0; at2 < rows.length; at2 += 24) {
+      const batch2 = rows.slice(at2, at2 + 24);
+      const label = h.kind === "shares" ? "Employment percentages and hourly dollars" : "Employment counts, location quotients, hourly and annual dollars";
+      add(
+        label + " \xB7 rows " + (at2 + 1) + "\u2013" + (at2 + batch2.length) + " of " + rows.length + (h.local ? " \xB7 " + h.local : ""),
+        [{ start: h.start, end: h.end }, { start: batch2[0].start, end: batch2.at(-1).end }],
+        h.kind === "shares" ? WAGE_SCHEMA : EMPLOYMENT_SCHEMA,
+        PAGE_TABLE_VERSION,
+        h.kind,
+        batch2.length
+      );
+    }
+  }
+  if (headers2.length > 1 && !consumed.length)
+    throw new ContractError("ambiguous_table_header", "Repeated table headers have no recognizable rows. Paste a complete table or select a smaller section.");
+  let at = 0;
+  const rest = [];
+  for (const r of consumed) {
+    rest.push(...paragraphs(text, at, r.start));
+    at = r.end;
+  }
+  rest.push(...paragraphs(text, at));
+  let batch = [], size = 0, part = 0;
+  const flush = () => {
+    if (batch.length) {
+      add("Other page text \xB7 part " + ++part, batch, PROSE_SCHEMA, PROSE_VERSION, "prose");
+      batch = [];
+      size = 0;
+    }
+  };
+  for (const p of rest) {
+    if (p.text.length > 12e3) throw new ContractError("section_limit", "A single page paragraph exceeds 12,000 characters. Add paragraph breaks before parsing.");
+    if (batch.length >= 24 || size + p.text.length + 2 > 12e3) flush();
+    batch.push(p);
+    size += p.text.length + 2;
+  }
+  flush();
+  if (!datasets.length) throw new ContractError("empty_page", "No nonempty page sections found.");
+  return { text, datasets };
+}
+function extractPageTable(packet) {
+  const headers2 = pageHeaders(packet.source.text);
+  if (headers2.length !== 1) throw new ContractError("page_table_header", "Expected one explicit grouped table header in this selection.");
+  const h = headers2[0], schema = h.kind === "shares" ? WAGE_SCHEMA : EMPLOYMENT_SCHEMA;
+  if (canonical(schema) !== canonical(packet.schema)) throw new ContractError("page_table_schema", "Selected columns do not match the table header.");
+  const headerPassage = packet.passages.find((p) => p.start <= h.start && p.end >= h.end);
+  if (!headerPassage) throw new ContractError("page_table_header", "Header must be retained in its own evidence passage.");
+  const fields = schema.fields, records = [], outcomes = [];
+  for (const p of packet.passages) {
+    const m = p.id === headerPassage.id ? null : rowMatch(p.text, h.kind);
+    const ids = [];
+    if (m) {
+      if (records.length >= LIMITS.records || p.text.length > LIMITS.quote || headerPassage.text.length > LIMITS.quote)
+        throw new ContractError("page_table_limit", "Table selection exceeds row or quotation limits.");
+      const id = "row-" + (records.length + 1), span = { passage_id: p.id, quote: p.text, occurrence: 0 };
+      records.push({ id, fields: Object.fromEntries(fields.map((f, i) => [f.name, {
+        value: i ? Number(m[i + 1].replaceAll(",", "")) : m[1],
+        evidence: i ? [span, { passage_id: headerPassage.id, quote: headerPassage.text, occurrence: 0 }] : [span]
+      }])) });
+      ids.push(id);
+    }
+    outcomes.push({
+      passage_id: p.id,
+      status: ids.length ? "records" : "no_result",
+      record_ids: ids,
+      reason: ids.length ? "Typed cells mapped from this row and the explicit selected table header; review alignment before approval." : "Retained supporting header or unrecognized text; no data row inferred."
+    });
+  }
+  const headerOutcome = outcomes.find((o) => o.passage_id === headerPassage.id);
+  if (records.length) {
+    headerOutcome.status = "records";
+    headerOutcome.record_ids = records.map((r) => r.id);
+  }
+  return { version: "candidates-v1", records, outcomes };
+}
+function documentEvidence(validation, selection, text, hash) {
+  const copy2 = structuredClone(validation);
+  for (const row of copy2.records) for (const field of Object.values(row.fields)) for (const e of field.evidence) {
+    const part = selection.source_map.find((r) => e.source_start >= r.packet_start && e.source_end <= r.packet_start + r.length);
+    if (!part) throw new ContractError("document_evidence", "Evidence crosses a section boundary without a source mapping.");
+    const start = part.document_start + e.source_start - part.packet_start;
+    if (text.slice(start, start + e.quote.length) !== e.quote) throw new ContractError("document_evidence", "Section evidence differs from the retained page.");
+    e.document_start = start;
+    e.document_end = start + e.quote.length;
+    e.document_hash = hash;
+  }
+  return copy2;
+}
+
 // examples/interpretation-scripted.json
 var interpretation_scripted_default = {
   source: {
@@ -1006,10 +1182,10 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 <a href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><span class="badge">Pasted text and examples \xB7 No AI calls</span>
 <p>Compare proposed values with their source passages before deciding what to accept. Paste your text for suggested quantitative records and columns, or use a fictional example. This is not general language understanding.</p>
 <section class="card"><h2>Use your own text</h2><p class="hint">Paste ordinary prose as written. Start with automatic suggestions\u2014no column names or special formatting needed. It recognizes some explicit percentages, counts and name/number pairs, plus pasted occupational wage tables with their grouped headers. Review the suggested preview; other facts may remain unrecognized. You can add or correct records manually.</p>
-<form id="custom-input"><label for="source-text">Paste source text</label><textarea id="source-text" required maxlength="16000" placeholder="Paste your text here when ready. Maximum 16,000 characters and 32 paragraphs."></textarea><label for="source-url">Source URL (optional attribution, never fetched)</label><input id="source-url" type="url" placeholder="https://example.org/article"><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Suggest columns and facts from prose</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><div class="bar"><div><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div><div><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div></div><p class="hint">Two columns for this first parser: text, then number. Use lowercase names with underscores. Numbers are signed, ungrouped decimals. No score range is assumed.</p></fieldset><button id="extract" type="submit">Preview suggested records</button></form></section>
+<form id="custom-input"><label for="source-text">Paste source text</label><textarea id="source-text" required placeholder="Paste a passage or full page here (up to 64,000 characters). Automatic mode splits long pages into bounded sections."></textarea><label for="source-url">Source URL (optional attribution, never fetched)</label><input id="source-url" type="url" placeholder="https://example.org/article"><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Suggest columns and facts from prose</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><div class="bar"><div><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div><div><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div></div><p class="hint">Two columns for this first parser: text, then number. Use lowercase names with underscores. Numbers are signed, ungrouped decimals. No score range is assumed.</p></fieldset><button id="extract" type="submit">Preview suggested records</button></form></section>
 <div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load">Load example</button></div>
 <p class="hint">Session only: extracting new text, loading another example or reloading this page clears the current review. Download diagnostic JSON to retain the evidence and history. Reviewer names are self-declared; this is not an authenticated audit service.</p>
-<p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
+<section id="page-sections" class="card" hidden><h2>Sections detected in this page</h2><p id="page-scope" class="hint"></p><label for="dataset">Section to review</label><select id="dataset"></select><button id="open-section" type="button">Open selected section</button><p class="hint">Current records and exports cover the selected section only. Download its review/export before switching; opening another section starts a new review session. The full original page is retained.</p><details><summary>Full retained page text</summary><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section><p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
 <section id="workspace" hidden><div class="bar"><strong id="counts"></strong><button id="revalidate" class="secondary">Revalidate evidence</button></div><p class="hint">Literal matches do not prove that a value belongs to a measure. No record is approved automatically.</p>
 <p id="interpretation-summary" class="hint"></p><div class="grid"><section class="card" aria-labelledby="source-title"><h2 id="source-title">Source passages</h2><p id="source-info" class="hint"></p><div id="passages"></div><details><summary>Source integrity</summary><p class="hint">Offsets refer to the retained text in UTF-16 code units, start inclusive and end exclusive.</p><p id="source-hash" class="hash"></p></details></section>
 <section class="card" aria-labelledby="candidates-title"><h2 id="candidates-title">Proposed records</h2><p class="hint">Click a value to inspect its evidence. Selecting a different record clears the review note and confirmation.</p><div class="scroll"><table><caption class="hint">Candidates in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
@@ -1054,6 +1230,8 @@ var lab_client_default = `"use strict";
   }
   function controls() {
     for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode"]) $(id).disabled = state.busy;
+    $("dataset").disabled = state.busy || !state.view?.document;
+    $("open-section").disabled = state.busy || !state.view?.document;
     $("manual-columns").disabled = state.busy || $("text-mode").value !== "pair";
     $("manual-columns").hidden = $("text-mode").value !== "pair";
     for (const id of [
@@ -1143,7 +1321,7 @@ var lab_client_default = `"use strict";
       field = row?.fields[state.field];
     $("source-info").textContent =
       packet.passages.length +
-      " passages \xB7 Source attribution (not fetched): " +
+      " passages in current section \xB7 Source attribution (not fetched): " +
       (packet.source.url || "none") +
       ". The URL was not fetched.";
     $("source-hash").textContent = "SHA-256: " + packet.source.text_hash;
@@ -1183,9 +1361,10 @@ var lab_client_default = `"use strict";
   function displayValue(row, field) {
     const value = row.fields[field.name].value;
     if (value === null || value === undefined) return "\u2014";
-    if (typeof value === "number" && /^hourly_wage_.*_dollars$/.test(field.name))
+    if (typeof value === "number" && /^(?:hourly|annual)_wage(?:_.*)?_dollars$/.test(field.name))
       return "$" + new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 20 }).format(value);
     if (typeof value === "number" && /^employment_percent_/.test(field.name)) return value + "%";
+    if (typeof value === "number" && field.number_format === "en-US-grouped") return new Intl.NumberFormat("en-US", { maximumFractionDigits: 20 }).format(value);
     return value;
   }
   function renderTable() {
@@ -1265,7 +1444,7 @@ var lab_client_default = `"use strict";
             " \xB7 snapshot offsets " +
             e.source_start +
             "\u2013" +
-            e.source_end,
+            e.source_end + (e.document_start !== undefined ? " \xB7 original page offsets " + e.document_start + "\u2013" + e.document_end : ""),
           "hint",
         ),
       );
@@ -1307,6 +1486,16 @@ var lab_client_default = `"use strict";
     if (!selected()) {
       state.rowId = state.view.validation.records[0]?.id;
       state.field = state.view.job.packet.schema.fields[0]?.name;
+    }
+    $("page-sections").hidden = !state.view.document;
+    if (state.view.document) {
+      const doc = state.view.document;
+      $("dataset").replaceChildren(...doc.datasets.map(d => {
+        const option = text("option", d.label); option.value = d.id; return option;
+      }));
+      $("dataset").value = doc.selected_id;
+      $("page-scope").textContent = doc.datasets.length + " sections available. " + doc.notice;
+      $("full-page").textContent = doc.text;
     }
     $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
@@ -1404,9 +1593,20 @@ var lab_client_default = `"use strict";
   $("edit-selected").onclick = () => editCandidate();
   $("add-record").onclick = () => editCandidate(true);
   $("text-mode").onchange = controls;
+  $("open-section").onclick = () => perform(async () => {
+    const response = await request("/api/interpretation/start", {
+      example_id: "custom-text", mode: "auto", source: state.view.job.document.source,
+      dataset_id: $("dataset").value,
+    });
+    state.view = await response.json(); state.rowId = null; state.field = null;
+    clearDecision(); render(); editCandidate();
+    say("Opened selected section. This is a new review session; other sections are not included in its approved records.");
+  });
   $("custom-input").onsubmit = (event) => {
     event.preventDefault();
     perform(async () => {
+      const limit = $("text-mode").value === "auto" ? 64000 : 16000;
+      if ($("source-text").value.length > limit) throw Error("The pasted text exceeds " + limit.toLocaleString() + " characters for this mode. Your full paste remains in the box; nothing was submitted or truncated.");
       const response = await request("/api/interpretation/start", {
         example_id: "custom-text",
         source: { text: $("source-text").value, url: $("source-url").value.trim() || null },
@@ -1418,7 +1618,7 @@ var lab_client_default = `"use strict";
       });
       state.view = await response.json(); state.rowId = null; state.field = null;
       clearDecision(); render(); editCandidate();
-      say("Parsed your supplied text. Preview the suggested columns and records below. No AI calls. Unmatched text remains visible.");
+      say(state.view.document ? "Full page accepted and divided into sections. Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. Preview the suggested columns and records below. No AI calls. Unmatched text remains visible.");
     });
   };
   $("correction-form").onsubmit = (event) => {
@@ -1615,19 +1815,14 @@ var fail = (code, message, status = 400) => {
   error.status = status;
   throw error;
 };
-var plain = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-var only = (value, keys2) => plain(value) && Object.keys(value).every((key) => keys2.includes(key));
+var plain2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var only = (value, keys2) => plain2(value) && Object.keys(value).every((key) => keys2.includes(key));
 async function readBody(request) {
   if (!/^application\/json(?:;|$)/i.test(
     request.headers.get("content-type") || ""
   ))
     fail("json_required", "Send a JSON request.", 415);
-  if (Number(request.headers.get("content-length")) > 131072)
-    fail(
-      "request_limit",
-      "The lab request exceeds 128 KiB. Download the current diagnostic report before starting a new session.",
-      413
-    );
+  let oversized = Number(request.headers.get("content-length")) > 1048576;
   const reader = request.body?.getReader(), chunks = [];
   let bytes = 0;
   if (reader)
@@ -1636,15 +1831,20 @@ async function readBody(request) {
         const { value, done } = await reader.read();
         if (done) break;
         bytes += value.byteLength;
-        if (bytes > 131072) {
-          await reader.cancel();
-          fail("request_limit", "The lab request exceeds 128 KiB.", 413);
+        if (bytes > 1048576) {
+          oversized = true;
+          chunks.length = 0;
         }
-        chunks.push(value);
+        if (bytes > 2097152) {
+          await reader.cancel();
+          fail("request_limit", "The lab request exceeds 1 MiB.", 413);
+        }
+        if (!oversized) chunks.push(value);
       }
     } finally {
       reader.releaseLock();
     }
+  if (oversized) fail("request_limit", "The lab request exceeds 1 MiB. Export the current diagnostic report before starting a smaller session.", 413);
   let body;
   try {
     body = JSON.parse(await new Blob(chunks).text());
@@ -1657,7 +1857,7 @@ async function entryFor(packet, response) {
   return (await runInterpretation(packet, await scriptedInterpreter(response))).cache_entry;
 }
 function applyCorrection(packet, response, change) {
-  if (!only(change, ["record_id", "fields", "reviewer", "note", "at", "prior_events"]) || typeof change.reviewer !== "string" || !change.reviewer.trim() || change.reviewer.length > 80 || typeof change.note !== "string" || !change.note.trim() || change.note.length > 1e3 || typeof change.at !== "string" || !Number.isFinite(Date.parse(change.at)) || !Array.isArray(change.prior_events) || change.prior_events.length > 64 || !plain(change.fields))
+  if (!only(change, ["record_id", "fields", "reviewer", "note", "at", "prior_events"]) || typeof change.reviewer !== "string" || !change.reviewer.trim() || change.reviewer.length > 80 || typeof change.note !== "string" || !change.note.trim() || change.note.length > 1e3 || typeof change.at !== "string" || !Number.isFinite(Date.parse(change.at)) || !Array.isArray(change.prior_events) || change.prior_events.length > 64 || !plain2(change.fields))
     fail("invalid_correction", "A correction requires a reviewer, note, timestamp and requested fields.");
   const next = structuredClone(response);
   const index = next.records.findIndex((r) => r.id === change.record_id);
@@ -1679,14 +1879,41 @@ function applyCorrection(packet, response, change) {
 function originalResponse(job) {
   if (job.example_id !== "custom-text") return examples[job.example_id].scripted_response;
   if (job.parser_version === "name-number-v1") return extractTextRules(job.packet);
+  if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if (job.parser_version === WAGE_VERSION) return extractWageTable(job.packet);
   if (job.parser_version === PROSE_VERSION) return extractProseRules(job.packet);
   fail("parser_version", "Unsupported text parser version.");
 }
+async function documentInfo(job) {
+  if (!job.document) return null;
+  if (job.example_id !== "custom-text" || !only(job.document, ["source", "dataset_id"]))
+    fail("invalid_document", "Invalid full-page source or selection.");
+  const plan = planPage(job.document.source);
+  const selected = plan.datasets.find((d) => d.id === job.document.dataset_id);
+  if (!selected || job.parser_version !== selected.parser_version)
+    fail("invalid_document", "The selected section or parser does not match the retained page.");
+  const rebuilt = await createPacket({ source: { text: selected.text, url: job.document.source.url ?? null }, schema: selected.schema }, job.packet.source.received_at);
+  if (canonical(rebuilt) !== canonical(job.packet))
+    fail("document_mismatch", "The selected packet does not match its original full-page source.");
+  return { plan, selected, hash: await digest(plan.text), original_hash: await digest(job.document.source.text) };
+}
+function publicDocument(info, job) {
+  return {
+    text: info.plan.text,
+    text_hash: info.hash,
+    original_text_hash: info.original_hash,
+    url: job.packet.source.url,
+    selected_id: info.selected.id,
+    source_map: info.selected.source_map,
+    datasets: info.plan.datasets.map((d) => ({ id: d.id, label: d.label, row_count: d.row_count, kind: d.kind })),
+    notice: "Only the selected section is parsed/reviewed/exported as current records. The full page is retained; other sections are not implicitly approved. Switching sections starts a new review session."
+  };
+}
 async function checkJob(job) {
-  if (!only(job, ["example_id", "packet", "cache_entry", "events", "revisions", "parser_version"]) || !Array.isArray(job.events) || job.events.length > 64 || job.revisions !== void 0 && (!Array.isArray(job.revisions) || job.revisions.length > 8))
+  if (!only(job, ["example_id", "packet", "cache_entry", "events", "revisions", "parser_version", "document"]) || !Array.isArray(job.events) || job.events.length > 64 || job.revisions !== void 0 && (!Array.isArray(job.revisions) || job.revisions.length > 8))
     fail("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
   await revalidate(job.packet, job.cache_entry);
+  await documentInfo(job);
   let response;
   if (job.example_id === "custom-text") {
     response = originalResponse(job);
@@ -1707,10 +1934,13 @@ async function checkJob(job) {
     fail("example_mismatch", "Candidate data differs from its rule output and recorded corrections.");
   return exportInterpretation(job.packet, job.cache_entry, job.events, { approvedOnly: false });
 }
-function view(job, result) {
+async function view(job, result) {
+  const info = await documentInfo(job);
+  if (info) result.json.validation = documentEvidence(result.json.validation, info.selected, info.plan.text, info.hash);
   const records = result.json.validation.records;
   return {
     job,
+    ...info ? { document: publicDocument(info, job) } : {},
     validation: result.json.validation,
     counts: {
       candidates: records.length,
@@ -1721,7 +1951,7 @@ function view(job, result) {
     interpretation: {
       method: job.parser_version || "fictional-scripted-example",
       columns: job.packet.schema.fields.map((f) => f.name),
-      explanation: job.parser_version === WAGE_VERSION ? "Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = " + wageHeader(job.packet).local + ". Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval." : job.parser_version === PROSE_VERSION ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
+      explanation: info ? "Full page retained. Current section: " + info.selected.label + ". Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets." : job.parser_version === WAGE_VERSION ? "Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = " + wageHeader(job.packet).local + ". Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval." : job.parser_version === PROSE_VERSION ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
     },
     notice: "Rule-based or scripted candidates, with optional human corrections. No AI inference. Session-only, self-declared review; not an authenticated audit service."
   };
@@ -1767,17 +1997,27 @@ async function labFetch(request) {
   try {
     const body = await readBody(request);
     if (url.pathname === "/api/interpretation/start") {
-      let packet, response, parserVersion;
+      let packet, response, parserVersion, document;
       if (body?.example_id === "custom-text") {
-        if (!only(body, ["example_id", "source", "schema", "mode"]) || body.mode !== void 0 && !["auto", "pair"].includes(body.mode))
+        if (!only(body, ["example_id", "source", "schema", "mode", "dataset_id"]) || body.mode !== void 0 && !["auto", "pair"].includes(body.mode))
           fail("invalid_input", "Choose automatic suggestions or manual pair columns.");
         if (body.mode === "auto" && body.schema !== void 0)
           fail("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
-        packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? PROSE_SCHEMA : body.schema });
-        parserVersion = body.mode === "auto" ? PROSE_VERSION : "name-number-v1";
-        if (body.mode === "auto" && wageHeader(packet)) {
-          packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
-          parserVersion = WAGE_VERSION;
+        if (body.mode === "auto" && (needsPageIntake(body.source) || body.dataset_id !== void 0)) {
+          const plan = planPage(body.source);
+          const selected = body.dataset_id === void 0 ? plan.datasets[0] : plan.datasets.find((d) => d.id === body.dataset_id);
+          if (!selected) fail("invalid_selection", "Choose a listed full-page section.");
+          document = { source: body.source, dataset_id: selected.id };
+          packet = await createPacket({ source: { text: selected.text, url: body.source.url ?? null }, schema: selected.schema });
+          parserVersion = selected.parser_version;
+        } else {
+          if (body.dataset_id !== void 0) fail("invalid_selection", "Section selection requires automatic mode.");
+          packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? PROSE_SCHEMA : body.schema });
+          parserVersion = body.mode === "auto" ? PROSE_VERSION : "name-number-v1";
+          if (body.mode === "auto" && wageHeader(packet)) {
+            packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
+            parserVersion = WAGE_VERSION;
+          }
         }
         response = originalResponse({ example_id: "custom-text", parser_version: parserVersion, packet });
       } else {
@@ -1797,9 +2037,10 @@ async function labFetch(request) {
         cache_entry: run.cache_entry,
         events: [],
         revisions: [],
+        ...document ? { document } : {},
         ...body.example_id === "custom-text" ? { parser_version: parserVersion } : {}
       };
-      return reply(view(job, await checkJob(job)));
+      return reply(await view(job, await checkJob(job)));
     }
     if (url.pathname !== "/api/interpretation/action")
       return reply({ error: "Not found", code: "not_found" }, 404);
@@ -1817,7 +2058,7 @@ async function labFetch(request) {
         events: [],
         cache_entry: await entryFor(body.job.packet, response)
       };
-      return reply(view(job, await checkJob(job)));
+      return reply(await view(job, await checkJob(job)));
     }
     if (body.action === "review") {
       if (body.job.events.length >= 64)
@@ -1833,9 +2074,9 @@ async function labFetch(request) {
         body.decision
       );
       const job = { ...body.job, events };
-      return reply(view(job, await checkJob(job)));
+      return reply(await view(job, await checkJob(job)));
     }
-    if (body.action === "revalidate") return reply(view(body.job, result));
+    if (body.action === "revalidate") return reply(await view(body.job, result));
     if (!["csv", "json"].includes(body.format) || body.diagnostic !== void 0 && typeof body.diagnostic !== "boolean")
       fail(
         "invalid_export",
@@ -1847,6 +2088,11 @@ async function labFetch(request) {
       body.job.events,
       { approvedOnly: !body.diagnostic }
     );
+    const info = await documentInfo(body.job);
+    if (info) {
+      exported.json.document = publicDocument(info, body.job);
+      exported.json.validation = documentEvidence(exported.json.validation, info.selected, info.plan.text, info.hash);
+    }
     exported.json.candidate_revision_history = body.job.revisions || [];
     exported.json.original_candidates = originalResponse(body.job);
     exported.json.method = body.job.parser_version || "fictional-scripted-example";
@@ -2341,12 +2587,12 @@ function clean(value) {
 function normalizeRows(rows) {
   const elements = rows.filter((c) => /^\d+$/.test(clean(c[0] || ""))).map((c) => {
     if (c.length !== 16) throw new Error("Source table columns changed; extraction stopped.");
-    const group = clean(c[4]);
+    const group2 = clean(c[4]);
     return {
       atomic_number: Number(clean(c[0])),
       symbol: clean(c[1]),
       name: clean(c[2]),
-      group: /^\d+$/.test(group) ? Number(group) : null,
+      group: /^\d+$/.test(group2) ? Number(group2) : null,
       period: Number(clean(c[5]))
     };
   });

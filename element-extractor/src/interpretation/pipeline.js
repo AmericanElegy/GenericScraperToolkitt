@@ -93,7 +93,7 @@ function schemaOf(schema) {
   const names = new Set();
   for (const f of schema.fields) {
     check(
-      keys(f, ["name", "type", "required", "min", "max"]) &&
+      keys(f, ["name", "type", "required", "min", "max", "number_format"]) &&
         typeof f.name === "string" &&
         /^[a-z][a-z0-9_]{0,39}$/.test(f.name) &&
         ![
@@ -113,6 +113,8 @@ function schemaOf(schema) {
       "invalid_schema",
       "Each field requires a string/number type and a required boolean.",
     );
+    check(f.number_format === undefined || (f.type === "number" && f.number_format === "en-US-grouped"),
+      "invalid_schema", "number_format is only supported for numeric en-US-grouped fields.");
     for (const k of ["min", "max"])
       if (Object.hasOwn(f, k))
         check(
@@ -377,16 +379,20 @@ function evidenceFor(candidate, field, packet) {
         : evidence.some((e) =>
             Array.from(
               e.quote.matchAll(
-                /(?<![\w.,])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?!\w|\.\d|,\d)/g,
+                field.number_format === "en-US-grouped"
+                  ? /(?<![\w.,])[-+]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?!\w|\.\d|,\d)/g
+                  : /(?<![\w.,])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?!\w|\.\d|,\d)/g,
               ),
-              (m) => Number(m[0]),
+              (m) => Number(field.number_format === "en-US-grouped" ? m[0].replaceAll(",", "") : m[0]),
             ).includes(value),
           );
     if (!supported)
       issues.push(
         issue(
           "literal_support_missing",
-          "The literal value is not supported by the retained quotations. Numeric formatting is limited to signed, ungrouped decimal notation.",
+          field.number_format === "en-US-grouped"
+            ? "The literal value is not supported by a strict en-US-grouped number in the retained quotations."
+            : "The literal value is not supported by the retained quotations. Numeric formatting is limited to signed, ungrouped decimal notation.",
         ),
       );
   }
@@ -554,7 +560,7 @@ export async function validateResponse(packet, response) {
         issue("unaccounted_record", "No passage outcome accounts for " + r.id),
       );
   return freeze({
-    validator_version: VALIDATOR_VERSION,
+    validator_version: packet.schema.fields.some(f => f.number_format) ? "evidence-grouped-v1" : VALIDATOR_VERSION,
     packet_hash: packet.hash,
     source_hash: packet.source.text_hash,
     status: issues.length

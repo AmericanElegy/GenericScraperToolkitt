@@ -32,6 +32,8 @@
   }
   function controls() {
     for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode"]) $(id).disabled = state.busy;
+    $("dataset").disabled = state.busy || !state.view?.document;
+    $("open-section").disabled = state.busy || !state.view?.document;
     $("manual-columns").disabled = state.busy || $("text-mode").value !== "pair";
     $("manual-columns").hidden = $("text-mode").value !== "pair";
     for (const id of [
@@ -121,7 +123,7 @@
       field = row?.fields[state.field];
     $("source-info").textContent =
       packet.passages.length +
-      " passages · Source attribution (not fetched): " +
+      " passages in current section · Source attribution (not fetched): " +
       (packet.source.url || "none") +
       ". The URL was not fetched.";
     $("source-hash").textContent = "SHA-256: " + packet.source.text_hash;
@@ -161,9 +163,10 @@
   function displayValue(row, field) {
     const value = row.fields[field.name].value;
     if (value === null || value === undefined) return "—";
-    if (typeof value === "number" && /^hourly_wage_.*_dollars$/.test(field.name))
+    if (typeof value === "number" && /^(?:hourly|annual)_wage(?:_.*)?_dollars$/.test(field.name))
       return "$" + new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 20 }).format(value);
     if (typeof value === "number" && /^employment_percent_/.test(field.name)) return value + "%";
+    if (typeof value === "number" && field.number_format === "en-US-grouped") return new Intl.NumberFormat("en-US", { maximumFractionDigits: 20 }).format(value);
     return value;
   }
   function renderTable() {
@@ -243,7 +246,7 @@
             " · snapshot offsets " +
             e.source_start +
             "–" +
-            e.source_end,
+            e.source_end + (e.document_start !== undefined ? " · original page offsets " + e.document_start + "–" + e.document_end : ""),
           "hint",
         ),
       );
@@ -285,6 +288,16 @@
     if (!selected()) {
       state.rowId = state.view.validation.records[0]?.id;
       state.field = state.view.job.packet.schema.fields[0]?.name;
+    }
+    $("page-sections").hidden = !state.view.document;
+    if (state.view.document) {
+      const doc = state.view.document;
+      $("dataset").replaceChildren(...doc.datasets.map(d => {
+        const option = text("option", d.label); option.value = d.id; return option;
+      }));
+      $("dataset").value = doc.selected_id;
+      $("page-scope").textContent = doc.datasets.length + " sections available. " + doc.notice;
+      $("full-page").textContent = doc.text;
     }
     $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
@@ -382,9 +395,20 @@
   $("edit-selected").onclick = () => editCandidate();
   $("add-record").onclick = () => editCandidate(true);
   $("text-mode").onchange = controls;
+  $("open-section").onclick = () => perform(async () => {
+    const response = await request("/api/interpretation/start", {
+      example_id: "custom-text", mode: "auto", source: state.view.job.document.source,
+      dataset_id: $("dataset").value,
+    });
+    state.view = await response.json(); state.rowId = null; state.field = null;
+    clearDecision(); render(); editCandidate();
+    say("Opened selected section. This is a new review session; other sections are not included in its approved records.");
+  });
   $("custom-input").onsubmit = (event) => {
     event.preventDefault();
     perform(async () => {
+      const limit = $("text-mode").value === "auto" ? 64000 : 16000;
+      if ($("source-text").value.length > limit) throw Error("The pasted text exceeds " + limit.toLocaleString() + " characters for this mode. Your full paste remains in the box; nothing was submitted or truncated.");
       const response = await request("/api/interpretation/start", {
         example_id: "custom-text",
         source: { text: $("source-text").value, url: $("source-url").value.trim() || null },
@@ -396,7 +420,7 @@
       });
       state.view = await response.json(); state.rowId = null; state.field = null;
       clearDecision(); render(); editCandidate();
-      say("Parsed your supplied text. Preview the suggested columns and records below. No AI calls. Unmatched text remains visible.");
+      say(state.view.document ? "Full page accepted and divided into sections. Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. Preview the suggested columns and records below. No AI calls. Unmatched text remains visible.");
     });
   };
   $("correction-form").onsubmit = (event) => {

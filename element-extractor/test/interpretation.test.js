@@ -579,3 +579,14 @@ test("cross-passage fields retain every supporting quote and require an explicit
     1,
   );
 });
+
+test('explicit en-US numeric columns validate grouped literals without accepting comma suffixes or malformed groups', async () => {
+  const schema = { fields: [{ name: 'amount', type: 'number', required: true, number_format: 'en-US-grouped' }] };
+  const packet = await createPacket({ source: { text: 'Employment was 96,850 and annual wages were $49,690.' }, schema });
+  const response = value => ({ version: 'candidates-v1', records: [{ id: 'r1', fields: { amount: { value, evidence: [{ passage_id: 'p001', quote: packet.passages[0].text }] } } }], outcomes: [{ passage_id: 'p001', status: 'records', record_ids: ['r1'], reason: 'Numeric-format test only.' }] });
+  for (const n of [96850, 49690]) assert.equal((await validateResponse(packet, response(n))).records[0].fields.amount.issues.length, 0);
+  for (const n of [850, 690]) assert.ok((await validateResponse(packet, response(n))).records[0].fields.amount.issues.some(i => i.code === 'literal_support_missing'));
+  const invalid = await createPacket({ source: { text: 'Amount: 96,85 and 49.690,00.' }, schema });
+  const bad = response(9685); bad.records[0].fields.amount.evidence[0].quote = invalid.passages[0].text;
+  assert.ok((await validateResponse(invalid, bad)).records[0].fields.amount.issues.some(i => i.code === 'literal_support_missing'));
+});

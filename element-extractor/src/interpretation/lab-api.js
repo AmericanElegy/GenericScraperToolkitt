@@ -1,3 +1,4 @@
+import { planPage, needsPageIntake, extractPageTable, PAGE_TABLE_VERSION, documentEvidence } from './page-intake.js';
 import { wageHeader, extractWageTable, WAGE_SCHEMA, WAGE_VERSION } from './wage-table.js';
 import { extractProseRules, PROSE_SCHEMA, PROSE_VERSION } from './prose-rules.js';
 import { extractTextRules } from './text-rules.js';
@@ -10,6 +11,7 @@ import {
   appendReview,
   exportInterpretation,
   canonical,
+  digest,
   ContractError,
 } from "./pipeline.js";
 import { LAB_PAGE } from "./lab-page.js";
@@ -101,12 +103,7 @@ async function readBody(request) {
     )
   )
     fail("json_required", "Send a JSON request.", 415);
-  if (Number(request.headers.get("content-length")) > 131072)
-    fail(
-      "request_limit",
-      "The lab request exceeds 128 KiB. Download the current diagnostic report before starting a new session.",
-      413,
-    );
+  let oversized = Number(request.headers.get("content-length")) > 1048576;
   const reader = request.body?.getReader(),
     chunks = [];
   let bytes = 0;
@@ -116,15 +113,19 @@ async function readBody(request) {
         const { value, done } = await reader.read();
         if (done) break;
         bytes += value.byteLength;
-        if (bytes > 131072) {
+        if (bytes > 1048576) { oversized = true; chunks.length = 0; }
+        // Drain a bounded oversize upload so a normal client can receive the 413
+        // instead of an EPIPE while it is still writing. Never buffer excess data.
+        if (bytes > 2097152) {
           await reader.cancel();
-          fail("request_limit", "The lab request exceeds 128 KiB.", 413);
+          fail("request_limit", "The lab request exceeds 1 MiB.", 413);
         }
-        chunks.push(value);
+        if (!oversized) chunks.push(value);
       }
     } finally {
       reader.releaseLock();
     }
+  if (oversized) fail("request_limit", "The lab request exceeds 1 MiB. Export the current diagnostic report before starting a smaller session.", 413);
   let body;
   try {
     body = JSON.parse(await new Blob(chunks).text());
@@ -160,16 +161,38 @@ function applyCorrection(packet, response, change) {
 function originalResponse(job) {
   if (job.example_id !== 'custom-text') return examples[job.example_id].scripted_response;
   if (job.parser_version === 'name-number-v1') return extractTextRules(job.packet);
+  if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if (job.parser_version === WAGE_VERSION) return extractWageTable(job.packet);
   if (job.parser_version === PROSE_VERSION) return extractProseRules(job.packet);
   fail('parser_version', 'Unsupported text parser version.');
 }
+async function documentInfo(job) {
+  if (!job.document) return null;
+  if (job.example_id !== 'custom-text' || !only(job.document, ['source', 'dataset_id']))
+    fail('invalid_document', 'Invalid full-page source or selection.');
+  const plan = planPage(job.document.source);
+  const selected = plan.datasets.find(d => d.id === job.document.dataset_id);
+  if (!selected || job.parser_version !== selected.parser_version)
+    fail('invalid_document', 'The selected section or parser does not match the retained page.');
+  const rebuilt = await createPacket({ source: { text: selected.text, url: job.document.source.url ?? null }, schema: selected.schema }, job.packet.source.received_at);
+  if (canonical(rebuilt) !== canonical(job.packet))
+    fail('document_mismatch', 'The selected packet does not match its original full-page source.');
+  return { plan, selected, hash: await digest(plan.text), original_hash: await digest(job.document.source.text) };
+}
+function publicDocument(info, job) {
+  return { text: info.plan.text, text_hash: info.hash, original_text_hash: info.original_hash,
+    url: job.packet.source.url, selected_id: info.selected.id,
+    source_map: info.selected.source_map,
+    datasets: info.plan.datasets.map(d => ({ id: d.id, label: d.label, row_count: d.row_count, kind: d.kind })),
+    notice: 'Only the selected section is parsed/reviewed/exported as current records. The full page is retained; other sections are not implicitly approved. Switching sections starts a new review session.' };
+}
 async function checkJob(job) {
-  if (!only(job, ['example_id', 'packet', 'cache_entry', 'events', 'revisions', 'parser_version']) ||
+  if (!only(job, ['example_id', 'packet', 'cache_entry', 'events', 'revisions', 'parser_version', 'document']) ||
       !Array.isArray(job.events) || job.events.length > 64 ||
       (job.revisions !== undefined && (!Array.isArray(job.revisions) || job.revisions.length > 8)))
     fail('invalid_lab_job', 'Invalid session. Maximum 64 review events and 8 candidate revisions.');
   await revalidate(job.packet, job.cache_entry);
+  await documentInfo(job);
   let response;
   if (job.example_id === 'custom-text') {
     response = originalResponse(job);
@@ -192,10 +215,13 @@ async function checkJob(job) {
     fail('example_mismatch', 'Candidate data differs from its rule output and recorded corrections.');
   return exportInterpretation(job.packet, job.cache_entry, job.events, { approvedOnly: false });
 }
-function view(job, result) {
+async function view(job, result) {
+  const info = await documentInfo(job);
+  if (info) result.json.validation = documentEvidence(result.json.validation, info.selected, info.plan.text, info.hash);
   const records = result.json.validation.records;
   return {
     job,
+    ...(info ? { document: publicDocument(info, job) } : {}),
     validation: result.json.validation,
     counts: {
       candidates: records.length,
@@ -206,7 +232,9 @@ function view(job, result) {
     interpretation: {
       method: job.parser_version || 'fictional-scripted-example',
       columns: job.packet.schema.fields.map(f => f.name),
-      explanation: job.parser_version === WAGE_VERSION
+      explanation: info
+        ? 'Full page retained. Current section: ' + info.selected.label + '. Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets.'
+        : job.parser_version === WAGE_VERSION
         ? 'Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = ' + wageHeader(job.packet).local + '. Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval.'
         : job.parser_version === PROSE_VERSION
         ? 'Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding.'
@@ -263,18 +291,28 @@ export async function labFetch(request) {
   try {
     const body = await readBody(request);
     if (url.pathname === "/api/interpretation/start") {
-      let packet, response, parserVersion;
+      let packet, response, parserVersion, document;
       if (body?.example_id === 'custom-text') {
-        if (!only(body, ['example_id', 'source', 'schema', 'mode']) ||
+        if (!only(body, ['example_id', 'source', 'schema', 'mode', 'dataset_id']) ||
             (body.mode !== undefined && !['auto', 'pair'].includes(body.mode)))
           fail('invalid_input', 'Choose automatic suggestions or manual pair columns.');
         if (body.mode === 'auto' && body.schema !== undefined)
           fail('invalid_input', 'Automatic suggestions choose their own columns. Use manual mode to supply columns.');
-        packet = await createPacket({ source: body.source, schema: body.mode === 'auto' ? PROSE_SCHEMA : body.schema });
-        parserVersion = body.mode === 'auto' ? PROSE_VERSION : 'name-number-v1';
-        if (body.mode === 'auto' && wageHeader(packet)) {
-          packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
-          parserVersion = WAGE_VERSION;
+        if (body.mode === 'auto' && (needsPageIntake(body.source) || body.dataset_id !== undefined)) {
+          const plan = planPage(body.source);
+          const selected = body.dataset_id === undefined ? plan.datasets[0] : plan.datasets.find(d => d.id === body.dataset_id);
+          if (!selected) fail('invalid_selection', 'Choose a listed full-page section.');
+          document = { source: body.source, dataset_id: selected.id };
+          packet = await createPacket({ source: { text: selected.text, url: body.source.url ?? null }, schema: selected.schema });
+          parserVersion = selected.parser_version;
+        } else {
+          if (body.dataset_id !== undefined) fail('invalid_selection', 'Section selection requires automatic mode.');
+          packet = await createPacket({ source: body.source, schema: body.mode === 'auto' ? PROSE_SCHEMA : body.schema });
+          parserVersion = body.mode === 'auto' ? PROSE_VERSION : 'name-number-v1';
+          if (body.mode === 'auto' && wageHeader(packet)) {
+            packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
+            parserVersion = WAGE_VERSION;
+          }
         }
         response = originalResponse({ example_id: 'custom-text', parser_version: parserVersion, packet });
       } else {
@@ -294,9 +332,10 @@ export async function labFetch(request) {
         cache_entry: run.cache_entry,
         events: [],
         revisions: [],
+        ...(document ? { document } : {}),
         ...(body.example_id === "custom-text" ? { parser_version: parserVersion } : {}),
       };
-      return reply(view(job, await checkJob(job)));
+      return reply(await view(job, await checkJob(job)));
     }
     if (url.pathname !== "/api/interpretation/action")
       return reply({ error: "Not found", code: "not_found" }, 404);
@@ -313,7 +352,7 @@ export async function labFetch(request) {
       const response = applyCorrection(body.job.packet, body.job.cache_entry.raw_response, change);
       const job = { ...body.job, revisions: [...(body.job.revisions || []), change], events: [],
         cache_entry: await entryFor(body.job.packet, response) };
-      return reply(view(job, await checkJob(job)));
+      return reply(await view(job, await checkJob(job)));
     }
     if (body.action === "review") {
       if (body.job.events.length >= 64)
@@ -329,9 +368,9 @@ export async function labFetch(request) {
         body.decision,
       );
       const job = { ...body.job, events };
-      return reply(view(job, await checkJob(job)));
+      return reply(await view(job, await checkJob(job)));
     }
-    if (body.action === "revalidate") return reply(view(body.job, result));
+    if (body.action === "revalidate") return reply(await view(body.job, result));
     if (
       !["csv", "json"].includes(body.format) ||
       (body.diagnostic !== undefined && typeof body.diagnostic !== "boolean")
@@ -346,6 +385,11 @@ export async function labFetch(request) {
       body.job.events,
       { approvedOnly: !body.diagnostic },
     );
+    const info = await documentInfo(body.job);
+    if (info) {
+      exported.json.document = publicDocument(info, body.job);
+      exported.json.validation = documentEvidence(exported.json.validation, info.selected, info.plan.text, info.hash);
+    }
     exported.json.candidate_revision_history = body.job.revisions || [];
     exported.json.original_candidates = originalResponse(body.job);
     exported.json.method = body.job.parser_version || 'fictional-scripted-example';
