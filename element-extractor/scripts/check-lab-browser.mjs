@@ -366,6 +366,16 @@ try {
   await evaluate('document.getElementById("note").value="Confirmed establishments rate in the BLS passage.";document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"));document.getElementById("approve").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled'));
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
+  const wageText = await readFile(new URL("../test/fixtures/pasted-wage-table.txt", import.meta.url), "utf8");
+  await evaluate('document.getElementById("source-text").value=' + JSON.stringify(wageText) + ';document.getElementById("extract").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("23 candidates") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("interpretation-summary").textContent'), /local = Jacksonville/);
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=hourly_wage_local_dollars]").textContent'), '$31.59');
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=employment_percent_local]").textContent'), '100%');
+  await evaluate('document.querySelector("button[data-record=row-1][data-field=hourly_wage_local_dollars]").click()');
+  assert.equal(await evaluate('document.querySelectorAll("#evidence blockquote").length'), 2);
+  assert.match(await evaluate('document.getElementById("evidence").textContent'), /Mean hourly wage/);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
   await send("Page.reload");
   await waitFor(() =>
     evaluate(

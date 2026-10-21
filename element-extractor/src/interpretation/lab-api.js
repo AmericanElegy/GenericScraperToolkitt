@@ -1,3 +1,4 @@
+import { wageHeader, extractWageTable, WAGE_SCHEMA, WAGE_VERSION } from './wage-table.js';
 import { extractProseRules, PROSE_SCHEMA, PROSE_VERSION } from './prose-rules.js';
 import { extractTextRules } from './text-rules.js';
 import sample from "../../examples/interpretation-scripted.json";
@@ -159,6 +160,7 @@ function applyCorrection(packet, response, change) {
 function originalResponse(job) {
   if (job.example_id !== 'custom-text') return examples[job.example_id].scripted_response;
   if (job.parser_version === 'name-number-v1') return extractTextRules(job.packet);
+  if (job.parser_version === WAGE_VERSION) return extractWageTable(job.packet);
   if (job.parser_version === PROSE_VERSION) return extractProseRules(job.packet);
   fail('parser_version', 'Unsupported text parser version.');
 }
@@ -204,7 +206,9 @@ function view(job, result) {
     interpretation: {
       method: job.parser_version || 'fictional-scripted-example',
       columns: job.packet.schema.fields.map(f => f.name),
-      explanation: job.parser_version === PROSE_VERSION
+      explanation: job.parser_version === WAGE_VERSION
+        ? 'Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = ' + wageHeader(job.packet).local + '. Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval.'
+        : job.parser_version === PROSE_VERSION
         ? 'Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding.'
         : 'Limited name/number rules or prewritten examples. All candidates require review.',
     },
@@ -259,7 +263,7 @@ export async function labFetch(request) {
   try {
     const body = await readBody(request);
     if (url.pathname === "/api/interpretation/start") {
-      let packet, response;
+      let packet, response, parserVersion;
       if (body?.example_id === 'custom-text') {
         if (!only(body, ['example_id', 'source', 'schema', 'mode']) ||
             (body.mode !== undefined && !['auto', 'pair'].includes(body.mode)))
@@ -267,7 +271,12 @@ export async function labFetch(request) {
         if (body.mode === 'auto' && body.schema !== undefined)
           fail('invalid_input', 'Automatic suggestions choose their own columns. Use manual mode to supply columns.');
         packet = await createPacket({ source: body.source, schema: body.mode === 'auto' ? PROSE_SCHEMA : body.schema });
-        response = body.mode === 'auto' ? extractProseRules(packet) : extractTextRules(packet);
+        parserVersion = body.mode === 'auto' ? PROSE_VERSION : 'name-number-v1';
+        if (body.mode === 'auto' && wageHeader(packet)) {
+          packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
+          parserVersion = WAGE_VERSION;
+        }
+        response = originalResponse({ example_id: 'custom-text', parser_version: parserVersion, packet });
       } else {
         if (!only(body, ['example_id']) || !Object.hasOwn(examples, body.example_id))
           fail('unknown_example', 'Choose an example or paste your own text.');
@@ -285,7 +294,7 @@ export async function labFetch(request) {
         cache_entry: run.cache_entry,
         events: [],
         revisions: [],
-        ...(body.example_id === "custom-text" ? { parser_version: body.mode === "auto" ? PROSE_VERSION : "name-number-v1" } : {}),
+        ...(body.example_id === "custom-text" ? { parser_version: parserVersion } : {}),
       };
       return reply(view(job, await checkJob(job)));
     }

@@ -6,11 +6,21 @@ Start with `npm.cmd run dev` in PowerShell, then open **Open the offline Interpr
 
 Paste prose unchanged, leave **Suggest columns and facts from prose** selected, and click **Preview suggested records**. No column names or special input formatting are needed. Manual column inputs are hidden and disabled in this mode, so they cannot trigger a browser pattern-validation error.
 
-The `prose-facts-v1` offline interpreter suggests four columns: `measure` (text), `value` (number), `unit` (optional text), and `qualifier` (optional text). It recognizes explicit rates followed by “based on” or “of” labels, simple percentage statements, selected count nouns and simple name/number pairs. These are generic quantitative rules, not a BLS-only adapter or general language understanding. It does not summarize definitions, infer missing relationships, interpret arbitrary text-only facts or guarantee complete coverage. The preview explains the method, and every paragraph stays visible.
+For prose, the `prose-facts-v1` offline interpreter suggests four columns: `measure` (text), `value` (number), `unit` (optional text), and `qualifier` (optional text). It recognizes explicit rates followed by “based on” or “of” labels, simple percentage statements, selected count nouns and simple name/number pairs. These are generic quantitative rules, not a BLS-only adapter or general language understanding. It does not summarize definitions, infer missing relationships, interpret arbitrary text-only facts or guarantee complete coverage. The preview explains the method, and every paragraph stays visible.
 
 For the supplied OEWS passage, suggestions include establishments / 66.2 / percent, weighted sampled employment / 67.2 / percent, areas / 530 / areas / over, and states / 50 / states. The original sentence remains the evidence; “over 530” is not turned into an exact count. Bare years, NAICS classification digits and URL target numbers are not treated as facts. Units and qualifiers preserve literal source spelling; there is no unit conversion. Different measures may have different contexts, so inspect the quotation before treating them as comparable.
 
 Automatic suggestions are always pending. Negation/correction/uncertainty keywords and percentages outside 0–100 create blocking findings. These keyword checks are incomplete; even a clean literal match requires human association review. Ambiguous unsupported clauses may produce no candidates instead of a guess. Optional blank unit/qualifier values are allowed when correcting a record. No-result and partial matches are not proof that all information has been extracted.
+
+## Pasted employment/wage tables
+
+Automatic mode also recognizes the explicit grouped header `Major occupational group Percent of total employment Mean hourly wage ($)` followed by repeated `United States <local region>` labels. Paste the header and rows together, with rows on separate lines or separated by blank lines. This is a supported layout, not a universal reconstruction of arbitrary flattened tables. Missing/ambiguous headers or incomplete rows are not guessed.
+
+The `pasted-wage-table-v1` schema separates occupational group, national employment percent, local employment percent, national hourly wage in dollars, and local hourly wage in dollars. The region is shown in the preview explanation. Numeric cells cite both their row and the header, so a reviewer can verify alignment and units. The header is supporting evidence, not a data row.
+
+For the supplied Jacksonville table, 23 rows are recognized. The first row has employment shares of 100% / 100% and hourly wages of $33.54 / $31.59. The screen displays percentage and dollar symbols; CSV/JSON retain numeric values in clearly named percent/dollar columns, allowing numeric sorting/calculation. This is not a formatted Excel workbook. The source dollar sign is retained; the tool does not perform currency conversion or infer an ISO currency code.
+
+Rows currently require exactly four ungrouped decimal values, optionally with dollar signs on the two wage cells. Thousands separators, locale-specific currency formatting, other grouped headings and multiple tables in one paste are unsupported in this layout. Table percentages are checked against 0–100 and wages against zero; all associations still require review. The prose parser itself has not acquired general currency understanding.
 
 ## Manual pair mode
 
@@ -54,6 +64,7 @@ Both JSON export types contain the full source snapshot, passage outcomes and or
 
 ## Developer entry points
 
+- `src/interpretation/wage-table.js`: grouped pasted wage-table detection, mapping and row/header evidence.
 - `src/interpretation/prose-rules.js`: versioned automatic quantitative suggestions and schema.
 - `src/interpretation/text-rules.js`: bounded `name-number-v1` grammar. Change its version when changing replay semantics.
 - `src/interpretation/lab-api.js`: stateless source/fixture handling, correction replay, independent validation/review/export.

@@ -388,3 +388,50 @@ test('automatic prose mode keeps uncertainty, unsupported text and numbers in UR
     assert.equal((await (await autoText(mf, 'See https://example.org/Alpha:98.6')).json()).counts.candidates, 0);
   } finally { await mf.dispose(); }
 });
+
+test('pasted grouped wage table distinguishes employment percentages from hourly dollars using header evidence', async () => {
+  const { mf, calls } = await setup();
+  try {
+    const text = await readFile(new URL('./fixtures/pasted-wage-table.txt', import.meta.url), 'utf8');
+    const response = await autoText(mf, text);
+    assert.equal(response.status, 200);
+    let value = await response.json();
+    assert.equal(value.counts.candidates, 23);
+    assert.match(value.interpretation.explanation, /local = Jacksonville/);
+    assert.equal(value.job.parser_version, 'pasted-wage-table-v1');
+    const first = value.validation.records[0].fields;
+    assert.equal(first.occupational_group.value, 'Total, all occupations');
+    assert.equal(first.employment_percent_national.value, 100);
+    assert.equal(first.employment_percent_local.value, 100);
+    assert.equal(first.hourly_wage_national_dollars.value, 33.54);
+    assert.equal(first.hourly_wage_local_dollars.value, 31.59);
+    assert.equal(value.validation.records[1].fields.hourly_wage_local_dollars.value, 65.97);
+    for (const r of value.validation.records) for (const f of Object.values(r.fields)) {
+      assert.equal(f.issues.length, 0);
+      for (const e of f.evidence) assert.equal(value.job.packet.source.text.slice(e.source_start, e.source_end), e.quote);
+    }
+    assert.equal(first.hourly_wage_local_dollars.evidence.length, 2);
+    value = await (await action(mf, value.job, 'review', { decision })).json();
+    assert.equal(value.counts.approved, 1);
+    const exported = await action(mf, value.job, 'export', { format: 'csv' });
+    const csv = await exported.text();
+    assert.match(csv, /hourly_wage_local_dollars/);
+    assert.match(csv, /"100","100","33.54","31.59"/);
+    assert.equal((await action(mf, value.job, 'revalidate')).status, 200);
+    assert.equal(calls(), 0);
+  } finally { await mf.dispose(); }
+});
+test('pasted wage mapping needs unambiguous repeated header and complete four-value rows', async () => {
+  const { mf } = await setup();
+  try {
+    const header = 'Major occupational group Percent of total employment Mean hourly wage ($) United States New York United States New York';
+    let value = await (await autoText(mf, header + '\n\nManagement 7.2 7.4 $69.84 $65.97\n\nIncomplete 1 2 3\n\nExtra values 1 2 3 4 5')).json();
+    assert.equal(value.counts.candidates, 1);
+    assert.match(value.interpretation.explanation, /local = New York/);
+    assert.equal(value.validation.outcomes[2].status, 'no_result');
+    assert.equal(value.validation.outcomes[3].status, 'no_result');
+    assert.equal((await autoText(mf, header + '\n\n' + header)).status, 400);
+    value = await (await autoText(mf, 'Management 7.2 7.4 69.84 65.97')).json();
+    assert.equal(value.counts.candidates, 0);
+  } finally { await mf.dispose(); }
+});

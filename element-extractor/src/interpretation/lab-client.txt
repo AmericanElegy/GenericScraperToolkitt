@@ -158,6 +158,14 @@
       }),
     );
   }
+  function displayValue(row, field) {
+    const value = row.fields[field.name].value;
+    if (value === null || value === undefined) return "—";
+    if (typeof value === "number" && /^hourly_wage_.*_dollars$/.test(field.name))
+      return "$" + new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 20 }).format(value);
+    if (typeof value === "number" && /^employment_percent_/.test(field.name)) return value + "%";
+    return value;
+  }
   function renderTable() {
     const columns = state.view.job.packet.schema.fields;
     const head = document.createElement("tr");
@@ -178,7 +186,7 @@
         tr.append(text("td", row.id));
         for (const f of columns) {
           const td = document.createElement("td"),
-            button = text("button", row.fields[f.name].value ?? "—", "value");
+            button = text("button", displayValue(row, f), "value");
           button.type = "button";
           button.dataset.record = row.id;
           button.dataset.field = f.name;

@@ -711,6 +711,72 @@ async function exportInterpretation(packet, entry, events = [], { approvedOnly =
   return { json: json2, csv };
 }
 
+// src/interpretation/wage-table.js
+var WAGE_VERSION = "pasted-wage-table-v1";
+var WAGE_SCHEMA = { fields: [
+  { name: "occupational_group", type: "string", required: true },
+  { name: "employment_percent_national", type: "number", required: true, min: 0, max: 100 },
+  { name: "employment_percent_local", type: "number", required: true, min: 0, max: 100 },
+  { name: "hourly_wage_national_dollars", type: "number", required: true, min: 0 },
+  { name: "hourly_wage_local_dollars", type: "number", required: true, min: 0 }
+] };
+function wageHeader(packet) {
+  const matches = packet.passages.map((p) => {
+    const normalized = p.text.replace(/\s+/g, " ").trim();
+    const m = normalized.match(/^Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
+    return m ? { passage: p, national: "United States", local: m[2] } : null;
+  }).filter(Boolean);
+  if (matches.length > 1) throw new ContractError("ambiguous_table_header", "More than one wage-table header was found. Paste one table at a time.");
+  return matches[0] || null;
+}
+function extractWageTable(packet) {
+  const header = wageHeader(packet);
+  if (!header || canonical(packet.schema) !== canonical(WAGE_SCHEMA))
+    throw new ContractError("wage_table_schema", "The pasted wage table needs its explicit grouped percentage and hourly-dollar headers.");
+  const records = [], outcomes = [];
+  const names = WAGE_SCHEMA.fields.map((f) => f.name);
+  for (const p of packet.passages) {
+    const ids = [];
+    if (p.id !== header.passage.id) {
+      let cursor = 0;
+      for (const line of p.text.split("\n")) {
+        const quote = line.trim();
+        const pos = p.text.indexOf(quote, cursor);
+        cursor = pos + quote.length;
+        const m = quote.match(/^(.+?)[ \t]+(\d+(?:\.\d+)?)[ \t]+(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)$/);
+        if (!m || !/[\p{L}]/u.test(m[1]) || /\d$/.test(m[1]) || /https?:\/\//i.test(quote)) continue;
+        if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 table rows. Paste a smaller table.");
+        if (quote.length > LIMITS.quote || header.passage.text.length > LIMITS.quote) throw new ContractError("quote_limit", "Table row or header exceeds the evidence limit.");
+        let occurrence = 0, found = p.text.indexOf(quote);
+        while (found >= 0 && found < pos) {
+          occurrence++;
+          found = p.text.indexOf(quote, found + 1);
+        }
+        const span = { passage_id: p.id, quote, occurrence };
+        const fields = Object.fromEntries(names.map((name, i) => [name, {
+          value: i === 0 ? m[1] : Number(m[i + 1]),
+          evidence: i === 0 ? [span] : [span, { passage_id: header.passage.id, quote: header.passage.text, occurrence: 0 }]
+        }]));
+        const id = "row-" + (records.length + 1);
+        records.push({ id, fields });
+        ids.push(id);
+      }
+    }
+    outcomes.push({
+      passage_id: p.id,
+      status: ids.length ? "records" : "no_result",
+      record_ids: ids,
+      reason: p.id === header.passage.id ? "Grouped header supplies column meanings and currency units; it is retained as evidence, not a data row." : ids.length ? "Four numeric cells mapped to the explicit grouped header. Confirm row alignment and units before approval." : "No complete four-value row recognized. This text was retained, not guessed or discarded."
+    });
+  }
+  const h = outcomes.find((o) => o.passage_id === header.passage.id);
+  if (records.length) {
+    h.status = "records";
+    h.record_ids = records.map((r) => r.id);
+  }
+  return { version: "candidates-v1", records, outcomes };
+}
+
 // src/interpretation/text-rules.js
 function extractTextRules(packet) {
   if (packet.schema.fields.length !== 2 || packet.schema.fields[0].type !== "string" || packet.schema.fields[1].type !== "number")
@@ -939,7 +1005,7 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 </style><script src="/interpretation-client.js" defer><\/script></head><body><main>
 <a href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><span class="badge">Pasted text and examples \xB7 No AI calls</span>
 <p>Compare proposed values with their source passages before deciding what to accept. Paste your text for suggested quantitative records and columns, or use a fictional example. This is not general language understanding.</p>
-<section class="card"><h2>Use your own text</h2><p class="hint">Paste ordinary prose as written. Start with automatic suggestions\u2014no column names or special formatting needed. It recognizes some explicit percentages, counts and name/number pairs. Review the suggested preview; other facts may remain unrecognized. You can add or correct records manually.</p>
+<section class="card"><h2>Use your own text</h2><p class="hint">Paste ordinary prose as written. Start with automatic suggestions\u2014no column names or special formatting needed. It recognizes some explicit percentages, counts and name/number pairs, plus pasted occupational wage tables with their grouped headers. Review the suggested preview; other facts may remain unrecognized. You can add or correct records manually.</p>
 <form id="custom-input"><label for="source-text">Paste source text</label><textarea id="source-text" required maxlength="16000" placeholder="Paste your text here when ready. Maximum 16,000 characters and 32 paragraphs."></textarea><label for="source-url">Source URL (optional attribution, never fetched)</label><input id="source-url" type="url" placeholder="https://example.org/article"><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Suggest columns and facts from prose</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><div class="bar"><div><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div><div><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div></div><p class="hint">Two columns for this first parser: text, then number. Use lowercase names with underscores. Numbers are signed, ungrouped decimals. No score range is assumed.</p></fieldset><button id="extract" type="submit">Preview suggested records</button></form></section>
 <div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load">Load example</button></div>
 <p class="hint">Session only: extracting new text, loading another example or reloading this page clears the current review. Download diagnostic JSON to retain the evidence and history. Reviewer names are self-declared; this is not an authenticated audit service.</p>
@@ -1114,6 +1180,14 @@ var lab_client_default = `"use strict";
       }),
     );
   }
+  function displayValue(row, field) {
+    const value = row.fields[field.name].value;
+    if (value === null || value === undefined) return "\u2014";
+    if (typeof value === "number" && /^hourly_wage_.*_dollars$/.test(field.name))
+      return "$" + new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 20 }).format(value);
+    if (typeof value === "number" && /^employment_percent_/.test(field.name)) return value + "%";
+    return value;
+  }
   function renderTable() {
     const columns = state.view.job.packet.schema.fields;
     const head = document.createElement("tr");
@@ -1134,7 +1208,7 @@ var lab_client_default = `"use strict";
         tr.append(text("td", row.id));
         for (const f of columns) {
           const td = document.createElement("td"),
-            button = text("button", row.fields[f.name].value ?? "\u2014", "value");
+            button = text("button", displayValue(row, f), "value");
           button.type = "button";
           button.dataset.record = row.id;
           button.dataset.field = f.name;
@@ -1605,6 +1679,7 @@ function applyCorrection(packet, response, change) {
 function originalResponse(job) {
   if (job.example_id !== "custom-text") return examples[job.example_id].scripted_response;
   if (job.parser_version === "name-number-v1") return extractTextRules(job.packet);
+  if (job.parser_version === WAGE_VERSION) return extractWageTable(job.packet);
   if (job.parser_version === PROSE_VERSION) return extractProseRules(job.packet);
   fail("parser_version", "Unsupported text parser version.");
 }
@@ -1646,7 +1721,7 @@ function view(job, result) {
     interpretation: {
       method: job.parser_version || "fictional-scripted-example",
       columns: job.packet.schema.fields.map((f) => f.name),
-      explanation: job.parser_version === PROSE_VERSION ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
+      explanation: job.parser_version === WAGE_VERSION ? "Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = " + wageHeader(job.packet).local + ". Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval." : job.parser_version === PROSE_VERSION ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
     },
     notice: "Rule-based or scripted candidates, with optional human corrections. No AI inference. Session-only, self-declared review; not an authenticated audit service."
   };
@@ -1692,14 +1767,19 @@ async function labFetch(request) {
   try {
     const body = await readBody(request);
     if (url.pathname === "/api/interpretation/start") {
-      let packet, response;
+      let packet, response, parserVersion;
       if (body?.example_id === "custom-text") {
         if (!only(body, ["example_id", "source", "schema", "mode"]) || body.mode !== void 0 && !["auto", "pair"].includes(body.mode))
           fail("invalid_input", "Choose automatic suggestions or manual pair columns.");
         if (body.mode === "auto" && body.schema !== void 0)
           fail("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
         packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? PROSE_SCHEMA : body.schema });
-        response = body.mode === "auto" ? extractProseRules(packet) : extractTextRules(packet);
+        parserVersion = body.mode === "auto" ? PROSE_VERSION : "name-number-v1";
+        if (body.mode === "auto" && wageHeader(packet)) {
+          packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
+          parserVersion = WAGE_VERSION;
+        }
+        response = originalResponse({ example_id: "custom-text", parser_version: parserVersion, packet });
       } else {
         if (!only(body, ["example_id"]) || !Object.hasOwn(examples, body.example_id))
           fail("unknown_example", "Choose an example or paste your own text.");
@@ -1717,7 +1797,7 @@ async function labFetch(request) {
         cache_entry: run.cache_entry,
         events: [],
         revisions: [],
-        ...body.example_id === "custom-text" ? { parser_version: body.mode === "auto" ? PROSE_VERSION : "name-number-v1" } : {}
+        ...body.example_id === "custom-text" ? { parser_version: parserVersion } : {}
       };
       return reply(view(job, await checkJob(job)));
     }
