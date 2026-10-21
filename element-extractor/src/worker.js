@@ -145,34 +145,39 @@ async function fetchPublicPage(input, ownHost) {
       url = publicURL(new URL(location, url).href); continue;
     }
     if (!r.ok) { await r.body?.cancel(); throw new InputError(`Source returned HTTP ${r.status}. Login-protected or blocked pages are not supported.`, 422); }
+    if (/^image\//i.test(r.headers.get('content-type') || '')) {await r.body?.cancel(); throw new InputError('This URL returns an image. Reading image-based data requires OCR, which is not enabled. Use an HTML source or an official text/CSV export.',422);}
     if (!/^text\/html(?:;|$)/i.test(r.headers.get('content-type') || '')) { await r.body?.cancel(); throw new InputError('The source must return an HTML webpage.', 422); }
     const charset = (r.headers.get('content-type') || '').match(/charset\s*=\s*[\"']?([^;\s\"']+)/i)?.[1];
     if (charset && !/^(utf-?8|us-ascii)$/i.test(charset)) {await r.body?.cancel(); throw new InputError('This first version supports UTF-8 HTML pages only.',422);}
     return {source: url.href, page: await readBounded(r)};
   }
 }
-async function discoverTables(page) {
+async function discoverTables(page, accessible = false) {
+  const rootSelector = accessible ? '[role="table"], [role="grid"]' : 'table';
+  const rowSelector = accessible ? '[role="row"]' : 'tr';
+  const cellSelector = accessible ? '[role="cell"], [role="gridcell"], [role="columnheader"], [role="rowheader"]' : 'td, th';
   const tables = [], stack = []; let totalRows = 0, totalCells = 0, ignored = 0;
   const current = () => stack[stack.length - 1];
   const rewrite = new HTMLRewriter()
-    .on('table', {element(el) {
+    .on(rootSelector, {element(el) {
+      if (accessible && el.tagName === 'table') {if (current()) current().unsupported = 'Nested tables are not supported yet.'; return;}
       if (tables.length >= LIMITS.tables) throw new InputError('Page exceeds the limit of 20 tables.', 422);
       const parent = current(); if (parent) parent.unsupported = 'Nested tables are not supported yet.';
-      const table = {rows: [], caption: '', unsupported: parent ? 'Nested tables are not supported yet.' : null};
+      const table = {rows: [], caption: accessible ? (el.getAttribute('aria-label') || '') : '', unsupported: parent ? 'Nested tables are not supported yet.' : null};
       tables.push(table); stack.push(table);
       el.onEndTag(() => { if (current() === table) stack.pop(); });
     }})
-    .on('tr', {element(el) {
+    .on(rowSelector, {element(el) {
       const table = current(); if (!table) return;
       if (++totalRows > LIMITS.rows) throw new InputError('Page exceeds the limit of 5000 total rows.', 422);
       const row = []; table.rows.push(row); table.row = row; table.cell = undefined;
       el.onEndTag(() => { if (table.row === row) {table.row = undefined; table.cell = undefined;} });
     }})
-    .on('td, th', {element(el) {
+    .on(cellSelector, {element(el) {
       const table = current(); if (!table?.row) return;
       if (table.row.length >= LIMITS.columns || ++totalCells > LIMITS.cells) throw new InputError('Page exceeds the cell or column limit.', 422);
-      if (['rowspan','colspan'].some(k => el.hasAttribute(k) && el.getAttribute(k) !== '1')) table.unsupported = 'Merged cells are not supported yet.';
-      const cell = {text: '', header: el.tagName === 'th'}; table.row.push(cell); table.cell = cell;
+      if (['rowspan','colspan','aria-rowspan','aria-colspan'].some(k => el.hasAttribute(k) && el.getAttribute(k) !== '1')) table.unsupported = 'Merged cells are not supported yet.';
+      const cell = {text: '', header: accessible ? el.getAttribute('role') === 'columnheader' : el.tagName === 'th'}; table.row.push(cell); table.cell = cell;
       el.onEndTag(() => {if (table.cell === cell) table.cell = undefined;});
     }})
     .on('caption', {element(el) {const table = current(); if (!table) return; table.inCaption = true; el.onEndTag(() => {table.inCaption = false;});}})
@@ -190,8 +195,8 @@ async function discoverTables(page) {
     if (rows.slice(heading ? 1 : 0).some(r => r.some(c => c.header) && r.every(c => c.header))) t.unsupported ||= 'Multiple header rows are not supported yet.';
     if (rows.some(r => r.length !== width)) t.unsupported ||= 'Rows have inconsistent column counts.';
     const normalize = text => decodeHTML(text).replace(/\s+/g, ' ').trim();
-    return {id, title: normalize(t.caption) || `Table ${id + 1}`, headers: heading ? rows[0].map(c => normalize(c.text)) : Array.from({length: width}, (_,i) => `Column ${i + 1}`),
-      rows: rows.slice(heading ? 1 : 0).map(r => r.map(c => normalize(c.text))), unsupported: t.unsupported};
+    return {id, title: normalize(t.caption) || `${accessible ? 'Accessible table' : 'Table'} ${id + 1}`, headers: heading ? rows[0].map(c => normalize(c.text)) : Array.from({length: width}, (_,i) => `Column ${i + 1}`),
+      rows: rows.slice(heading ? 1 : 0).map(r => r.map(c => normalize(c.text))), unsupported: t.unsupported, extraction_method: accessible ? 'aria-grid' : 'html-table'};
   });
 }
 // DCI publishes its score grid as divs, not a semantic HTML table.
@@ -236,12 +241,76 @@ async function discoverDCIScores(page) {
   });
 }
 
+async function inspectPage(page) {
+  const signals = {html_tables:0, accessible_grids:0, json_blocks:0, linked_scripts:0, app_roots:0, password_fields:0, layout_hints:0, images:0, canvases:0, title:''};
+  let title = false;
+  await new HTMLRewriter()
+    .on('table', {element(){signals.html_tables++;}})
+    .on('[role="table"], [role="grid"]', {element(el){if(el.tagName!=='table')signals.accessible_grids++;}})
+    .on('script', {element(el){
+      const type=(el.getAttribute('type')||'').toLowerCase();
+      if(['application/json','application/ld+json'].includes(type))signals.json_blocks++;
+      if(el.hasAttribute('src'))signals.linked_scripts++;
+    }})
+    .on('#root, #app, #__next, #__nuxt', {element(){signals.app_roots++;}})
+    .on('img', {element(){signals.images++;}})
+    .on('canvas', {element(){signals.canvases++;}})
+    .on('input[type="password"]', {element(){signals.password_fields++;}})
+    .on('[class]', {element(el){if(/(?:^|[\s_-])(table|tbl|score|grid|row)(?:$|[\s_-])/i.test(el.getAttribute('class')||''))signals.layout_hints++;}})
+    .on('title', {element(el){title=true;el.onEndTag(()=>{title=false;});},text(chunk){if(title&&signals.title.length<300)signals.title+=chunk.text.slice(0,300-signals.title.length);}})
+    .transform(new Response(page)).arrayBuffer();
+  signals.title=decodeHTML(signals.title).replace(/\s+/g,' ').trim();
+  return signals;
+}
+function noDataReason(signals) {
+  if (/access denied|just a moment|verify (you are|you're) human|attention required|sign in|log in/i.test(signals.title) || signals.password_fields) return {
+    code:'possible_access_barrier',
+    message:'The returned page contains a sign-in or verification indicator, and no supported data structure was found.',
+    next_action:'Check the URL in your browser. Use a public source or an authorized export; this toolkit does not sign in or bypass verification.'
+  };
+  if(signals.json_blocks)return {
+    code:'embedded_data_detected',message:`Found ${signals.json_blocks} embedded JSON blocks but no supported table. These blocks may contain page metadata rather than the requested rows.`,
+    next_action:'The next extraction option is a validated embedded-data adapter or a documented public API. No script was executed and no JSON was guessed into rows.'
+  };
+  if(signals.app_roots&&signals.linked_scripts)return {
+    code:'possible_client_rendering',message:'Found an application container and linked scripts, but no supported rows in the returned HTML. The data may load after JavaScript runs; this is an indication, not a confirmed diagnosis.',
+    next_action:'Look for an official export or public data endpoint. Browser rendering is not enabled, and the toolkit did not execute these scripts.'
+  };
+  if(signals.layout_hints)return {
+    code:'unsupported_page_layout',message:'Found table-like layout class names, but no HTML table, accessible grid, or matching supported adapter. Class names alone do not establish which values belong together.',
+    next_action:'This page needs a validated layout adapter or explicit row/column selection. The toolkit stopped rather than guessing a dataset.'
+  };
+  if(signals.images||signals.canvases)return {code:'visual_content_present',message:`Found ${signals.images} images and ${signals.canvases} canvas elements, but no supported dataset. Their presence does not prove the requested data is in a picture. Image contents were not read.`,next_action:'If the data is shown only as an image, OCR plus row/column verification is needed. OCR is not enabled. Prefer an official text or CSV export when available.'};
+  return {code:'no_supported_structure',message:'The page downloaded successfully, but no supported row-and-column structure was found. There is not enough evidence to say JavaScript or login is the cause.',next_action:'Check that this is the actual data page. Try a direct public table, an official export, or provide the page for a new adapter.'};
+}
+async function analyzePage(page, source, checks) {
+  const signals=await inspectPage(page);
+  let tables=await discoverTables(page);
+  const summarize=(label,items)=>({step:label,status:items.length?'found':'not_found',message:items.length?`${items.length} structures found; ${items.filter(t=>!t.unsupported).length} usable for preview and export.`:'No matching structures found in the returned HTML.'});
+  checks.push(summarize('HTML tables',tables));
+  const accessible=await discoverTables(page,true);
+  checks.push(summarize('Accessible tables and grids',accessible));tables.push(...accessible);
+  const u=new URL(source);
+  if(['www.dci.org','dci.org'].includes(u.hostname)&&u.pathname.startsWith('/scores/final-scores/')) {
+    const scores=await discoverDCIScores(page);checks.push(summarize('DCI final-score adapter',scores));tables.push(...scores);
+  } else checks.push({step:'Supported site adapters',status:'not_applicable',message:'No site-specific adapter matches this URL.'});
+  const cells=tables.reduce((n,t)=>n+t.rows.length*t.headers.length,0);
+  if(tables.length>LIMITS.tables||tables.reduce((n,t)=>n+t.rows.length,0)>LIMITS.rows||cells>LIMITS.cells)throw new InputError('Combined extraction exceeds the table, row or cell limit.',422);
+  checks.push({step:'Embedded data',status:signals.json_blocks?'found':'not_found',message:`${signals.json_blocks} JSON blocks found. They may contain metadata rather than table rows; no dataset was inferred from them.`});
+  checks.push({step:'JavaScript indicators',status:signals.app_roots&&signals.linked_scripts?'indicated':'checked',message:`${signals.linked_scripts} linked scripts and ${signals.app_roots} application containers found. Scripts were not executed; these clues do not confirm where data loads.`});
+  checks.push({step:'Images and canvas',status:signals.images||signals.canvases?'found':'not_found',message:`${signals.images} images and ${signals.canvases} canvas elements found. Their contents were not read; OCR is not enabled.`});
+  if(!tables.length)return {tables,signals,...noDataReason(signals)};
+  const usable=tables.filter(t=>!t.unsupported).length;
+  return {tables:tables.map((t,id)=>({...t,id})),signals,code:usable?'extracted':'unsupported_table_structure',message:usable?`${usable} usable datasets found.`:'Tables were found, but their structures are not supported yet.',next_action:usable?'Choose a dataset to preview and export.': 'Choose a table to see its specific issue, such as merged cells, nested tables or inconsistent columns.'};
+}
+
 async function tablesAPI(request, url) {
   if (request.method !== 'POST') return new Response('Method not allowed', {status:405, headers:{...SECURITY, Allow:'POST'}});
   // Do not provide a cross-origin scraping proxy; no CORS headers are emitted.
   const origin = request.headers.get('origin');
   if (origin && origin !== url.origin) return json({error:'Cross-origin extraction is not supported.'},403);
   if (!/^application\/json(?:;|$)/i.test(request.headers.get('content-type') || '')) return json({error:'Send a JSON request.'},415);
+  const checks = []; let phase = 'Request validation';
   try {
     if (Number(request.headers.get('content-length')) > 4096) throw new InputError('Request is too large.',413);
     const reader = request.body?.getReader(); const chunks = []; let bytes = 0;
@@ -249,17 +318,19 @@ async function tablesAPI(request, url) {
     const text = await new Blob(chunks).text();
     let body; try {body = JSON.parse(text);} catch {throw new InputError('Invalid JSON request.');}
     if (!body || typeof body.url !== 'string') throw new InputError('Provide a public HTTPS URL.');
+    checks.push({step:'Request validation',status:'passed',message:'A bounded JSON request with a URL was received.'});
+    phase='Public page request';
     const {source, page} = await fetchPublicPage(body.url, url.hostname);
-    let tables = await discoverTables(page);
-    const sourceURL = new URL(source);
-    if (['www.dci.org','dci.org'].includes(sourceURL.hostname) && sourceURL.pathname.startsWith('/scores/final-scores/')) {
-      const scores = await discoverDCIScores(page);
-      tables = [...tables, ...scores].map((table,id)=>({...table,id}));
-    }
-    if (!tables.length) throw new InputError('No supported table or score grid found. This page may use an unsupported layout, JavaScript rendering, or restricted access.',422);
-    return json({source, retrieved_at:new Date().toISOString(), tables});
+    checks.push({step:phase,status:'passed',message:'Public HTTPS and DNS checks passed for the request and redirects. HTML downloaded within the size and time limits.'});
+    phase='Structure detection';
+    const result=await analyzePage(page,source,checks);
+    const diagnostics={code:result.code,summary:result.message,next_action:result.next_action,checks,signals:result.signals};
+    if(!result.tables.length)return json({error:result.message,source,diagnostics},422);
+    return json({source,retrieved_at:new Date().toISOString(),tables:result.tables,diagnostics});
   } catch (error) {
-    return json({error: error.name === 'TimeoutError' || error.name === 'AbortError' ? 'The source exceeded the 15-second request limit.' : error.message || 'Table extraction failed.'}, error.status || 502);
+    const message = error.name === 'TimeoutError' || error.name === 'AbortError' ? 'The source exceeded the 15-second request limit.' : error.message || 'Table extraction failed.';
+    checks.push({step:phase,status:'failed',message});
+    return json({error:message,diagnostics:{code:'extraction_stopped',summary:message,next_action:phase==='Request validation'?'Correct the request and try again.':'Resolve the failed check before retrying. A later extraction strategy cannot bypass an access or request-limit failure.',checks}},error.status||502);
   }
 }
 
@@ -305,18 +376,21 @@ const TABLE_PAGE = String.raw`<!doctype html><html lang="en"><head><meta charset
 <style>*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17283c;font:16px system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 22px}h1{font-size:clamp(30px,5vw,48px);margin:12px 0}p{line-height:1.6}a{color:#18568b}.bar{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}input,select{padding:12px;border:1px solid #8596a8;border-radius:8px;font:inherit;max-width:100%}input{flex:1;min-width:200px}button,.button{padding:12px 18px;border:0;border-radius:8px;background:#173b59;color:white;font:inherit;cursor:pointer;text-decoration:none}button:disabled{opacity:.5;cursor:wait}label{display:block;font-weight:600;margin:12px 0 6px}.hint,footer{font-size:14px;color:#47607a}#status{min-height:28px}#wrap{overflow:auto;background:white;border:1px solid #d7dfe6;border-radius:10px;max-height:65vh}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:12px 16px;border-bottom:1px solid #e7edf2;max-width:420px;overflow-wrap:anywhere;min-width:100px}th{background:#e8eff5;position:sticky;top:0}footer{margin-top:28px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #bc6b10;outline-offset:3px}[hidden]{display:none!important}</style></head>
 <body><main><h1>Web Table Toolkit</h1><p>Turn tables on public webpages into searchable data. Preview a table, then download CSV or JSON.</p>
 <form id="extract"><label for="url">Public webpage URL</label><div class="bar"><input id="url" type="url" maxlength="2048" required placeholder="https://www.w3schools.com/html/html_tables.asp"><button id="submit" type="submit">Find tables</button></div></form>
-<p class="hint">Public HTTPS pages only. HTML tables or supported DCI final-score grids must be present in the page source. Maximum 2 MiB, 20 tables, and 5,000 total rows. Complex tables are marked unsupported.</p>
+<p class="hint">Public HTTPS pages only. HTML tables, accessible grids, or supported score grids must be present in the page source. Images require OCR, which is not enabled. Maximum 2 MiB, 20 tables, and 5,000 total rows. Complex tables are marked unsupported.</p>
 <p><button id="try" type="button">Try a sample table</button> <a href="/example">Open the validated 118-element example</a></p>
 <p id="status" role="status" aria-live="polite">Enter a URL to begin.</p>
-<section id="results" hidden><label for="tables">Choose a table</label><select id="tables"></select><p id="source" class="hint"></p><p id="notice" role="status"></p>
+<p id="next-action" class="hint"></p><details id="diagnostics" hidden><summary>What was checked?</summary><ol id="checks"></ol></details>
+<section id="results" hidden><label for="tables">Choose a table</label><select id="tables"></select><p id="source" class="hint"></p><p id="notice" role="status"></p><p id="method" class="hint"></p>
 <div class="bar"><input id="search" type="search" aria-label="Search table rows" placeholder="Search table rows"><button id="csv" type="button">Download CSV</button><button id="json" type="button">Download JSON</button></div>
 <p id="count"></p><p class="hint">Exports include all rows in the selected table. Search filters the preview only.</p><div id="wrap"><table><caption id="caption"></caption><thead id="head"></thead><tbody id="rows"></tbody></table></div></section>
 <footer>Only extract sources you are authorized to use and respect their terms. Source content stays text, never executable HTML. Extraction data is not saved by this application. No AI or browser service is used.</footer></main>
 <script>
 const $=id=>document.getElementById(id);let dataset;
 function selected(){return dataset.tables[Number($('tables').value)]}
+function showDiagnostics(d){$('diagnostics').hidden=!d;$('checks').replaceChildren();$('next-action').textContent=d?.next_action||'';if(d)for(const check of d.checks||[]){const li=document.createElement('li');li.textContent=check.step+' — '+check.status.replaceAll('_',' ')+': '+check.message;$('checks').append(li)}}
 function render(){
  const table=selected();const q=$('search').value.trim().toLowerCase();const rows=table.rows.filter(r=>r.some(c=>c.toLowerCase().includes(q)));
+ $('method').textContent='Extraction method: '+({'html-table':'HTML table','aria-grid':'accessible table or grid','dci-final-scores':'validated DCI score layout'}[table.extraction_method]||'supported layout');
  $('notice').textContent=table.unsupported||'';for(const id of ['csv','json','search'])$(id).disabled=Boolean(table.unsupported);
  $('wrap').hidden=Boolean(table.unsupported);$('caption').textContent=table.title;
  const heading=document.createElement('tr');for(const name of table.headers){const th=document.createElement('th');th.scope='col';th.textContent=name;heading.append(th)}$('head').replaceChildren(heading);
@@ -324,12 +398,12 @@ function render(){
  $('count').textContent=table.unsupported?'Choose another table to preview or export.':rows.length+' of '+table.rows.length+' rows · '+table.headers.length+' columns';
 }
 $('extract').onsubmit=async event=>{
- event.preventDefault();$('submit').disabled=true;$('try').disabled=true;$('results').hidden=true;dataset=undefined;$('status').textContent='Fetching page and finding tables…';
- try{const r=await fetch('/api/tables',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('url').value.trim()})});const d=await r.json();if(!r.ok)throw Error(d.error||'Extraction failed.');dataset=d;
+ event.preventDefault();showDiagnostics(null);$('submit').disabled=true;$('try').disabled=true;$('results').hidden=true;dataset=undefined;$('status').textContent='Fetching page and finding tables…';
+ try{const r=await fetch('/api/tables',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('url').value.trim()})});const d=await r.json();showDiagnostics(d.diagnostics);$('diagnostics').open=!r.ok;if(!r.ok)throw Error(d.error||'Extraction failed.');dataset=d;
  $('tables').replaceChildren(...d.tables.map((t,i)=>{const option=document.createElement('option');option.value=i;option.textContent=t.title+' · '+t.rows.length+' rows × '+t.headers.length+' columns'+(t.unsupported?' · unsupported':'');return option}));
  const first=d.tables.findIndex(t=>!t.unsupported);$('tables').value=String(first<0?0:first);$('search').value='';
  const link=document.createElement('a');link.href=d.source;link.rel='noreferrer';link.target='_blank';link.textContent=d.source;$('source').replaceChildren('Source: ',link,' · Retrieved '+new Date(d.retrieved_at).toLocaleString());
- render();$('results').hidden=false;$('status').textContent='Found '+d.tables.length+' tables. Choose one to preview.';
+ render();$('results').hidden=false;$('status').textContent=d.diagnostics?.summary||('Found '+d.tables.length+' tables. Choose one to preview.');
  }catch(e){$('status').textContent=e.message}finally{$('submit').disabled=false;$('try').disabled=false}
 };
 $('try').onclick=()=>{$('url').value='https://www.w3schools.com/html/html_tables.asp';$('extract').requestSubmit()};

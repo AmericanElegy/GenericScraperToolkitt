@@ -66,3 +66,11 @@ Live general table discovery was also checked against W3Schools and Wikipedia IS
 `npm run deploy` updates the `genericscrapertoolkit` Worker using your authenticated account. This project does not enable paid services or change your subscription. Deploying and saving a Codex environment snapshot are separate operations.
 
 DCI support requires outbound access to `www.dci.org` (and `dci.org` if using its alternate hostname). The score adapter uses the already returned HTML; it does not execute page JavaScript or use a paid browser.
+
+## General detection checklist
+
+The API now returns `diagnostics` on extraction success and on failures after a valid request begins. The UI shows the next action and an expandable **What was checked?** list. It checks the public request, native HTML tables, general accessible (`role=table/grid`) structures, matching site adapters, embedded JSON, JavaScript indicators, and images/canvas. Accessible grids use the same row/cell/size limits and unsupported-structure rules as native tables. A native table with an ARIA role is not duplicated.
+
+Messages distinguish observations from hypotheses: an app container plus linked scripts suggests possible client rendering but does not prove it. JSON blocks may be metadata, not data. Images may be logos; finding one does not prove the requested rows are image-based. A password field or verification title is an access indicator, not a license to bypass it. Access and request-limit failures stop extraction before fallback methods run.
+
+A direct image URL explains that OCR is needed. Pages containing only possible visual data explain that image contents were not read. **OCR, JavaScript execution, and automatic extraction from arbitrary embedded JSON are not enabled.** Future OCR would require row/column reconstruction and review of uncertain values before claiming a verified dataset. No paid service has been added.
