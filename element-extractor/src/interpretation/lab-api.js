@@ -1,3 +1,4 @@
+import { extractProseRules, PROSE_SCHEMA, PROSE_VERSION } from './prose-rules.js';
 import { extractTextRules } from './text-rules.js';
 import sample from "../../examples/interpretation-scripted.json";
 import {
@@ -155,6 +156,12 @@ function applyCorrection(packet, response, change) {
   });
   return next;
 }
+function originalResponse(job) {
+  if (job.example_id !== 'custom-text') return examples[job.example_id].scripted_response;
+  if (job.parser_version === 'name-number-v1') return extractTextRules(job.packet);
+  if (job.parser_version === PROSE_VERSION) return extractProseRules(job.packet);
+  fail('parser_version', 'Unsupported text parser version.');
+}
 async function checkJob(job) {
   if (!only(job, ['example_id', 'packet', 'cache_entry', 'events', 'revisions', 'parser_version']) ||
       !Array.isArray(job.events) || job.events.length > 64 ||
@@ -163,8 +170,7 @@ async function checkJob(job) {
   await revalidate(job.packet, job.cache_entry);
   let response;
   if (job.example_id === 'custom-text') {
-    if (job.parser_version !== 'name-number-v1') fail('parser_version', 'Unsupported text parser version.');
-    response = extractTextRules(job.packet);
+    response = originalResponse(job);
   } else {
     if (!Object.hasOwn(examples, job.example_id)) fail('invalid_lab_job', 'Unknown example.');
     const fixture = examples[job.example_id];
@@ -194,6 +200,13 @@ function view(job, result) {
       approved: records.filter((r) => r.review_status === "approved").length,
       rejected: records.filter((r) => r.review_status === "rejected").length,
       pending: records.filter((r) => r.review_status === "needs_review").length,
+    },
+    interpretation: {
+      method: job.parser_version || 'fictional-scripted-example',
+      columns: job.packet.schema.fields.map(f => f.name),
+      explanation: job.parser_version === PROSE_VERSION
+        ? 'Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding.'
+        : 'Limited name/number rules or prewritten examples. All candidates require review.',
     },
     notice:
       "Rule-based or scripted candidates, with optional human corrections. No AI inference. Session-only, self-declared review; not an authenticated audit service.",
@@ -248,9 +261,13 @@ export async function labFetch(request) {
     if (url.pathname === "/api/interpretation/start") {
       let packet, response;
       if (body?.example_id === 'custom-text') {
-        if (!only(body, ['example_id', 'source', 'schema'])) fail('invalid_input', 'Send source text and two requested columns.');
-        packet = await createPacket({ source: body.source, schema: body.schema });
-        response = extractTextRules(packet);
+        if (!only(body, ['example_id', 'source', 'schema', 'mode']) ||
+            (body.mode !== undefined && !['auto', 'pair'].includes(body.mode)))
+          fail('invalid_input', 'Choose automatic suggestions or manual pair columns.');
+        if (body.mode === 'auto' && body.schema !== undefined)
+          fail('invalid_input', 'Automatic suggestions choose their own columns. Use manual mode to supply columns.');
+        packet = await createPacket({ source: body.source, schema: body.mode === 'auto' ? PROSE_SCHEMA : body.schema });
+        response = body.mode === 'auto' ? extractProseRules(packet) : extractTextRules(packet);
       } else {
         if (!only(body, ['example_id']) || !Object.hasOwn(examples, body.example_id))
           fail('unknown_example', 'Choose an example or paste your own text.');
@@ -268,7 +285,7 @@ export async function labFetch(request) {
         cache_entry: run.cache_entry,
         events: [],
         revisions: [],
-        ...(body.example_id === "custom-text" ? { parser_version: "name-number-v1" } : {}),
+        ...(body.example_id === "custom-text" ? { parser_version: body.mode === "auto" ? PROSE_VERSION : "name-number-v1" } : {}),
       };
       return reply(view(job, await checkJob(job)));
     }
@@ -321,9 +338,8 @@ export async function labFetch(request) {
       { approvedOnly: !body.diagnostic },
     );
     exported.json.candidate_revision_history = body.job.revisions || [];
-    exported.json.original_candidates = body.job.example_id === 'custom-text'
-      ? extractTextRules(body.job.packet) : examples[body.job.example_id].scripted_response;
-    exported.json.method = body.job.example_id === 'custom-text' ? 'name-number-v1' : 'fictional-scripted-example';
+    exported.json.original_candidates = originalResponse(body.job);
+    exported.json.method = body.job.parser_version || 'fictional-scripted-example';
     exported.json.notice = 'Limited rules or scripted examples, with optional human corrections. No AI inference. Original automated findings are retained separately from human review.';
     const prefix = body.diagnostic
       ? "interpretation-diagnostic"

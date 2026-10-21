@@ -329,6 +329,8 @@ try {
   assert.doesNotMatch(await evaluate('document.getElementById("findings").textContent'), /association is wrong/);
   await evaluate('document.getElementById("note").value="Checked Alpha and 98.6 in the quotation.";document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"));document.getElementById("approve").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled'));
+  // Existing manual-column mode remains available.
+  await evaluate('document.getElementById("text-mode").value="pair";document.getElementById("text-mode").dispatchEvent(new Event("change"))');
   // Custom paste, unmatched paragraph and inert markup.
   await evaluate('document.getElementById("source-text").value=' + JSON.stringify('Alpha scored 12.5.\n\nThe result for Delta was 82.25 points. <img src=x onerror=alert(1)>') + ';document.getElementById("extract").click()');
   await waitFor(() => evaluate('document.getElementById("status").textContent.includes("Parsed your supplied text") && !document.getElementById("load").disabled'));
@@ -349,6 +351,20 @@ try {
   })()`);
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("2 candidates") && !document.getElementById("load").disabled'));
   assert.match(await evaluate('document.getElementById("candidate-rows").textContent'), /Delta.*82.25/);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
+  // Automatic prose mode: no column names or matching-format requirement.
+  const blsText = await readFile(new URL("../test/fixtures/bls-oews-passage.txt", import.meta.url), "utf8");
+  await evaluate('document.getElementById("text-mode").value="auto";document.getElementById("text-mode").dispatchEvent(new Event("change"));document.getElementById("name-column").value="INVALID NAME";document.getElementById("source-text").value=' + JSON.stringify(blsText) + ';document.getElementById("extract").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("4 candidates") && !document.getElementById("load").disabled'));
+  assert.equal(await evaluate('document.getElementById("manual-columns").hidden && document.getElementById("manual-columns").disabled'), true);
+  assert.match(await evaluate('document.getElementById("interpretation-summary").textContent'), /measure, value, unit, qualifier/);
+  assert.match(await evaluate('document.getElementById("candidate-rows").textContent'), /establishments.*66.2.*percent/);
+  assert.match(await evaluate('document.getElementById("candidate-rows").textContent'), /weighted sampled employment.*67.2/);
+  // Optional blank qualifier must not prevent manual correction or review.
+  await evaluate('document.querySelector("button[data-record=row-2][data-field=value]").click();document.getElementById("edit-selected").click();document.getElementById("correction-note").value="Checked the rate against its source sentence.";document.getElementById("save-correction").click()');
+  await waitFor(() => evaluate('document.querySelectorAll("#revision-history li").length===1 && !document.getElementById("load").disabled'));
+  await evaluate('document.getElementById("note").value="Confirmed establishments rate in the BLS passage.";document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"));document.getElementById("approve").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled'));
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
   await send("Page.reload");
   await waitFor(() =>

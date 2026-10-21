@@ -715,7 +715,7 @@ async function exportInterpretation(packet, entry, events = [], { approvedOnly =
 function extractTextRules(packet) {
   if (packet.schema.fields.length !== 2 || packet.schema.fields[0].type !== "string" || packet.schema.fields[1].type !== "number")
     throw new ContractError("rule_schema", "The text parser needs a text column followed by a numeric column.");
-  const [name, number] = packet.schema.fields.map((f) => f.name);
+  const [name, number2] = packet.schema.fields.map((f) => f.name);
   const records = [], outcomes = [];
   for (const p of packet.passages) {
     const ids = [];
@@ -736,7 +736,7 @@ function extractTextRules(packet) {
       const span = { passage_id: p.id, quote, occurrence };
       const record = { id, fields: {
         [name]: { value: match[1].trim(), evidence: [span] },
-        [number]: { value: Number(match[2]), evidence: [span] }
+        [number2]: { value: Number(match[2]), evidence: [span] }
       } };
       if (/\b(correct(?:ion|ed)?|revised|not|never|instead|however|previously|disputed)\b/i.test(p.text))
         record.issues = ["This paragraph includes correction, negation or uncertainty wording. The rule match needs a manually corrected candidate with supporting quotations."];
@@ -748,6 +748,91 @@ function extractTextRules(packet) {
       status: ids.length ? "records" : "no_result",
       record_ids: ids,
       reason: ids.length ? "Matched a limited name/number grammar; human association review is still required." : "No supported name/number pattern matched. This does not mean the paragraph contains no useful data. Add a candidate manually or reformat the source in a new session."
+    });
+  }
+  return { version: "candidates-v1", records, outcomes };
+}
+
+// src/interpretation/prose-rules.js
+var PROSE_VERSION = "prose-facts-v1";
+var PROSE_SCHEMA = { fields: [
+  { name: "measure", type: "string", required: true },
+  { name: "value", type: "number", required: true },
+  { name: "unit", type: "string", required: false },
+  { name: "qualifier", type: "string", required: false }
+] };
+var number = "[-+]?\\d+(?:\\.\\d+)?";
+var qualifiers = "over|more than|at least|about|approximately|roughly|nearly|under|less than|up to|at most";
+var counts = "areas|states|employees|workers|establishments|respondents|participants|schools|hospitals|people|households|companies|students|patients";
+var flags = /\b(correct(?:ion|ed)?|revised|no|not|never|instead|however|previously|disputed|forecast|projected|estimated)\b/i;
+function extractProseRules(packet) {
+  if (canonical(packet.schema) !== canonical(PROSE_SCHEMA))
+    throw new ContractError("prose_schema", "Automatic prose mode uses its suggested measure/value/unit/qualifier columns.");
+  const records = [], outcomes = [];
+  for (const passage of packet.passages) {
+    const ids = [], seen = /* @__PURE__ */ new Set();
+    const masked = passage.text.replace(/https?:\/\/[^\s)"<>]+/g, (s) => " ".repeat(s.length));
+    const sentences = [...masked.matchAll(/[^.!?\n]*(?:\.(?!\s|$)[^.!?\n]*)*(?:[.!?](?=\s|$)|$)/g)].filter((m) => m[0].trim());
+    for (const sentence of sentences) {
+      const raw = passage.text.slice(sentence.index, sentence.index + sentence[0].length).trim();
+      const searchable = sentence[0].trim();
+      const add = (measure, value, unit = null, qualifier = null, uncertain = false) => {
+        measure = measure.trim().replace(/[\s,;:.]+$/, "");
+        if (!measure || !/[\p{L}]/u.test(measure)) return;
+        if (raw.length > LIMITS.quote) throw new ContractError("quote_limit", "A matched sentence exceeds the 2,048-character evidence limit. Paste a smaller section.");
+        const key = canonical([measure, value, unit, qualifier, sentence.index]);
+        if (seen.has(key)) return;
+        seen.add(key);
+        if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 suggested facts. Paste a smaller section; nothing was silently truncated.");
+        const id = "row-" + (records.length + 1);
+        const local = passage.text.indexOf(raw, sentence.index);
+        let occurrence = 0, found = passage.text.indexOf(raw);
+        while (found >= 0 && found < local) {
+          occurrence++;
+          found = passage.text.indexOf(raw, found + 1);
+        }
+        const evidence = [{ passage_id: passage.id, quote: raw, occurrence }];
+        const field = (v) => ({ value: v, evidence: v === null ? [] : evidence });
+        const candidate = { id, fields: { measure: field(measure), value: field(value), unit: field(unit), qualifier: field(qualifier) } };
+        if (flags.test(searchable) || uncertain)
+          candidate.issues = ["This sentence contains uncertainty, correction, negation or a percentage outside 0\u2013100. Inspect the context and explicitly correct the candidate before approval."];
+        records.push(candidate);
+        ids.push(id);
+      };
+      const based = new RegExp("(?<![\\w.,-])(?:(" + qualifiers + ")\\s+)?(" + number + ")\\s*(percent|%)\\s+(?:based on|of)\\s+([^.;!?]+?)(?=\\s+(?:and|or)\\s+(?:(?:" + qualifiers + ")\\s+)?" + number + "\\s*(?:percent|%)|[.;!?]|$)", "gi");
+      let rateFound = false;
+      for (const m of searchable.matchAll(based)) {
+        add(m[4], Number(m[2]), m[3], m[1] || null, Number(m[2]) < 0 || Number(m[2]) > 100);
+        rateFound = true;
+      }
+      const percentCount = [...searchable.matchAll(new RegExp(number + "\\s*(?:percent|%)", "gi"))].length;
+      if (!rateFound && percentCount === 1) {
+        const m = searchable.match(new RegExp("^(.{1,180}?)\\s*(?::\\s*|\\s+(?:was|were|is|are|reached|totaled|at)\\s+)(?:(" + qualifiers + ")\\s+)?(" + number + ")\\s*(percent|%)\\.?$", "i"));
+        if (m) add(m[1], Number(m[3]), m[4], m[2] || null, Number(m[3]) < 0 || Number(m[3]) > 100);
+      }
+      const count = new RegExp("(?<![\\w.,-])(?:(" + qualifiers + ")\\s+)?(" + number + ")\\s+(" + counts + ")\\b", "gi");
+      for (const m of searchable.matchAll(count)) add(m[3], Number(m[2]), m[3], m[1] || null);
+    }
+    if (!ids.length) {
+      const pairPacket = { ...packet, passages: [passage], schema: { fields: [
+        { name: "measure", type: "string", required: true },
+        { name: "value", type: "number", required: true }
+      ] } };
+      for (const r of extractTextRules(pairPacket).records) {
+        if (Object.values(r.fields).some((f) => f.evidence.some((e) => /https?:\/\//i.test(e.quote)))) continue;
+        if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 suggestions. Paste a smaller section.");
+        r.id = "row-" + (records.length + 1);
+        r.fields.unit = { value: null, evidence: [] };
+        r.fields.qualifier = { value: null, evidence: [] };
+        records.push(r);
+        ids.push(r.id);
+      }
+    }
+    outcomes.push({
+      passage_id: passage.id,
+      status: ids.length ? "records" : "no_result",
+      record_ids: ids,
+      reason: ids.length ? "Suggested explicit rates, count quantities or name/number pairs. Other information in this paragraph may be unrecognized; this is not a complete interpretation." : "No supported quantitative relationship was recognized. The text is retained. Add a candidate manually; arbitrary prose understanding is not enabled."
     });
   }
   return { version: "candidates-v1", records, outcomes };
@@ -853,14 +938,14 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 *{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17283c;font:16px system-ui,sans-serif}main{max-width:1320px;margin:auto;padding:32px 22px 60px}h1{font-size:clamp(30px,5vw,46px);margin:14px 0}h2{font-size:22px;margin:0 0 16px}h3{font-size:18px}p{line-height:1.55}a{color:#18568b}button,select,input,textarea{font:inherit}button{border:1px solid #173b59;border-radius:8px;background:#173b59;color:#fff;padding:11px 16px;cursor:pointer}button.secondary{background:#fff;color:#173b59}button:disabled{opacity:.5;cursor:not-allowed}input,select,textarea{border:1px solid #8596a8;border-radius:8px;padding:10px;max-width:100%;background:white;color:inherit}input,textarea{width:100%}textarea{min-height:80px;resize:vertical}label{display:block;font-weight:600;margin:12px 0 6px}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.hint{font-size:14px;color:#47607a}.badge{display:inline-block;border-radius:5px;background:#e1efeb;color:#225647;padding:5px 9px;font-size:13px;font-weight:600}.card{background:white;border:1px solid #d7dfe6;border-radius:12px;padding:20px}.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:20px;align-items:start}.passage{border-left:3px solid #d7dfe6;padding:0 0 0 14px;margin:18px 0;overflow-wrap:anywhere}.passage.focused{border-color:#bc6b10}mark{background:#ffe7b8;color:#17283c}blockquote{margin:12px 0;padding:12px;background:#f4f6f8;border-left:3px solid #8596a8;overflow-wrap:anywhere}ul,ol{padding-left:22px}li{margin:8px 0;line-height:1.5}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:10px;border-bottom:1px solid #e7edf2;vertical-align:top}td button.value{padding:6px 8px;background:white;color:#173b59;border:1px solid #b5c7d4;min-width:72px;overflow-wrap:anywhere;max-width:230px}td button.value[aria-pressed=true]{background:#e7eff7;border:2px solid #18568b}.status{font-size:13px;white-space:nowrap}.status.approved{color:#17634b}.status.rejected{color:#9b3228}.findings{background:#fff6e6;border-radius:8px;padding:12px}.check{display:flex;align-items:flex-start;gap:10px;font-weight:400}.check input{width:auto;margin-top:5px}.hash{font-family:monospace;overflow-wrap:anywhere;font-size:12px}#status{min-height:26px}#workspace{margin-top:20px}#history{overflow-wrap:anywhere}details{margin:14px 0}summary{cursor:pointer}footer{margin-top:24px}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #bc6b10;outline-offset:3px}[hidden]{display:none!important}@media(max-width:800px){.grid{grid-template-columns:1fr}.card{padding:16px}main{padding:22px 14px}.bar select{width:100%}th,td{padding:8px}}
 </style><script src="/interpretation-client.js" defer><\/script></head><body><main>
 <a href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><span class="badge">Pasted text and examples \xB7 No AI calls</span>
-<p>Compare proposed values with their source passages before deciding what to accept. Paste your text for a limited name/number parser, or use a fictional example. This is not general language understanding.</p>
-<section class="card"><h2>Use your own text</h2><p class="hint">Supported: \u201CAlpha scored 98.6.\u201D or \u201CAlpha: 98.6\u201D, one pair per line or sentence. Other wording may produce no candidates. You can add or correct candidates manually. No useful data is assumed absent just because the parser finds no match.</p>
-<form id="custom-input"><label for="source-text">Paste source text</label><textarea id="source-text" required maxlength="16000" placeholder="Paste your text here when ready. Maximum 16,000 characters and 32 paragraphs."></textarea><label for="source-url">Source URL (optional attribution, never fetched)</label><input id="source-url" type="url" placeholder="https://example.org/article"><div class="bar"><div><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div><div><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div></div><p class="hint">Two columns for this first parser: text, then number. Use lowercase names with underscores. Numbers are signed, ungrouped decimals. No score range is assumed.</p><button id="extract" type="submit">Extract pasted text</button></form></section>
+<p>Compare proposed values with their source passages before deciding what to accept. Paste your text for suggested quantitative records and columns, or use a fictional example. This is not general language understanding.</p>
+<section class="card"><h2>Use your own text</h2><p class="hint">Paste ordinary prose as written. Start with automatic suggestions\u2014no column names or special formatting needed. It recognizes some explicit percentages, counts and name/number pairs. Review the suggested preview; other facts may remain unrecognized. You can add or correct records manually.</p>
+<form id="custom-input"><label for="source-text">Paste source text</label><textarea id="source-text" required maxlength="16000" placeholder="Paste your text here when ready. Maximum 16,000 characters and 32 paragraphs."></textarea><label for="source-url">Source URL (optional attribution, never fetched)</label><input id="source-url" type="url" placeholder="https://example.org/article"><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Suggest columns and facts from prose</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><div class="bar"><div><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div><div><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div></div><p class="hint">Two columns for this first parser: text, then number. Use lowercase names with underscores. Numbers are signed, ungrouped decimals. No score range is assumed.</p></fieldset><button id="extract" type="submit">Preview suggested records</button></form></section>
 <div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load">Load example</button></div>
 <p class="hint">Session only: extracting new text, loading another example or reloading this page clears the current review. Download diagnostic JSON to retain the evidence and history. Reviewer names are self-declared; this is not an authenticated audit service.</p>
 <p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
-<section id="workspace" hidden><div class="bar"><strong id="counts"></strong><button id="revalidate" class="secondary">Revalidate evidence</button></div><p class="hint">Literal matches do not prove that a score belongs to a name. No record is approved automatically.</p>
-<div class="grid"><section class="card" aria-labelledby="source-title"><h2 id="source-title">Source passages</h2><p id="source-info" class="hint"></p><div id="passages"></div><details><summary>Source integrity</summary><p class="hint">Offsets refer to the retained text in UTF-16 code units, start inclusive and end exclusive.</p><p id="source-hash" class="hash"></p></details></section>
+<section id="workspace" hidden><div class="bar"><strong id="counts"></strong><button id="revalidate" class="secondary">Revalidate evidence</button></div><p class="hint">Literal matches do not prove that a value belongs to a measure. No record is approved automatically.</p>
+<p id="interpretation-summary" class="hint"></p><div class="grid"><section class="card" aria-labelledby="source-title"><h2 id="source-title">Source passages</h2><p id="source-info" class="hint"></p><div id="passages"></div><details><summary>Source integrity</summary><p class="hint">Offsets refer to the retained text in UTF-16 code units, start inclusive and end exclusive.</p><p id="source-hash" class="hash"></p></details></section>
 <section class="card" aria-labelledby="candidates-title"><h2 id="candidates-title">Proposed records</h2><p class="hint">Click a value to inspect its evidence. Selecting a different record clears the review note and confirmation.</p><div class="scroll"><table><caption class="hint">Candidates in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
 <h3 id="field-title"></h3><div id="evidence"></div><div id="findings" class="findings"></div>
 <form id="review"><h3 id="review-title">Review selected record</h3><p id="approval-note" class="hint"></p><label for="reviewer">Reviewer name</label><input id="reviewer" required maxlength="80" autocomplete="off"><label for="note">Review note</label><textarea id="note" required maxlength="1000" placeholder="Explain your decision using the source passages."></textarea><label class="check"><input type="checkbox" id="confirm"><span>I compared the proposed values with the source and explicitly confirm their association.</span></label><div class="bar"><button id="approve" data-decision="approved" type="submit">Approve</button><button id="reject" data-decision="rejected" class="secondary" type="submit">Reject</button><button id="pending" data-decision="needs_review" class="secondary" type="submit">Leave pending</button></div></form><details id="correction-panel"><summary>Correct selected candidate or add a record</summary><p class="hint">Provide each value and an exact supporting quotation. Choose the paragraph and occurrence (0 means first match). No changes are approved automatically. Saving a revision resets all current approvals; earlier decisions remain in the revision history.</p><button id="edit-selected" type="button" class="secondary">Edit selected record</button> <button id="add-record" type="button" class="secondary">Add a record</button><form id="correction-form"><h3 id="correction-title">Correct candidate</h3><div id="correction-fields"></div><label for="correction-note">Reason for correction or addition</label><textarea id="correction-note" required maxlength="1000"></textarea><p class="hint">Uses the reviewer name above. Every changed candidate must pass evidence checks and be reviewed again.</p><button id="save-correction" type="submit">Save candidate and revalidate</button></form></details></section></div>
@@ -902,7 +987,9 @@ var lab_client_default = `"use strict";
     return blockers(row).length > 0;
   }
   function controls() {
-    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column"]) $(id).disabled = state.busy;
+    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode"]) $(id).disabled = state.busy;
+    $("manual-columns").disabled = state.busy || $("text-mode").value !== "pair";
+    $("manual-columns").hidden = $("text-mode").value !== "pair";
     for (const id of [
       "revalidate",
       "approved-csv",
@@ -1147,6 +1234,7 @@ var lab_client_default = `"use strict";
       state.rowId = state.view.validation.records[0]?.id;
       state.field = state.view.job.packet.schema.fields[0]?.name;
     }
+    $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
     $("counts").textContent =
       c.candidates +
@@ -1212,7 +1300,7 @@ var lab_client_default = `"use strict";
       const field = row?.fields[f.name], first = field?.evidence[0];
       const valueLabel = text("label", f.name + " value");
       const value = document.createElement("input");
-      value.dataset.part = "value"; value.required = true;
+      value.dataset.part = "value"; value.required = f.required;
       value.type = f.type === "number" ? "number" : "text";
       if (f.type === "number") value.step = "any";
       value.value = field?.value ?? "";
@@ -1227,7 +1315,7 @@ var lab_client_default = `"use strict";
       passageLabel.append(passage);
       const quoteLabel = text("label", "Exact quotation");
       const quote = document.createElement("textarea"); quote.dataset.part = "quote";
-      quote.required = true; quote.maxLength = 2048; quote.value = first?.quote || "";
+      quote.required = f.required; quote.maxLength = 2048; quote.value = first?.quote || "";
       quoteLabel.append(quote);
       const occurrenceLabel = text("label", "Quotation occurrence (zero-based)");
       const occurrence = document.createElement("input"); occurrence.type = "number"; occurrence.min = "0";
@@ -1241,20 +1329,22 @@ var lab_client_default = `"use strict";
   }
   $("edit-selected").onclick = () => editCandidate();
   $("add-record").onclick = () => editCandidate(true);
+  $("text-mode").onchange = controls;
   $("custom-input").onsubmit = (event) => {
     event.preventDefault();
     perform(async () => {
       const response = await request("/api/interpretation/start", {
         example_id: "custom-text",
         source: { text: $("source-text").value, url: $("source-url").value.trim() || null },
-        schema: { fields: [
+        mode: $("text-mode").value,
+        ...($("text-mode").value === "pair" ? { schema: { fields: [
           { name: $("name-column").value.trim(), type: "string", required: true },
           { name: $("number-column").value.trim(), type: "number", required: true },
-        ] },
+        ] } } : {}),
       });
       state.view = await response.json(); state.rowId = null; state.field = null;
       clearDecision(); render(); editCandidate();
-      say("Parsed your supplied text with limited name/number rules. No AI calls. Review each candidate; unmatched paragraphs remain visible.");
+      say("Parsed your supplied text. Preview the suggested columns and records below. No AI calls. Unmatched text remains visible.");
     });
   };
   $("correction-form").onsubmit = (event) => {
@@ -1265,8 +1355,9 @@ var lab_client_default = `"use strict";
       for (const section of document.querySelectorAll("#correction-fields section")) {
         const field = state.view.job.packet.schema.fields.find(f => f.name === section.dataset.column);
         const part = key => section.querySelector('[data-part="' + key + '"]').value;
-        fields[field.name] = { value: field.type === "number" ? Number(part("value")) : part("value"),
-          evidence: [{ passage_id: part("passage"), quote: part("quote"), occurrence: Number(part("occurrence")) }] };
+        const empty = !field.required && !part("value").trim();
+        fields[field.name] = { value: empty ? null : field.type === "number" ? Number(part("value")) : part("value"),
+          evidence: empty ? [] : [{ passage_id: part("passage"), quote: part("quote"), occurrence: Number(part("occurrence")) }] };
       }
       const response = await request("/api/interpretation/action", { action: "correct", job: state.view.job,
         correction: { record_id: state.editingId, fields, reviewer: $("reviewer").value.trim(), note: $("correction-note").value.trim() } });
@@ -1511,14 +1602,19 @@ function applyCorrection(packet, response, change) {
   });
   return next;
 }
+function originalResponse(job) {
+  if (job.example_id !== "custom-text") return examples[job.example_id].scripted_response;
+  if (job.parser_version === "name-number-v1") return extractTextRules(job.packet);
+  if (job.parser_version === PROSE_VERSION) return extractProseRules(job.packet);
+  fail("parser_version", "Unsupported text parser version.");
+}
 async function checkJob(job) {
   if (!only(job, ["example_id", "packet", "cache_entry", "events", "revisions", "parser_version"]) || !Array.isArray(job.events) || job.events.length > 64 || job.revisions !== void 0 && (!Array.isArray(job.revisions) || job.revisions.length > 8))
     fail("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
   await revalidate(job.packet, job.cache_entry);
   let response;
   if (job.example_id === "custom-text") {
-    if (job.parser_version !== "name-number-v1") fail("parser_version", "Unsupported text parser version.");
-    response = extractTextRules(job.packet);
+    response = originalResponse(job);
   } else {
     if (!Object.hasOwn(examples, job.example_id)) fail("invalid_lab_job", "Unknown example.");
     const fixture = examples[job.example_id];
@@ -1546,6 +1642,11 @@ function view(job, result) {
       approved: records.filter((r) => r.review_status === "approved").length,
       rejected: records.filter((r) => r.review_status === "rejected").length,
       pending: records.filter((r) => r.review_status === "needs_review").length
+    },
+    interpretation: {
+      method: job.parser_version || "fictional-scripted-example",
+      columns: job.packet.schema.fields.map((f) => f.name),
+      explanation: job.parser_version === PROSE_VERSION ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
     },
     notice: "Rule-based or scripted candidates, with optional human corrections. No AI inference. Session-only, self-declared review; not an authenticated audit service."
   };
@@ -1593,9 +1694,12 @@ async function labFetch(request) {
     if (url.pathname === "/api/interpretation/start") {
       let packet, response;
       if (body?.example_id === "custom-text") {
-        if (!only(body, ["example_id", "source", "schema"])) fail("invalid_input", "Send source text and two requested columns.");
-        packet = await createPacket({ source: body.source, schema: body.schema });
-        response = extractTextRules(packet);
+        if (!only(body, ["example_id", "source", "schema", "mode"]) || body.mode !== void 0 && !["auto", "pair"].includes(body.mode))
+          fail("invalid_input", "Choose automatic suggestions or manual pair columns.");
+        if (body.mode === "auto" && body.schema !== void 0)
+          fail("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
+        packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? PROSE_SCHEMA : body.schema });
+        response = body.mode === "auto" ? extractProseRules(packet) : extractTextRules(packet);
       } else {
         if (!only(body, ["example_id"]) || !Object.hasOwn(examples, body.example_id))
           fail("unknown_example", "Choose an example or paste your own text.");
@@ -1613,7 +1717,7 @@ async function labFetch(request) {
         cache_entry: run.cache_entry,
         events: [],
         revisions: [],
-        ...body.example_id === "custom-text" ? { parser_version: "name-number-v1" } : {}
+        ...body.example_id === "custom-text" ? { parser_version: body.mode === "auto" ? PROSE_VERSION : "name-number-v1" } : {}
       };
       return reply(view(job, await checkJob(job)));
     }
@@ -1664,8 +1768,8 @@ async function labFetch(request) {
       { approvedOnly: !body.diagnostic }
     );
     exported.json.candidate_revision_history = body.job.revisions || [];
-    exported.json.original_candidates = body.job.example_id === "custom-text" ? extractTextRules(body.job.packet) : examples[body.job.example_id].scripted_response;
-    exported.json.method = body.job.example_id === "custom-text" ? "name-number-v1" : "fictional-scripted-example";
+    exported.json.original_candidates = originalResponse(body.job);
+    exported.json.method = body.job.parser_version || "fictional-scripted-example";
     exported.json.notice = "Limited rules or scripted examples, with optional human corrections. No AI inference. Original automated findings are retained separately from human review.";
     const prefix = body.diagnostic ? "interpretation-diagnostic" : "interpretation-approved";
     return new Response(

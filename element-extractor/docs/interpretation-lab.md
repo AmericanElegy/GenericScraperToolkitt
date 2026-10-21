@@ -2,11 +2,23 @@
 
 Start with `npm.cmd run dev` in PowerShell, then open **Open the offline Interpretation Lab** on the toolkit home page (`/interpretation`). The local server must be restarted after a code update. Nothing is deployed automatically. The isolated [Windows launcher](windows-launcher.md) downloads the latest feature branch into a separate folder and verifies startup.
 
-## Pasted text
+## Automatic suggestions (default)
+
+Paste prose unchanged, leave **Suggest columns and facts from prose** selected, and click **Preview suggested records**. No column names or special input formatting are needed. Manual column inputs are hidden and disabled in this mode, so they cannot trigger a browser pattern-validation error.
+
+The `prose-facts-v1` offline interpreter suggests four columns: `measure` (text), `value` (number), `unit` (optional text), and `qualifier` (optional text). It recognizes explicit rates followed by “based on” or “of” labels, simple percentage statements, selected count nouns and simple name/number pairs. These are generic quantitative rules, not a BLS-only adapter or general language understanding. It does not summarize definitions, infer missing relationships, interpret arbitrary text-only facts or guarantee complete coverage. The preview explains the method, and every paragraph stays visible.
+
+For the supplied OEWS passage, suggestions include establishments / 66.2 / percent, weighted sampled employment / 67.2 / percent, areas / 530 / areas / over, and states / 50 / states. The original sentence remains the evidence; “over 530” is not turned into an exact count. Bare years, NAICS classification digits and URL target numbers are not treated as facts. Units and qualifiers preserve literal source spelling; there is no unit conversion. Different measures may have different contexts, so inspect the quotation before treating them as comparable.
+
+Automatic suggestions are always pending. Negation/correction/uncertainty keywords and percentages outside 0–100 create blocking findings. These keyword checks are incomplete; even a clean literal match requires human association review. Ambiguous unsupported clauses may produce no candidates instead of a guess. Optional blank unit/qualifier values are allowed when correcting a record. No-result and partial matches are not proof that all information has been extracted.
+
+## Manual pair mode
+
+Choose **Manual name/number column names** if you want to specify a two-column schema for the original narrow parser.
 
 1. Paste your passage into **Use your own text**. The optional HTTPS URL is attribution only; it is never fetched. The pasted text, rather than the URL, is the source snapshot.
-2. Set two requested column names: one text field, then one numeric field. Defaults are `entity_name` and `score`. Use distinct lowercase identifiers with underscores. The core validator supports other schemas, but this first rule parser is limited to this pair.
-3. Click **Extract pasted text**. The `name-number-v1` grammar supports simple lines/sentences such as `Alpha scored 98.6.`, `Alpha received a score of 98.6.` or `Alpha: 98.6`. It accepts signed, ungrouped decimals; there is no assumed 0–100 range. It does not infer arbitrary relationships or handle all natural-language wording. Sentence splitting is basic; abbreviations and complex clauses may need manual correction.
+2. Set two requested column names: one text field, then one numeric field. Defaults are `entity_name` and `score`. Use distinct lowercase identifiers with underscores. The core validator supports other schemas, but manual pair mode is limited to this pair.
+3. Click **Preview suggested records**. The `name-number-v1` grammar supports simple lines/sentences such as `Alpha scored 98.6.`, `Alpha received a score of 98.6.` or `Alpha: 98.6`. It accepts signed, ungrouped decimals; there is no assumed 0–100 range. It does not infer arbitrary relationships or handle all natural-language wording. Sentence splitting is basic; abbreviations and complex clauses may need manual correction.
 4. Inspect every candidate against its highlighted exact quotation. Every candidate starts pending. Paragraphs without a supported match stay visible with an explicit no-result explanation; that is not proof of absent data. Keywords for correction, negation or uncertainty block rule candidates in that paragraph, but this heuristic is not complete semantic analysis.
 5. Enter reviewer name, note and source confirmation to approve a clean candidate. The button explains missing steps and displays **Already approved** after success.
 6. Download approved CSV/JSON or diagnostic JSON. Approved exports omit rejected/pending records. Diagnostic JSON retains all current statuses and failed evidence.
@@ -42,11 +54,12 @@ Both JSON export types contain the full source snapshot, passage outcomes and or
 
 ## Developer entry points
 
+- `src/interpretation/prose-rules.js`: versioned automatic quantitative suggestions and schema.
 - `src/interpretation/text-rules.js`: bounded `name-number-v1` grammar. Change its version when changing replay semantics.
 - `src/interpretation/lab-api.js`: stateless source/fixture handling, correction replay, independent validation/review/export.
 - `src/interpretation/lab-page.js` and `lab-client.txt`: UI; `.txt` is a source JavaScript text module.
 - `GET /interpretation`, `GET /interpretation-client.js`.
-- `POST /api/interpretation/start`: `{example_id:"scores-and-correction"}` (also `missing-evidence`, `ambiguous-association`), or `{example_id:"custom-text",source:{text,url:null},schema:{fields:[{name:"entity_name",type:"string",required:true},{name:"score",type:"number",required:true}]}}`.
+- `POST /api/interpretation/start`: automatic mode uses `{example_id:"custom-text",mode:"auto",source:{text,url:null}}` without a client schema. Manual mode uses `mode:"pair"` plus a two-column schema (omitting mode preserves older clients). Examples use `{example_id:"scores-and-correction"}` (also `missing-evidence`, `ambiguous-association`), or `{example_id:"custom-text",source:{text,url:null},schema:{fields:[{name:"entity_name",type:"string",required:true},{name:"score",type:"number",required:true}]}}`.
 - `POST /api/interpretation/action`: returned job plus `action`: `revalidate`, `review`, `correct`, `export`. Review needs `decision`; correction needs `{record_id:null|id,fields,reviewer,note}`. Null adds a record; supplied field evidence uses the core quotation contract. Export needs `format:"csv"|"json"` and optional `diagnostic:true`.
 
-`npm test` exercises the backend in workerd, including custom rules, no-result accounting, correction/review history, tampering and approval guards. `npm run check:lab-browser` checks real browser paste, manual addition, correction, approval, exports, inert markup, mobile layout and session reset. Chromium is required (optional `CHROMIUM_PATH`); the browser test temporarily uses ports 8794 and 9225. `npm run check:browser` covers the separate table UI. `npm run check` is a Wrangler deployment dry run; none of these commands deploys.
+`npm test` exercises the backend in workerd, including the full BLS prose fixture, automatic schema suggestions, units/qualifiers, URL/year exclusion, custom rules, no-result accounting, correction/review history, tampering and approval guards. `npm run check:lab-browser` checks real browser paste, manual addition, correction, approval, exports, inert markup, mobile layout and session reset. Chromium is required (optional `CHROMIUM_PATH`); the browser test temporarily uses ports 8794 and 9225. `npm run check:browser` covers the separate table UI. `npm run check` is a Wrangler deployment dry run; none of these commands deploys.

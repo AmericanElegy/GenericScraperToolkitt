@@ -333,3 +333,58 @@ test('unmatched pasted text permits a manually supplied candidate with exact evi
     assert.equal((await result.json()).counts.approved, 1);
   } finally { await mf.dispose(); }
 });
+
+const autoText = (mf, text) => post(mf, '/api/interpretation/start', { example_id: 'custom-text', mode: 'auto', source: { text, url: null } });
+test('automatic prose mode suggests columns for the full BLS passage and preserves associations, units and qualifiers', async () => {
+  const { mf, calls } = await setup();
+  try {
+    const text = await readFile(new URL('./fixtures/bls-oews-passage.txt', import.meta.url), 'utf8');
+    const response = await autoText(mf, text);
+    assert.equal(response.status, 200);
+    let value = await response.json();
+    assert.deepEqual(value.interpretation.columns, ['measure', 'value', 'unit', 'qualifier']);
+    const rows = value.validation.records;
+    assert.equal(rows.length, 4);
+    const establishments = rows.find(r => r.fields.measure.value === 'establishments');
+    const employment = rows.find(r => r.fields.measure.value === 'weighted sampled employment');
+    assert.equal(establishments.fields.value.value, 66.2);
+    assert.equal(employment.fields.value.value, 67.2);
+    assert.equal(employment.fields.unit.value, 'percent');
+    const areas = rows.find(r => r.fields.measure.value === 'areas');
+    assert.equal(areas.fields.value.value, 530);
+    assert.equal(areas.fields.qualifier.value, 'over');
+    assert.ok(!rows.some(r => [2025, 3, 4, 5, 6].includes(r.fields.value.value)));
+    for (const r of rows) for (const f of Object.values(r.fields)) {
+      assert.equal(f.issues.length, 0);
+      for (const e of f.evidence) assert.equal(value.job.packet.source.text.slice(e.source_start, e.source_end), e.quote);
+    }
+    value = await (await action(mf, value.job, 'review', { decision: { ...decision, record_id: establishments.id } })).json();
+    assert.equal(value.counts.approved, 1);
+    assert.equal((await action(mf, value.job, 'revalidate')).status, 200);
+    const exported = await (await action(mf, value.job, 'export', { format: 'json' })).json();
+    assert.equal(exported.method, 'prose-facts-v1');
+    assert.equal(exported.original_candidates.records.length, 4);
+    assert.equal(exported.validation.records.length, 1);
+    assert.equal(exported.validation.records[0].fields.measure.value, 'establishments');
+    assert.equal(calls(), 0);
+  } finally { await mf.dispose(); }
+});
+test('automatic prose mode keeps uncertainty, unsupported text and numbers in URLs distinct from accepted facts', async () => {
+  const { mf } = await setup();
+  try {
+    let value = await (await autoText(mf, 'Participation was about 20 percent.\n\nThere were over 530 areas.\n\nNo quantitative claims here. See https://example.org/2025/999-workers.')).json();
+    assert.equal(value.counts.candidates, 2);
+    assert.equal(value.validation.records[0].fields.qualifier.value, 'about');
+    assert.equal(value.validation.outcomes[2].status, 'no_result');
+    value = await (await autoText(mf, 'Previously participation was 20 percent.')).json();
+    assert.equal(value.validation.records.length, 1);
+    assert.ok(value.validation.records[0].issues.some(i => i.code === 'interpreter_flag'));
+    value = await (await autoText(mf, 'Participation was 120 percent.')).json();
+    assert.equal(value.validation.records.length, 1);
+    assert.equal((await action(mf, value.job, 'review', { decision })).status, 400);
+    value = await (await autoText(mf, 'A was 20 percent and B was 30 percent.')).json();
+    assert.equal(value.counts.candidates, 0);
+    assert.equal((await autoText(mf, 'Alpha: 1')).status, 200);
+    assert.equal((await (await autoText(mf, 'See https://example.org/Alpha:98.6')).json()).counts.candidates, 0);
+  } finally { await mf.dispose(); }
+});

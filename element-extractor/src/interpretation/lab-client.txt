@@ -31,7 +31,9 @@
     return blockers(row).length > 0;
   }
   function controls() {
-    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column"]) $(id).disabled = state.busy;
+    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode"]) $(id).disabled = state.busy;
+    $("manual-columns").disabled = state.busy || $("text-mode").value !== "pair";
+    $("manual-columns").hidden = $("text-mode").value !== "pair";
     for (const id of [
       "revalidate",
       "approved-csv",
@@ -276,6 +278,7 @@
       state.rowId = state.view.validation.records[0]?.id;
       state.field = state.view.job.packet.schema.fields[0]?.name;
     }
+    $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
     $("counts").textContent =
       c.candidates +
@@ -341,7 +344,7 @@
       const field = row?.fields[f.name], first = field?.evidence[0];
       const valueLabel = text("label", f.name + " value");
       const value = document.createElement("input");
-      value.dataset.part = "value"; value.required = true;
+      value.dataset.part = "value"; value.required = f.required;
       value.type = f.type === "number" ? "number" : "text";
       if (f.type === "number") value.step = "any";
       value.value = field?.value ?? "";
@@ -356,7 +359,7 @@
       passageLabel.append(passage);
       const quoteLabel = text("label", "Exact quotation");
       const quote = document.createElement("textarea"); quote.dataset.part = "quote";
-      quote.required = true; quote.maxLength = 2048; quote.value = first?.quote || "";
+      quote.required = f.required; quote.maxLength = 2048; quote.value = first?.quote || "";
       quoteLabel.append(quote);
       const occurrenceLabel = text("label", "Quotation occurrence (zero-based)");
       const occurrence = document.createElement("input"); occurrence.type = "number"; occurrence.min = "0";
@@ -370,20 +373,22 @@
   }
   $("edit-selected").onclick = () => editCandidate();
   $("add-record").onclick = () => editCandidate(true);
+  $("text-mode").onchange = controls;
   $("custom-input").onsubmit = (event) => {
     event.preventDefault();
     perform(async () => {
       const response = await request("/api/interpretation/start", {
         example_id: "custom-text",
         source: { text: $("source-text").value, url: $("source-url").value.trim() || null },
-        schema: { fields: [
+        mode: $("text-mode").value,
+        ...($("text-mode").value === "pair" ? { schema: { fields: [
           { name: $("name-column").value.trim(), type: "string", required: true },
           { name: $("number-column").value.trim(), type: "number", required: true },
-        ] },
+        ] } } : {}),
       });
       state.view = await response.json(); state.rowId = null; state.field = null;
       clearDecision(); render(); editCandidate();
-      say("Parsed your supplied text with limited name/number rules. No AI calls. Review each candidate; unmatched paragraphs remain visible.");
+      say("Parsed your supplied text. Preview the suggested columns and records below. No AI calls. Unmatched text remains visible.");
     });
   };
   $("correction-form").onsubmit = (event) => {
@@ -394,8 +399,9 @@
       for (const section of document.querySelectorAll("#correction-fields section")) {
         const field = state.view.job.packet.schema.fields.find(f => f.name === section.dataset.column);
         const part = key => section.querySelector('[data-part="' + key + '"]').value;
-        fields[field.name] = { value: field.type === "number" ? Number(part("value")) : part("value"),
-          evidence: [{ passage_id: part("passage"), quote: part("quote"), occurrence: Number(part("occurrence")) }] };
+        const empty = !field.required && !part("value").trim();
+        fields[field.name] = { value: empty ? null : field.type === "number" ? Number(part("value")) : part("value"),
+          evidence: empty ? [] : [{ passage_id: part("passage"), quote: part("quote"), occurrence: Number(part("occurrence")) }] };
       }
       const response = await request("/api/interpretation/action", { action: "correct", job: state.view.job,
         correction: { record_id: state.editingId, fields, reviewer: $("reviewer").value.trim(), note: $("correction-note").value.trim() } });
