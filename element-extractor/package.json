@@ -9,13 +9,14 @@
     "check": "wrangler deploy --dry-run",
     "dev:wrangler": "wrangler dev",
     "test:live": "node scripts/verify-live.mjs",
-    "build": "esbuild src/worker.js --bundle --format=esm --platform=browser --outfile=worker-code.txt",
+    "build": "esbuild src/worker.js --bundle --format=esm --platform=browser --loader:.txt=text --outfile=worker-code.txt",
     "pretest": "npm run build",
     "predev": "npm run build",
     "pretest:live": "npm run build",
     "check:browser": "npm run build && node scripts/check-browser.mjs",
     "interpretation:demo": "node scripts/interpret.mjs demo",
-    "interpretation": "node scripts/interpret.mjs"
+    "interpretation": "node scripts/interpret.mjs",
+    "check:lab-browser": "npm run build && node scripts/check-lab-browser.mjs"
   },
   "repository": {
     "type": "git",

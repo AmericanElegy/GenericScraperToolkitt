@@ -1,3 +1,4 @@
+import { labFetch } from './interpretation/lab-api.js';
 import { decodeHTML } from 'entities';
 
 const SOURCE = 'https://en.wikipedia.org/wiki/List_of_chemical_elements';
@@ -337,6 +338,7 @@ async function tablesAPI(request, url) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (['/interpretation','/interpretation-client.js','/api/interpretation/start','/api/interpretation/action'].includes(url.pathname)) return labFetch(request);
     if (url.pathname === '/api/tables') return tablesAPI(request, url);
     if (request.method !== 'GET') return new Response('Method not allowed', {status:405, headers:{Allow:'GET'}});
     if (url.pathname === '/example') return new Response(PAGE, {headers:{...SECURITY, 'Content-Type':'text/html; charset=utf-8'}});
@@ -375,6 +377,7 @@ const PAGE = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="v
 const TABLE_PAGE = String.raw`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Table Toolkit</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17283c;font:16px system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 22px}h1{font-size:clamp(30px,5vw,48px);margin:12px 0}p{line-height:1.6}a{color:#18568b}.bar{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}input,select{padding:12px;border:1px solid #8596a8;border-radius:8px;font:inherit;max-width:100%}input{flex:1;min-width:200px}button,.button{padding:12px 18px;border:0;border-radius:8px;background:#173b59;color:white;font:inherit;cursor:pointer;text-decoration:none}button:disabled{opacity:.5;cursor:wait}label{display:block;font-weight:600;margin:12px 0 6px}.hint,footer{font-size:14px;color:#47607a}#status{min-height:28px}#wrap{overflow:auto;background:white;border:1px solid #d7dfe6;border-radius:10px;max-height:65vh}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:12px 16px;border-bottom:1px solid #e7edf2;max-width:420px;overflow-wrap:anywhere;min-width:100px}th{background:#e8eff5;position:sticky;top:0}footer{margin-top:28px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #bc6b10;outline-offset:3px}[hidden]{display:none!important}</style></head>
 <body><main><h1>Web Table Toolkit</h1><p>Turn tables on public webpages into searchable data. Preview a table, then download CSV or JSON.</p>
+<p><a href="/interpretation">Open the offline Interpretation Lab</a></p>
 <form id="extract"><label for="url">Public webpage URL</label><div class="bar"><input id="url" type="url" maxlength="2048" required placeholder="https://www.w3schools.com/html/html_tables.asp"><button id="submit" type="submit">Find tables</button></div></form>
 <p class="hint">Public HTTPS pages only. HTML tables, accessible grids, or supported score grids must be present in the page source. Images require OCR, which is not enabled. Maximum 2 MiB, 20 tables, and 5,000 total rows. Complex tables are marked unsupported.</p>
 <p><button id="try" type="button">Try a sample table</button> <a href="/example">Open the validated 118-element example</a></p>

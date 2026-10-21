@@ -8,7 +8,7 @@ This is a fresh standalone implementation informed by the user's read-only Fanta
 
 `supplied text → bounded passages → requested schema → scripted candidates → independent validation → human review → export`
 
-The script returns prewritten candidates. **It does not understand arbitrary prose, call an AI service, or fetch the attributed URL.** This is the offline contract and test harness for a later interpretation adapter. Website-to-article extraction, OCR, JavaScript execution and paid inference remain disabled/unimplemented. The web table UI and deployed Worker are unchanged.
+The script returns prewritten candidates. **It does not understand arbitrary prose, call an AI service, or fetch the attributed URL.** This is the offline contract and test harness for a later interpretation adapter. Website-to-article extraction, OCR, JavaScript execution and paid inference remain disabled/unimplemented. A separate browser [Interpretation Lab](interpretation-lab.md) now exposes built-in fictional fixtures and session-only review/export controls. Custom text still uses this scripted CLI; no arbitrary prose interpretation is enabled. The public Worker is not deployed automatically.
 
 ## Inputs, limits, and provenance
 

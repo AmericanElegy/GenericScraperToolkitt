@@ -1,0 +1,400 @@
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const state = { view: null, rowId: null, field: null, busy: false };
+  const labels = {
+    approved: "Approved",
+    rejected: "Rejected",
+    needs_review: "Needs review",
+  };
+  const text = (tag, value, className) => {
+    const element = document.createElement(tag);
+    element.textContent = value;
+    if (className) element.className = className;
+    return element;
+  };
+  const selected = () =>
+    state.view?.validation.records.find((row) => row.id === state.rowId);
+  function say(message) {
+    $("status").textContent = message;
+  }
+  function blocking(row) {
+    return (
+      state.view.validation.issues.length > 0 ||
+      row.issues.some(
+        (issue) =>
+          !["association_unverified", "cross_passage_association"].includes(
+            issue.code,
+          ),
+      ) ||
+      Object.values(row.fields).some((field) => field.issues.length)
+    );
+  }
+  function controls() {
+    for (const id of ["load", "example"]) $(id).disabled = state.busy;
+    for (const id of [
+      "revalidate",
+      "approved-csv",
+      "approved-json",
+      "diagnostic-json",
+      "reject",
+      "pending",
+      "reviewer",
+      "note",
+      "confirm",
+    ])
+      $(id).disabled = state.busy || !state.view;
+    for (const button of document.querySelectorAll("#candidate-rows button"))
+      button.disabled = state.busy;
+    const row = selected();
+    $("approve").disabled =
+      state.busy || !row || blocking(row) || !$("confirm").checked;
+  }
+  async function request(path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      let error;
+      try {
+        error = await response.json();
+      } catch {}
+      throw Error(
+        error?.error ||
+          "The lab request failed. Your current session was kept.",
+      );
+    }
+    return response;
+  }
+  function clearDecision() {
+    $("note").value = "";
+    $("confirm").checked = false;
+  }
+  function highlight(paragraph, ranges) {
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    const merged = [];
+    for (const r of ranges.sort((a, b) => a.start - b.start)) {
+      const last = merged.at(-1);
+      if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+      else merged.push({ ...r });
+    }
+    for (const r of merged) {
+      fragment.append(
+        document.createTextNode(paragraph.slice(cursor, r.start)),
+      );
+      fragment.append(text("mark", paragraph.slice(r.start, r.end)));
+      cursor = r.end;
+    }
+    fragment.append(document.createTextNode(paragraph.slice(cursor)));
+    return fragment;
+  }
+  function renderSource() {
+    const { packet } = state.view.job,
+      row = selected(),
+      field = row?.fields[state.field];
+    $("source-info").textContent =
+      packet.passages.length +
+      " passages · Fictional source attribution: " +
+      (packet.source.url || "none") +
+      ". The URL was not fetched.";
+    $("source-hash").textContent = "SHA-256: " + packet.source.text_hash;
+    $("passages").replaceChildren(
+      ...packet.passages.map((p) => {
+        const spans = (field?.evidence || [])
+          .filter((e) => e.passage_id === p.id)
+          .map((e) => ({ start: e.passage_start, end: e.passage_end }));
+        const article = document.createElement("article");
+        article.className = "passage" + (spans.length ? " focused" : "");
+        article.dataset.passage = p.id;
+        article.append(text("h3", p.id));
+        const content = document.createElement("p");
+        content.append(highlight(p.text, spans));
+        article.append(content);
+        const outcome = state.view.validation.outcomes.find(
+          (o) => o.passage_id === p.id,
+        );
+        if (outcome)
+          article.append(
+            text(
+              "p",
+              (outcome.status === "no_result"
+                ? "Interpreter reported no result"
+                : outcome.status === "not_processed"
+                  ? "Not processed"
+                  : "Candidate support") +
+                " — " +
+                outcome.reason,
+              "hint",
+            ),
+          );
+        return article;
+      }),
+    );
+  }
+  function renderTable() {
+    const columns = state.view.job.packet.schema.fields;
+    const head = document.createElement("tr");
+    for (const value of [
+      "Record",
+      ...columns.map((f) => f.name),
+      "Review status",
+    ]) {
+      const th = text("th", value);
+      th.scope = "col";
+      head.append(th);
+    }
+    $("candidate-head").replaceChildren(head);
+    $("candidate-rows").replaceChildren(
+      ...state.view.validation.records.map((row) => {
+        const tr = document.createElement("tr");
+        tr.dataset.record = row.id;
+        tr.append(text("td", row.id));
+        for (const f of columns) {
+          const td = document.createElement("td"),
+            button = text("button", row.fields[f.name].value ?? "—", "value");
+          button.type = "button";
+          button.dataset.record = row.id;
+          button.dataset.field = f.name;
+          button.setAttribute(
+            "aria-label",
+            "Inspect " + f.name + " for " + row.id,
+          );
+          button.setAttribute(
+            "aria-pressed",
+            String(state.rowId === row.id && state.field === f.name),
+          );
+          button.onclick = () => {
+            if (state.rowId !== row.id) clearDecision();
+            state.rowId = row.id;
+            state.field = f.name;
+            render();
+          };
+          td.append(button);
+          tr.append(td);
+        }
+        tr.append(
+          text(
+            "td",
+            labels[row.review_status] || row.review_status,
+            "status " + row.review_status,
+          ),
+        );
+        return tr;
+      }),
+    );
+  }
+  function renderEvidence() {
+    const row = selected(),
+      field = row?.fields[state.field];
+    if (!row || !field) return;
+    $("field-title").textContent =
+      "Evidence for " + state.field + " · " + row.id;
+    const evidence = [];
+    for (const e of field.evidence) {
+      evidence.push(
+        text("blockquote", e.quote),
+        text(
+          "p",
+          "Validated literal quotation · " +
+            e.passage_id +
+            " · snapshot offsets " +
+            e.source_start +
+            "–" +
+            e.source_end,
+          "hint",
+        ),
+      );
+    }
+    if (!field.evidence.length) {
+      evidence.push(
+        text("p", "No validated supporting quotation for this value."),
+      );
+      const raw = state.view.job.cache_entry.raw_response.records.find(
+        (r) => r.id === row.id,
+      )?.fields?.[state.field];
+      for (const e of raw?.evidence || [])
+        evidence.push(
+          text("blockquote", e.quote),
+          text("p", "Proposed quotation · not validated", "hint"),
+        );
+    }
+    $("evidence").replaceChildren(...evidence);
+    const list = document.createElement("ul");
+    for (const finding of [
+      ...state.view.validation.issues,
+      ...row.issues,
+      ...Object.values(row.fields).flatMap((f) => f.issues),
+    ])
+      list.append(text("li", finding.message));
+    $("findings").replaceChildren(
+      text("strong", "System findings — retained after review"),
+      list,
+    );
+    $("review-title").textContent =
+      "Review " +
+      row.id +
+      " · " +
+      (labels[row.review_status] || row.review_status);
+    $("approval-note").textContent = blocking(row)
+      ? "Approval blocked by validation or interpreter findings. Reject or leave pending; corrected candidates require a new validation."
+      : "Literal checks passed. They do not verify the association. Review the source, enter a note and explicitly confirm before approving.";
+  }
+  function render() {
+    if (!state.view) return;
+    if (!selected()) {
+      state.rowId = state.view.validation.records[0]?.id;
+      state.field = state.view.job.packet.schema.fields[0]?.name;
+    }
+    const c = state.view.counts;
+    $("counts").textContent =
+      c.candidates +
+      (c.candidates === 1 ? " candidate · " : " candidates · ") +
+      c.approved +
+      " approved · " +
+      c.rejected +
+      " rejected · " +
+      c.pending +
+      " pending";
+    renderTable();
+    renderSource();
+    renderEvidence();
+    $("history").replaceChildren(
+      ...state.view.job.events.map((event) =>
+        text(
+          "li",
+          "#" +
+            event.sequence +
+            " · " +
+            event.reviewer +
+            " · " +
+            labels[event.decision] +
+            " " +
+            event.record_id +
+            " — " +
+            event.note +
+            " (" +
+            new Date(event.at).toLocaleString() +
+            ")",
+        ),
+      ),
+    );
+    $("empty-history").hidden = state.view.job.events.length > 0;
+    $("workspace").hidden = false;
+    controls();
+  }
+  async function perform(task) {
+    if (state.busy) return;
+    state.busy = true;
+    controls();
+    try {
+      await task();
+    } catch (error) {
+      say(
+        error.message || "The request failed. Your current session was kept.",
+      );
+    } finally {
+      state.busy = false;
+      controls();
+    }
+  }
+  $("load").onclick = () =>
+    perform(async () => {
+      say("Loading a fictional scripted example…");
+      const response = await request("/api/interpretation/start", {
+        example_id: $("example").value,
+      });
+      const view = await response.json();
+      state.view = view;
+      state.rowId = null;
+      state.field = null;
+      clearDecision();
+      render();
+      say(
+        "Example loaded. Every candidate requires review; no AI inference was performed.",
+      );
+    });
+  $("confirm").onchange = controls;
+  $("review").onsubmit = (event) => {
+    event.preventDefault();
+    const row = selected(),
+      decision = event.submitter?.dataset.decision;
+    if (!row || !decision) return;
+    if (!$("reviewer").value.trim() || !$("note").value.trim()) {
+      say("Enter a reviewer name and a meaningful review note.");
+      return;
+    }
+    if (decision === "approved" && (blocking(row) || !$("confirm").checked)) {
+      say(
+        "Approval requires clean checks and explicit association confirmation.",
+      );
+      return;
+    }
+    perform(async () => {
+      const response = await request("/api/interpretation/action", {
+        action: "review",
+        job: state.view.job,
+        decision: {
+          record_id: row.id,
+          decision,
+          reviewer: $("reviewer").value.trim(),
+          note: $("note").value.trim(),
+          confirmed_association: $("confirm").checked,
+        },
+      });
+      state.view = await response.json();
+      clearDecision();
+      render();
+      say(
+        "Appended " +
+          labels[decision].toLowerCase() +
+          " decision for " +
+          row.id +
+          ". Earlier events were kept.",
+      );
+    });
+  };
+  $("revalidate").onclick = () =>
+    perform(async () => {
+      const response = await request("/api/interpretation/action", {
+        action: "revalidate",
+        job: state.view.job,
+      });
+      state.view = await response.json();
+      render();
+      say(
+        "Cached scripted response revalidated. No interpreter or AI call was made.",
+      );
+    });
+  async function download(format, diagnostic) {
+    const response = await request("/api/interpretation/action", {
+      action: "export",
+      job: state.view.job,
+      format,
+      diagnostic,
+    });
+    const blob = await response.blob(),
+      url = URL.createObjectURL(blob),
+      anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download =
+      (diagnostic ? "interpretation-diagnostic" : "interpretation-approved") +
+      "." +
+      format;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    say(
+      "Downloaded " +
+        response.headers.get("X-Exported-Records") +
+        " " +
+        (diagnostic ? "diagnostic" : "approved") +
+        " records.",
+    );
+  }
+  $("approved-csv").onclick = () => perform(() => download("csv", false));
+  $("approved-json").onclick = () => perform(() => download("json", false));
+  $("diagnostic-json").onclick = () => perform(() => download("json", true));
+  controls();
+})();
