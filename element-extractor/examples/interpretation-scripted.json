@@ -1,0 +1,92 @@
+{
+  "source": {
+    "url": "https://example.org/fictional-results",
+    "text": "Example Corps received a score of 98.6.\n\nAnother Corps scored 95.1. A correction says its score was 95.4.\n\nNo scores were published for the remaining entrants."
+  },
+  "schema": {
+    "fields": [
+      { "name": "corps_name", "type": "string", "required": true },
+      {
+        "name": "score",
+        "type": "number",
+        "required": true,
+        "min": 0,
+        "max": 100
+      }
+    ]
+  },
+  "scripted_response": {
+    "version": "candidates-v1",
+    "records": [
+      {
+        "id": "row-1",
+        "fields": {
+          "corps_name": {
+            "value": "Example Corps",
+            "evidence": [
+              {
+                "passage_id": "p001",
+                "quote": "Example Corps received a score of 98.6."
+              }
+            ]
+          },
+          "score": {
+            "value": 98.6,
+            "evidence": [
+              {
+                "passage_id": "p001",
+                "quote": "Example Corps received a score of 98.6."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "row-2",
+        "issues": [
+          "The passage contains a correction; the proposed old score must not be approved without a corrected candidate."
+        ],
+        "fields": {
+          "corps_name": {
+            "value": "Another Corps",
+            "evidence": [
+              {
+                "passage_id": "p002",
+                "quote": "Another Corps scored 95.1. A correction says its score was 95.4."
+              }
+            ]
+          },
+          "score": {
+            "value": 95.1,
+            "evidence": [
+              {
+                "passage_id": "p002",
+                "quote": "Another Corps scored 95.1. A correction says its score was 95.4."
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "outcomes": [
+      {
+        "passage_id": "p001",
+        "status": "records",
+        "record_ids": ["row-1"],
+        "reason": "Scripted candidate for a simple pair."
+      },
+      {
+        "passage_id": "p002",
+        "status": "records",
+        "record_ids": ["row-2"],
+        "reason": "Scripted old-score example intentionally flagged for review."
+      },
+      {
+        "passage_id": "p003",
+        "status": "no_result",
+        "record_ids": [],
+        "reason": "Scripted response reports no candidate in this paragraph; this is not independent semantic verification."
+      }
+    ]
+  }
+}

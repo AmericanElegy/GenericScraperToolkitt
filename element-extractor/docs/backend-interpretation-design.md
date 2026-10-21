@@ -1,6 +1,6 @@
 # Proposed paragraph interpretation backend
 
-Status: design only. No model integration, provider account, paid service, or paragraph-to-dataset implementation has been enabled. FantasyBrief has not been reviewed or modified: its code is absent from this workspace and its exact repository URL is still needed.
+Status: the offline contract, scripted interpreter, independent validation, review journal and exports are now implemented. See [offline-interpretation.md](offline-interpretation.md). No model integration, provider account or paid inference is enabled. A user-supplied read-only review distinguishes Atlas's paragraph lane from the separate Fable5 Core engine; that review informed patterns only. This chat has not independently accessed or modified either codebase.
 
 ## Intended behavior
 
@@ -40,6 +40,6 @@ This is an illustration, not a claim about the live DCI results. Name-before-sco
 
 Use passages with clear pairs, repeated entities, multiple scores, dates mixed with scores, negation, corrections, missing values, and malicious instructions embedded in source text. Check relationships, not just JSON shape. An unavailable provider must return an honest capability-not-configured result without breaking native table extraction. Verify evidence survives JSON export and uncertain records stay labeled in the UI.
 
-## FantasyBrief review, when access is supplied
+## Boundary for any future direct FantasyBrief review
 
 Read only its agent instructions, architecture docs, provider abstraction, input/output schemas, evidence/validation handling, error paths, cost controls and relevant tests. Do not inspect credential values, execute its jobs, modify files, deploy it, or import it as a runtime dependency. Distinguish verified implementation from documentation claims. Recommend reusable design patterns only after inspection, with file references and clear differences from this toolkit. Keep any new implementation standalone.

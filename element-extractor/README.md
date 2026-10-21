@@ -74,3 +74,7 @@ The API now returns `diagnostics` on extraction success and on failures after a 
 Messages distinguish observations from hypotheses: an app container plus linked scripts suggests possible client rendering but does not prove it. JSON blocks may be metadata, not data. Images may be logos; finding one does not prove the requested rows are image-based. A password field or verification title is an access indicator, not a license to bypass it. Access and request-limit failures stop extraction before fallback methods run.
 
 A direct image URL explains that OCR is needed. Pages containing only possible visual data explain that image contents were not read. **OCR, JavaScript execution, and automatic extraction from arbitrary embedded JSON are not enabled.** Future OCR would require row/column reconstruction and review of uncertain values before claiming a verified dataset. No paid service has been added.
+
+## Offline paragraph interpretation prototype
+
+Run `npm.cmd run interpretation:demo` in PowerShell for the new **scripted, offline** backend lab. It exercises bounded passages, requested columns, evidence offsets/hashes, independent validation, explicit no-result accounting, raw-response replay, append-only review events, and approved/diagnostic exports. It does not infer values from arbitrary prose or call an AI service. The web table UI and public Worker are unchanged. See [the walkthrough and trust limits](docs/offline-interpretation.md).
