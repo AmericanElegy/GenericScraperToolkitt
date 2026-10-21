@@ -2,100 +2,6 @@ var __freeze = Object.freeze;
 var __defProp = Object.defineProperty;
 var __template = (cooked, raw) => __freeze(__defProp(cooked, "raw", { value: __freeze(raw || cooked.slice()) }));
 
-// examples/interpretation-scripted.json
-var interpretation_scripted_default = {
-  source: {
-    url: "https://example.org/fictional-results",
-    text: "Example Corps received a score of 98.6.\n\nAnother Corps scored 95.1. A correction says its score was 95.4.\n\nNo scores were published for the remaining entrants."
-  },
-  schema: {
-    fields: [
-      { name: "corps_name", type: "string", required: true },
-      {
-        name: "score",
-        type: "number",
-        required: true,
-        min: 0,
-        max: 100
-      }
-    ]
-  },
-  scripted_response: {
-    version: "candidates-v1",
-    records: [
-      {
-        id: "row-1",
-        fields: {
-          corps_name: {
-            value: "Example Corps",
-            evidence: [
-              {
-                passage_id: "p001",
-                quote: "Example Corps received a score of 98.6."
-              }
-            ]
-          },
-          score: {
-            value: 98.6,
-            evidence: [
-              {
-                passage_id: "p001",
-                quote: "Example Corps received a score of 98.6."
-              }
-            ]
-          }
-        }
-      },
-      {
-        id: "row-2",
-        issues: [
-          "The passage contains a correction; the proposed old score must not be approved without a corrected candidate."
-        ],
-        fields: {
-          corps_name: {
-            value: "Another Corps",
-            evidence: [
-              {
-                passage_id: "p002",
-                quote: "Another Corps scored 95.1. A correction says its score was 95.4."
-              }
-            ]
-          },
-          score: {
-            value: 95.1,
-            evidence: [
-              {
-                passage_id: "p002",
-                quote: "Another Corps scored 95.1. A correction says its score was 95.4."
-              }
-            ]
-          }
-        }
-      }
-    ],
-    outcomes: [
-      {
-        passage_id: "p001",
-        status: "records",
-        record_ids: ["row-1"],
-        reason: "Scripted candidate for a simple pair."
-      },
-      {
-        passage_id: "p002",
-        status: "records",
-        record_ids: ["row-2"],
-        reason: "Scripted old-score example intentionally flagged for review."
-      },
-      {
-        passage_id: "p003",
-        status: "no_result",
-        record_ids: [],
-        reason: "Scripted response reports no candidate in this paragraph; this is not independent semantic verification."
-      }
-    ]
-  }
-};
-
 // src/interpretation/pipeline.js
 var PACKET_VERSION = "passages-v1";
 var RESPONSE_VERSION = "candidates-v1";
@@ -805,27 +711,674 @@ async function exportInterpretation(packet, entry, events = [], { approvedOnly =
   return { json: json2, csv };
 }
 
+// src/interpretation/text-rules.js
+function extractTextRules(packet) {
+  if (packet.schema.fields.length !== 2 || packet.schema.fields[0].type !== "string" || packet.schema.fields[1].type !== "number")
+    throw new ContractError("rule_schema", "The text parser needs a text column followed by a numeric column.");
+  const [name, number] = packet.schema.fields.map((f) => f.name);
+  const records = [], outcomes = [];
+  for (const p of packet.passages) {
+    const ids = [];
+    let cursor = 0;
+    for (const line of p.text.split(/\n|(?<=[.!?])\s+(?=[A-Z])/)) {
+      const quote = line.trim();
+      const position = p.text.indexOf(quote, cursor);
+      cursor = position + quote.length;
+      let occurrence = 0, found = p.text.indexOf(quote);
+      while (found >= 0 && found < position) {
+        occurrence++;
+        found = p.text.indexOf(quote, found + 1);
+      }
+      const match = quote.match(/^(.{1,120}?)\s*(?::|\s+(?:scored|received a score of|was given a score of))\s*([-+]?\d+(?:\.\d+)?)\.?$/i);
+      if (!match || !/[\p{L}]/u.test(match[1]) || !Number.isFinite(Number(match[2]))) continue;
+      if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 rule matches. Use a smaller passage; no matches were silently dropped.");
+      const id = "row-" + (records.length + 1);
+      const span = { passage_id: p.id, quote, occurrence };
+      const record = { id, fields: {
+        [name]: { value: match[1].trim(), evidence: [span] },
+        [number]: { value: Number(match[2]), evidence: [span] }
+      } };
+      if (/\b(correct(?:ion|ed)?|revised|not|never|instead|however|previously|disputed)\b/i.test(p.text))
+        record.issues = ["This paragraph includes correction, negation or uncertainty wording. The rule match needs a manually corrected candidate with supporting quotations."];
+      records.push(record);
+      ids.push(id);
+    }
+    outcomes.push({
+      passage_id: p.id,
+      status: ids.length ? "records" : "no_result",
+      record_ids: ids,
+      reason: ids.length ? "Matched a limited name/number grammar; human association review is still required." : "No supported name/number pattern matched. This does not mean the paragraph contains no useful data. Add a candidate manually or reformat the source in a new session."
+    });
+  }
+  return { version: "candidates-v1", records, outcomes };
+}
+
+// examples/interpretation-scripted.json
+var interpretation_scripted_default = {
+  source: {
+    url: "https://example.org/fictional-results",
+    text: "Example Corps received a score of 98.6.\n\nAnother Corps scored 95.1. A correction says its score was 95.4.\n\nNo scores were published for the remaining entrants."
+  },
+  schema: {
+    fields: [
+      { name: "corps_name", type: "string", required: true },
+      {
+        name: "score",
+        type: "number",
+        required: true,
+        min: 0,
+        max: 100
+      }
+    ]
+  },
+  scripted_response: {
+    version: "candidates-v1",
+    records: [
+      {
+        id: "row-1",
+        fields: {
+          corps_name: {
+            value: "Example Corps",
+            evidence: [
+              {
+                passage_id: "p001",
+                quote: "Example Corps received a score of 98.6."
+              }
+            ]
+          },
+          score: {
+            value: 98.6,
+            evidence: [
+              {
+                passage_id: "p001",
+                quote: "Example Corps received a score of 98.6."
+              }
+            ]
+          }
+        }
+      },
+      {
+        id: "row-2",
+        issues: [
+          "The passage contains a correction; the proposed old score must not be approved without a corrected candidate."
+        ],
+        fields: {
+          corps_name: {
+            value: "Another Corps",
+            evidence: [
+              {
+                passage_id: "p002",
+                quote: "Another Corps scored 95.1. A correction says its score was 95.4."
+              }
+            ]
+          },
+          score: {
+            value: 95.1,
+            evidence: [
+              {
+                passage_id: "p002",
+                quote: "Another Corps scored 95.1. A correction says its score was 95.4."
+              }
+            ]
+          }
+        }
+      }
+    ],
+    outcomes: [
+      {
+        passage_id: "p001",
+        status: "records",
+        record_ids: ["row-1"],
+        reason: "Scripted candidate for a simple pair."
+      },
+      {
+        passage_id: "p002",
+        status: "records",
+        record_ids: ["row-2"],
+        reason: "Scripted old-score example intentionally flagged for review."
+      },
+      {
+        passage_id: "p003",
+        status: "no_result",
+        record_ids: [],
+        reason: "Scripted response reports no candidate in this paragraph; this is not independent semantic verification."
+      }
+    ]
+  }
+};
+
 // src/interpretation/lab-page.js
 var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Interpretation Lab \xB7 Web Table Toolkit</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17283c;font:16px system-ui,sans-serif}main{max-width:1320px;margin:auto;padding:32px 22px 60px}h1{font-size:clamp(30px,5vw,46px);margin:14px 0}h2{font-size:22px;margin:0 0 16px}h3{font-size:18px}p{line-height:1.55}a{color:#18568b}button,select,input,textarea{font:inherit}button{border:1px solid #173b59;border-radius:8px;background:#173b59;color:#fff;padding:11px 16px;cursor:pointer}button.secondary{background:#fff;color:#173b59}button:disabled{opacity:.5;cursor:not-allowed}input,select,textarea{border:1px solid #8596a8;border-radius:8px;padding:10px;max-width:100%;background:white;color:inherit}input,textarea{width:100%}textarea{min-height:80px;resize:vertical}label{display:block;font-weight:600;margin:12px 0 6px}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.hint{font-size:14px;color:#47607a}.badge{display:inline-block;border-radius:5px;background:#e1efeb;color:#225647;padding:5px 9px;font-size:13px;font-weight:600}.card{background:white;border:1px solid #d7dfe6;border-radius:12px;padding:20px}.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:20px;align-items:start}.passage{border-left:3px solid #d7dfe6;padding:0 0 0 14px;margin:18px 0;overflow-wrap:anywhere}.passage.focused{border-color:#bc6b10}mark{background:#ffe7b8;color:#17283c}blockquote{margin:12px 0;padding:12px;background:#f4f6f8;border-left:3px solid #8596a8;overflow-wrap:anywhere}ul,ol{padding-left:22px}li{margin:8px 0;line-height:1.5}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:10px;border-bottom:1px solid #e7edf2;vertical-align:top}td button.value{padding:6px 8px;background:white;color:#173b59;border:1px solid #b5c7d4;min-width:72px;overflow-wrap:anywhere;max-width:230px}td button.value[aria-pressed=true]{background:#e7eff7;border:2px solid #18568b}.status{font-size:13px;white-space:nowrap}.status.approved{color:#17634b}.status.rejected{color:#9b3228}.findings{background:#fff6e6;border-radius:8px;padding:12px}.check{display:flex;align-items:flex-start;gap:10px;font-weight:400}.check input{width:auto;margin-top:5px}.hash{font-family:monospace;overflow-wrap:anywhere;font-size:12px}#status{min-height:26px}#workspace{margin-top:20px}#history{overflow-wrap:anywhere}details{margin:14px 0}summary{cursor:pointer}footer{margin-top:24px}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #bc6b10;outline-offset:3px}[hidden]{display:none!important}@media(max-width:800px){.grid{grid-template-columns:1fr}.card{padding:16px}main{padding:22px 14px}.bar select{width:100%}th,td{padding:8px}}
 </style><script src="/interpretation-client.js" defer><\/script></head><body><main>
-<a href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><span class="badge">Scripted examples \xB7 No AI calls</span>
-<p>Compare proposed values with their source passages before deciding what to accept. These fictional examples are prewritten; this lab does not interpret arbitrary text.</p>
+<a href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><span class="badge">Pasted text and examples \xB7 No AI calls</span>
+<p>Compare proposed values with their source passages before deciding what to accept. Paste your text for a limited name/number parser, or use a fictional example. This is not general language understanding.</p>
+<section class="card"><h2>Use your own text</h2><p class="hint">Supported: \u201CAlpha scored 98.6.\u201D or \u201CAlpha: 98.6\u201D, one pair per line or sentence. Other wording may produce no candidates. You can add or correct candidates manually. No useful data is assumed absent just because the parser finds no match.</p>
+<form id="custom-input"><label for="source-text">Paste source text</label><textarea id="source-text" required maxlength="16000" placeholder="Paste your text here when ready. Maximum 16,000 characters and 32 paragraphs."></textarea><label for="source-url">Source URL (optional attribution, never fetched)</label><input id="source-url" type="url" placeholder="https://example.org/article"><div class="bar"><div><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div><div><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div></div><p class="hint">Two columns for this first parser: text, then number. Use lowercase names with underscores. Numbers are signed, ungrouped decimals. No score range is assumed.</p><button id="extract" type="submit">Extract pasted text</button></form></section>
 <div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load">Load example</button></div>
-<p class="hint">Session only: loading another example or reloading this page clears the current review. Download diagnostic JSON to retain the evidence and history. Reviewer names are self-declared; this is not an authenticated audit service.</p>
-<p id="status" role="status" aria-live="polite">Load an example to begin.</p>
+<p class="hint">Session only: extracting new text, loading another example or reloading this page clears the current review. Download diagnostic JSON to retain the evidence and history. Reviewer names are self-declared; this is not an authenticated audit service.</p>
+<p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
 <section id="workspace" hidden><div class="bar"><strong id="counts"></strong><button id="revalidate" class="secondary">Revalidate evidence</button></div><p class="hint">Literal matches do not prove that a score belongs to a name. No record is approved automatically.</p>
 <div class="grid"><section class="card" aria-labelledby="source-title"><h2 id="source-title">Source passages</h2><p id="source-info" class="hint"></p><div id="passages"></div><details><summary>Source integrity</summary><p class="hint">Offsets refer to the retained text in UTF-16 code units, start inclusive and end exclusive.</p><p id="source-hash" class="hash"></p></details></section>
-<section class="card" aria-labelledby="candidates-title"><h2 id="candidates-title">Proposed records</h2><p class="hint">Click a value to inspect its evidence. Selecting a different record clears the review note and confirmation.</p><div class="scroll"><table><caption class="hint">Scripted candidates in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
+<section class="card" aria-labelledby="candidates-title"><h2 id="candidates-title">Proposed records</h2><p class="hint">Click a value to inspect its evidence. Selecting a different record clears the review note and confirmation.</p><div class="scroll"><table><caption class="hint">Candidates in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
 <h3 id="field-title"></h3><div id="evidence"></div><div id="findings" class="findings"></div>
-<form id="review"><h3 id="review-title">Review selected record</h3><p id="approval-note" class="hint"></p><label for="reviewer">Reviewer name</label><input id="reviewer" required maxlength="80" autocomplete="off"><label for="note">Review note</label><textarea id="note" required maxlength="1000" placeholder="Explain your decision using the source passages."></textarea><label class="check"><input type="checkbox" id="confirm"><span>I compared the proposed values with the source and explicitly confirm their association.</span></label><div class="bar"><button id="approve" data-decision="approved" type="submit">Approve</button><button id="reject" data-decision="rejected" class="secondary" type="submit">Reject</button><button id="pending" data-decision="needs_review" class="secondary" type="submit">Leave pending</button></div></form></section></div>
-<section class="card" style="margin-top:20px"><h2>Exports and review history</h2><p class="hint">Approved exports contain only approved records; before review, the CSV has a header and no data rows. JSON preserves the complete source and passage outcomes: approved-only is not source-text redaction.</p><div class="bar"><button id="approved-csv">Approved CSV</button><button id="approved-json">Approved JSON</button><button id="diagnostic-json" class="secondary">Diagnostic JSON \xB7 all statuses</button></div><p class="hint">Diagnostic JSON also retains the raw scripted response, including evidence that failed validation.</p><h3>Session review log</h3><ol id="history"></ol><p id="empty-history" class="hint">No review decisions yet.</p></section></section>
+<form id="review"><h3 id="review-title">Review selected record</h3><p id="approval-note" class="hint"></p><label for="reviewer">Reviewer name</label><input id="reviewer" required maxlength="80" autocomplete="off"><label for="note">Review note</label><textarea id="note" required maxlength="1000" placeholder="Explain your decision using the source passages."></textarea><label class="check"><input type="checkbox" id="confirm"><span>I compared the proposed values with the source and explicitly confirm their association.</span></label><div class="bar"><button id="approve" data-decision="approved" type="submit">Approve</button><button id="reject" data-decision="rejected" class="secondary" type="submit">Reject</button><button id="pending" data-decision="needs_review" class="secondary" type="submit">Leave pending</button></div></form><details id="correction-panel"><summary>Correct selected candidate or add a record</summary><p class="hint">Provide each value and an exact supporting quotation. Choose the paragraph and occurrence (0 means first match). No changes are approved automatically. Saving a revision resets all current approvals; earlier decisions remain in the revision history.</p><button id="edit-selected" type="button" class="secondary">Edit selected record</button> <button id="add-record" type="button" class="secondary">Add a record</button><form id="correction-form"><h3 id="correction-title">Correct candidate</h3><div id="correction-fields"></div><label for="correction-note">Reason for correction or addition</label><textarea id="correction-note" required maxlength="1000"></textarea><p class="hint">Uses the reviewer name above. Every changed candidate must pass evidence checks and be reviewed again.</p><button id="save-correction" type="submit">Save candidate and revalidate</button></form></details></section></div>
+<section class="card" style="margin-top:20px"><h2>Exports and review history</h2><p class="hint">Approved exports contain only approved records; before review, the CSV has a header and no data rows. JSON preserves the complete source and passage outcomes: approved-only is not source-text redaction.</p><div class="bar"><button id="approved-csv">Approved CSV</button><button id="approved-json">Approved JSON</button><button id="diagnostic-json" class="secondary">Diagnostic JSON \xB7 all statuses</button></div><p class="hint">JSON retains original candidates and candidate revision history, including earlier review decisions. Diagnostic JSON also includes all current candidates and evidence that failed validation.</p><p class="hint">The validation_issues column preserves original automated findings. An approved review_status means a person completed the association review; it does not mean the parser verified meaning.</p><h3>Candidate revision history</h3><ol id="revision-history"></ol><h3>Session review log</h3><ol id="history"></ol><p id="empty-history" class="hint">No review decisions yet.</p></section></section>
 <footer class="hint">No provider, OCR, browser-rendered scraping, paid service, or FantasyBrief dependency is enabled by this lab. Review events append within this session; they are not saved to durable server storage.</footer>
 </main></body></html>`;
 
 // src/interpretation/lab-client.txt
-var lab_client_default = '"use strict";\n(() => {\n  const $ = (id) => document.getElementById(id);\n  const state = { view: null, rowId: null, field: null, busy: false };\n  const labels = {\n    approved: "Approved",\n    rejected: "Rejected",\n    needs_review: "Needs review",\n  };\n  const text = (tag, value, className) => {\n    const element = document.createElement(tag);\n    element.textContent = value;\n    if (className) element.className = className;\n    return element;\n  };\n  const selected = () =>\n    state.view?.validation.records.find((row) => row.id === state.rowId);\n  function say(message) {\n    $("status").textContent = message;\n  }\n  function blockers(row) {\n    return [\n      ...state.view.validation.issues,\n      ...row.issues.filter(\n        (issue) => !["association_unverified", "cross_passage_association"].includes(issue.code),\n      ),\n      ...Object.values(row.fields).flatMap((field) => field.issues),\n    ];\n  }\n  function blocking(row) {\n    return blockers(row).length > 0;\n  }\n  function controls() {\n    for (const id of ["load", "example"]) $(id).disabled = state.busy;\n    for (const id of [\n      "revalidate",\n      "approved-csv",\n      "approved-json",\n      "diagnostic-json",\n      "reject",\n      "pending",\n      "reviewer",\n      "note",\n      "confirm",\n    ])\n      $(id).disabled = state.busy || !state.view;\n    for (const button of document.querySelectorAll("#candidate-rows button"))\n      button.disabled = state.busy;\n    const row = selected();\n    const missing = [];\n    if (!$("reviewer").value.trim()) missing.push("enter your reviewer name");\n    if (!$("note").value.trim()) missing.push("enter a review note");\n    if (!$("confirm").checked) missing.push("check the source confirmation box");\n    const approved = row?.review_status === "approved";\n    $("approve").textContent = approved ? "Already approved" : "Approve selected record";\n    $("approve").disabled =\n      state.busy || !row || approved || blocking(row) || missing.length > 0;\n    $("approve").setAttribute("aria-describedby", "approval-note");\n    $("approval-note").textContent = !row\n      ? "Select a candidate to review."\n      : approved\n        ? "This record is already approved and will be included in Approved CSV and Approved JSON. No further approval is needed."\n        : blocking(row)\n          ? "Cannot approve this record: " + blockers(row).map((issue) => issue.message).join(" ") + " You can reject it or leave it pending."\n          : missing.length\n            ? "To approve " + row.id + ": " + missing.join("; ") + "."\n            : "Ready to approve " + row.id + ". Approval confirms that you checked the values against their source.";\n  }\n  async function request(path, body) {\n    const response = await fetch(path, {\n      method: "POST",\n      headers: { "Content-Type": "application/json" },\n      body: JSON.stringify(body),\n    });\n    if (!response.ok) {\n      let error;\n      try {\n        error = await response.json();\n      } catch {}\n      throw Error(\n        error?.error ||\n          "The lab request failed. Your current session was kept.",\n      );\n    }\n    return response;\n  }\n  function clearDecision() {\n    $("note").value = "";\n    $("confirm").checked = false;\n  }\n  function highlight(paragraph, ranges) {\n    const fragment = document.createDocumentFragment();\n    let cursor = 0;\n    const merged = [];\n    for (const r of ranges.sort((a, b) => a.start - b.start)) {\n      const last = merged.at(-1);\n      if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);\n      else merged.push({ ...r });\n    }\n    for (const r of merged) {\n      fragment.append(\n        document.createTextNode(paragraph.slice(cursor, r.start)),\n      );\n      fragment.append(text("mark", paragraph.slice(r.start, r.end)));\n      cursor = r.end;\n    }\n    fragment.append(document.createTextNode(paragraph.slice(cursor)));\n    return fragment;\n  }\n  function renderSource() {\n    const { packet } = state.view.job,\n      row = selected(),\n      field = row?.fields[state.field];\n    $("source-info").textContent =\n      packet.passages.length +\n      " passages \xB7 Fictional source attribution: " +\n      (packet.source.url || "none") +\n      ". The URL was not fetched.";\n    $("source-hash").textContent = "SHA-256: " + packet.source.text_hash;\n    $("passages").replaceChildren(\n      ...packet.passages.map((p) => {\n        const spans = (field?.evidence || [])\n          .filter((e) => e.passage_id === p.id)\n          .map((e) => ({ start: e.passage_start, end: e.passage_end }));\n        const article = document.createElement("article");\n        article.className = "passage" + (spans.length ? " focused" : "");\n        article.dataset.passage = p.id;\n        article.append(text("h3", p.id));\n        const content = document.createElement("p");\n        content.append(highlight(p.text, spans));\n        article.append(content);\n        const outcome = state.view.validation.outcomes.find(\n          (o) => o.passage_id === p.id,\n        );\n        if (outcome)\n          article.append(\n            text(\n              "p",\n              (outcome.status === "no_result"\n                ? "Interpreter reported no result"\n                : outcome.status === "not_processed"\n                  ? "Not processed"\n                  : "Candidate support") +\n                " \u2014 " +\n                outcome.reason,\n              "hint",\n            ),\n          );\n        return article;\n      }),\n    );\n  }\n  function renderTable() {\n    const columns = state.view.job.packet.schema.fields;\n    const head = document.createElement("tr");\n    for (const value of [\n      "Record",\n      ...columns.map((f) => f.name),\n      "Review status",\n    ]) {\n      const th = text("th", value);\n      th.scope = "col";\n      head.append(th);\n    }\n    $("candidate-head").replaceChildren(head);\n    $("candidate-rows").replaceChildren(\n      ...state.view.validation.records.map((row) => {\n        const tr = document.createElement("tr");\n        tr.dataset.record = row.id;\n        tr.append(text("td", row.id));\n        for (const f of columns) {\n          const td = document.createElement("td"),\n            button = text("button", row.fields[f.name].value ?? "\u2014", "value");\n          button.type = "button";\n          button.dataset.record = row.id;\n          button.dataset.field = f.name;\n          button.setAttribute(\n            "aria-label",\n            "Inspect " + f.name + " for " + row.id,\n          );\n          button.setAttribute(\n            "aria-pressed",\n            String(state.rowId === row.id && state.field === f.name),\n          );\n          button.onclick = () => {\n            if (state.rowId !== row.id) clearDecision();\n            state.rowId = row.id;\n            state.field = f.name;\n            render();\n          };\n          td.append(button);\n          tr.append(td);\n        }\n        tr.append(\n          text(\n            "td",\n            labels[row.review_status] || row.review_status,\n            "status " + row.review_status,\n          ),\n        );\n        return tr;\n      }),\n    );\n  }\n  function renderEvidence() {\n    const row = selected(),\n      field = row?.fields[state.field];\n    if (!row || !field) return;\n    $("field-title").textContent =\n      "Evidence for " + state.field + " \xB7 " + row.id;\n    const evidence = [];\n    for (const e of field.evidence) {\n      evidence.push(\n        text("blockquote", e.quote),\n        text(\n          "p",\n          "Validated literal quotation \xB7 " +\n            e.passage_id +\n            " \xB7 snapshot offsets " +\n            e.source_start +\n            "\u2013" +\n            e.source_end,\n          "hint",\n        ),\n      );\n    }\n    if (!field.evidence.length) {\n      evidence.push(\n        text("p", "No validated supporting quotation for this value."),\n      );\n      const raw = state.view.job.cache_entry.raw_response.records.find(\n        (r) => r.id === row.id,\n      )?.fields?.[state.field];\n      for (const e of raw?.evidence || [])\n        evidence.push(\n          text("blockquote", e.quote),\n          text("p", "Proposed quotation \xB7 not validated", "hint"),\n        );\n    }\n    $("evidence").replaceChildren(...evidence);\n    const list = document.createElement("ul");\n    for (const finding of [\n      ...state.view.validation.issues,\n      ...row.issues,\n      ...Object.values(row.fields).flatMap((f) => f.issues),\n    ])\n      list.append(text("li", finding.message));\n    $("findings").replaceChildren(\n      text("strong", "System findings \u2014 retained after review"),\n      list,\n    );\n    $("review-title").textContent =\n      "Review " +\n      row.id +\n      " \xB7 " +\n      (labels[row.review_status] || row.review_status);\n\n  }\n  function render() {\n    if (!state.view) return;\n    if (!selected()) {\n      state.rowId = state.view.validation.records[0]?.id;\n      state.field = state.view.job.packet.schema.fields[0]?.name;\n    }\n    const c = state.view.counts;\n    $("counts").textContent =\n      c.candidates +\n      (c.candidates === 1 ? " candidate \xB7 " : " candidates \xB7 ") +\n      c.approved +\n      " approved \xB7 " +\n      c.rejected +\n      " rejected \xB7 " +\n      c.pending +\n      " pending";\n    renderTable();\n    renderSource();\n    renderEvidence();\n    $("history").replaceChildren(\n      ...state.view.job.events.map((event) =>\n        text(\n          "li",\n          "#" +\n            event.sequence +\n            " \xB7 " +\n            event.reviewer +\n            " \xB7 " +\n            labels[event.decision] +\n            " " +\n            event.record_id +\n            " \u2014 " +\n            event.note +\n            " (" +\n            new Date(event.at).toLocaleString() +\n            ")",\n        ),\n      ),\n    );\n    $("empty-history").hidden = state.view.job.events.length > 0;\n    $("workspace").hidden = false;\n    controls();\n  }\n  async function perform(task) {\n    if (state.busy) return;\n    state.busy = true;\n    controls();\n    try {\n      await task();\n    } catch (error) {\n      say(\n        error.message || "The request failed. Your current session was kept.",\n      );\n    } finally {\n      state.busy = false;\n      controls();\n    }\n  }\n  $("load").onclick = () =>\n    perform(async () => {\n      say("Loading a fictional scripted example\u2026");\n      const response = await request("/api/interpretation/start", {\n        example_id: $("example").value,\n      });\n      const view = await response.json();\n      state.view = view;\n      state.rowId = null;\n      state.field = null;\n      clearDecision();\n      render();\n      say(\n        "Example loaded. Every candidate requires review; no AI inference was performed.",\n      );\n    });\n  $("confirm").onchange = controls;\n  $("reviewer").oninput = controls;\n  $("note").oninput = controls;\n  $("review").onsubmit = (event) => {\n    event.preventDefault();\n    const row = selected(),\n      decision = event.submitter?.dataset.decision;\n    if (!row || !decision) return;\n    if (!$("reviewer").value.trim() || !$("note").value.trim()) {\n      say("Enter a reviewer name and a meaningful review note.");\n      return;\n    }\n    if (decision === "approved" && (blocking(row) || !$("confirm").checked)) {\n      say(\n        "Approval requires clean checks and explicit association confirmation.",\n      );\n      return;\n    }\n    perform(async () => {\n      const response = await request("/api/interpretation/action", {\n        action: "review",\n        job: state.view.job,\n        decision: {\n          record_id: row.id,\n          decision,\n          reviewer: $("reviewer").value.trim(),\n          note: $("note").value.trim(),\n          confirmed_association: $("confirm").checked,\n        },\n      });\n      state.view = await response.json();\n      clearDecision();\n      render();\n      say(\n        "Appended " +\n          labels[decision].toLowerCase() +\n          " decision for " +\n          row.id +\n          ". Earlier events were kept.",\n      );\n    });\n  };\n  $("revalidate").onclick = () =>\n    perform(async () => {\n      const response = await request("/api/interpretation/action", {\n        action: "revalidate",\n        job: state.view.job,\n      });\n      state.view = await response.json();\n      render();\n      say(\n        "Cached scripted response revalidated. No interpreter or AI call was made.",\n      );\n    });\n  async function download(format, diagnostic) {\n    const response = await request("/api/interpretation/action", {\n      action: "export",\n      job: state.view.job,\n      format,\n      diagnostic,\n    });\n    const blob = await response.blob(),\n      url = URL.createObjectURL(blob),\n      anchor = document.createElement("a");\n    anchor.href = url;\n    anchor.download =\n      (diagnostic ? "interpretation-diagnostic" : "interpretation-approved") +\n      "." +\n      format;\n    anchor.click();\n    setTimeout(() => URL.revokeObjectURL(url), 1000);\n    say(\n      "Downloaded " +\n        response.headers.get("X-Exported-Records") +\n        " " +\n        (diagnostic ? "diagnostic" : "approved") +\n        " records.",\n    );\n  }\n  $("approved-csv").onclick = () => perform(() => download("csv", false));\n  $("approved-json").onclick = () => perform(() => download("json", false));\n  $("diagnostic-json").onclick = () => perform(() => download("json", true));\n  controls();\n})();\n';
+var lab_client_default = `"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const state = { view: null, rowId: null, field: null, busy: false, editingId: null };
+  const labels = {
+    approved: "Approved",
+    rejected: "Rejected",
+    needs_review: "Needs review",
+  };
+  const text = (tag, value, className) => {
+    const element = document.createElement(tag);
+    element.textContent = value;
+    if (className) element.className = className;
+    return element;
+  };
+  const selected = () =>
+    state.view?.validation.records.find((row) => row.id === state.rowId);
+  function say(message) {
+    $("status").textContent = message;
+  }
+  function blockers(row) {
+    return [
+      ...state.view.validation.issues,
+      ...row.issues.filter(
+        (issue) => !["association_unverified", "cross_passage_association"].includes(issue.code),
+      ),
+      ...Object.values(row.fields).flatMap((field) => field.issues),
+    ];
+  }
+  function blocking(row) {
+    return blockers(row).length > 0;
+  }
+  function controls() {
+    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column"]) $(id).disabled = state.busy;
+    for (const id of [
+      "revalidate",
+      "approved-csv",
+      "approved-json",
+      "diagnostic-json",
+      "reject",
+      "pending",
+      "reviewer",
+      "note",
+      "confirm",
+      "edit-selected",
+      "add-record",
+      "save-correction",
+      "correction-note",
+    ])
+      $(id).disabled = state.busy || !state.view;
+    for (const button of document.querySelectorAll("#candidate-rows button"))
+      button.disabled = state.busy;
+    for (const field of document.querySelectorAll('#correction-fields input, #correction-fields select, #correction-fields textarea')) field.disabled = state.busy;
+    $("edit-selected").disabled = state.busy || !selected();
+    const row = selected();
+    const missing = [];
+    if (!$("reviewer").value.trim()) missing.push("enter your reviewer name");
+    if (!$("note").value.trim()) missing.push("enter a review note");
+    if (!$("confirm").checked) missing.push("check the source confirmation box");
+    const approved = row?.review_status === "approved";
+    $("approve").textContent = approved ? "Already approved" : "Approve selected record";
+    $("approve").disabled =
+      state.busy || !row || approved || blocking(row) || missing.length > 0;
+    $("approve").setAttribute("aria-describedby", "approval-note");
+    $("approval-note").textContent = !row
+      ? "Select a candidate to review."
+      : approved
+        ? "This record is already approved and will be included in Approved CSV and Approved JSON. No further approval is needed."
+        : blocking(row)
+          ? "Cannot approve this record: " + blockers(row).map((issue) => issue.message).join(" ") + " You can reject it or leave it pending."
+          : missing.length
+            ? "To approve " + row.id + ": " + missing.join("; ") + "."
+            : "Ready to approve " + row.id + ". Approval confirms that you checked the values against their source.";
+  }
+  async function request(path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      let error;
+      try {
+        error = await response.json();
+      } catch {}
+      throw Error(
+        error?.error ||
+          "The lab request failed. Your current session was kept.",
+      );
+    }
+    return response;
+  }
+  function clearDecision() {
+    $("note").value = "";
+    $("confirm").checked = false;
+  }
+  function highlight(paragraph, ranges) {
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    const merged = [];
+    for (const r of ranges.sort((a, b) => a.start - b.start)) {
+      const last = merged.at(-1);
+      if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+      else merged.push({ ...r });
+    }
+    for (const r of merged) {
+      fragment.append(
+        document.createTextNode(paragraph.slice(cursor, r.start)),
+      );
+      fragment.append(text("mark", paragraph.slice(r.start, r.end)));
+      cursor = r.end;
+    }
+    fragment.append(document.createTextNode(paragraph.slice(cursor)));
+    return fragment;
+  }
+  function renderSource() {
+    const { packet } = state.view.job,
+      row = selected(),
+      field = row?.fields[state.field];
+    $("source-info").textContent =
+      packet.passages.length +
+      " passages \xB7 Source attribution (not fetched): " +
+      (packet.source.url || "none") +
+      ". The URL was not fetched.";
+    $("source-hash").textContent = "SHA-256: " + packet.source.text_hash;
+    $("passages").replaceChildren(
+      ...packet.passages.map((p) => {
+        const spans = (field?.evidence || [])
+          .filter((e) => e.passage_id === p.id)
+          .map((e) => ({ start: e.passage_start, end: e.passage_end }));
+        const article = document.createElement("article");
+        article.className = "passage" + (spans.length ? " focused" : "");
+        article.dataset.passage = p.id;
+        article.append(text("h3", p.id));
+        const content = document.createElement("p");
+        content.append(highlight(p.text, spans));
+        article.append(content);
+        const outcome = state.view.validation.outcomes.find(
+          (o) => o.passage_id === p.id,
+        );
+        if (outcome)
+          article.append(
+            text(
+              "p",
+              (outcome.status === "no_result"
+                ? "Interpreter reported no result"
+                : outcome.status === "not_processed"
+                  ? "Not processed"
+                  : "Candidate support") +
+                " \u2014 " +
+                outcome.reason,
+              "hint",
+            ),
+          );
+        return article;
+      }),
+    );
+  }
+  function renderTable() {
+    const columns = state.view.job.packet.schema.fields;
+    const head = document.createElement("tr");
+    for (const value of [
+      "Record",
+      ...columns.map((f) => f.name),
+      "Review status",
+    ]) {
+      const th = text("th", value);
+      th.scope = "col";
+      head.append(th);
+    }
+    $("candidate-head").replaceChildren(head);
+    $("candidate-rows").replaceChildren(
+      ...state.view.validation.records.map((row) => {
+        const tr = document.createElement("tr");
+        tr.dataset.record = row.id;
+        tr.append(text("td", row.id));
+        for (const f of columns) {
+          const td = document.createElement("td"),
+            button = text("button", row.fields[f.name].value ?? "\u2014", "value");
+          button.type = "button";
+          button.dataset.record = row.id;
+          button.dataset.field = f.name;
+          button.setAttribute(
+            "aria-label",
+            "Inspect " + f.name + " for " + row.id,
+          );
+          button.setAttribute(
+            "aria-pressed",
+            String(state.rowId === row.id && state.field === f.name),
+          );
+          button.onclick = () => {
+            const changed = state.rowId !== row.id;
+            if (changed) clearDecision();
+            state.rowId = row.id;
+            state.field = f.name;
+            render();
+            if (changed) editCandidate();
+          };
+          td.append(button);
+          tr.append(td);
+        }
+        tr.append(
+          text(
+            "td",
+            labels[row.review_status] || row.review_status,
+            "status " + row.review_status,
+          ),
+        );
+        return tr;
+      }),
+    );
+  }
+  function renderEvidence() {
+    const row = selected(),
+      field = row?.fields[state.field];
+    if (!row || !field) {
+      $("field-title").textContent = "No candidates yet";
+      $("evidence").replaceChildren(text("p", "No supported pattern matched. Add a record manually using an exact quotation, or start a new session with a supported format."));
+      $("findings").replaceChildren();
+      $("review-title").textContent = "Add a candidate to review";
+      return;
+    }
+    $("field-title").textContent =
+      "Evidence for " + state.field + " \xB7 " + row.id;
+    const evidence = [];
+    for (const e of field.evidence) {
+      evidence.push(
+        text("blockquote", e.quote),
+        text(
+          "p",
+          "Validated literal quotation \xB7 " +
+            e.passage_id +
+            " \xB7 snapshot offsets " +
+            e.source_start +
+            "\u2013" +
+            e.source_end,
+          "hint",
+        ),
+      );
+    }
+    if (!field.evidence.length) {
+      evidence.push(
+        text("p", "No validated supporting quotation for this value."),
+      );
+      const raw = state.view.job.cache_entry.raw_response.records.find(
+        (r) => r.id === row.id,
+      )?.fields?.[state.field];
+      for (const e of raw?.evidence || [])
+        evidence.push(
+          text("blockquote", e.quote),
+          text("p", "Proposed quotation \xB7 not validated", "hint"),
+        );
+    }
+    $("evidence").replaceChildren(...evidence);
+    const list = document.createElement("ul");
+    for (const finding of [
+      ...state.view.validation.issues,
+      ...row.issues,
+      ...Object.values(row.fields).flatMap((f) => f.issues),
+    ])
+      list.append(text("li", finding.message));
+    $("findings").replaceChildren(
+      text("strong", row.review_status === "approved" ? "Original automated findings \xB7 human association review completed" : "System findings \u2014 retained after review"),
+      list,
+    );
+    $("review-title").textContent =
+      "Review " +
+      row.id +
+      " \xB7 " +
+      (labels[row.review_status] || row.review_status);
+
+  }
+  function render() {
+    if (!state.view) return;
+    if (!selected()) {
+      state.rowId = state.view.validation.records[0]?.id;
+      state.field = state.view.job.packet.schema.fields[0]?.name;
+    }
+    const c = state.view.counts;
+    $("counts").textContent =
+      c.candidates +
+      (c.candidates === 1 ? " candidate \xB7 " : " candidates \xB7 ") +
+      c.approved +
+      " approved \xB7 " +
+      c.rejected +
+      " rejected \xB7 " +
+      c.pending +
+      " pending";
+    renderTable();
+    renderSource();
+    renderEvidence();
+    $("history").replaceChildren(
+      ...state.view.job.events.map((event) =>
+        text(
+          "li",
+          "#" +
+            event.sequence +
+            " \xB7 " +
+            event.reviewer +
+            " \xB7 " +
+            labels[event.decision] +
+            " " +
+            event.record_id +
+            " \u2014 " +
+            event.note +
+            " (" +
+            new Date(event.at).toLocaleString() +
+            ")",
+        ),
+      ),
+    );
+    $("revision-history").replaceChildren(...(state.view.job.revisions || []).map((r, i) => text("li",
+      "Revision " + (i + 1) + " \xB7 " + r.reviewer + " \xB7 " + (r.record_id || "new record") + " \u2014 " + r.note + " \xB7 retained " + r.prior_events.length + " earlier review decisions")));
+    $("empty-history").hidden = state.view.job.events.length > 0;
+    $("workspace").hidden = false;
+    controls();
+  }
+  async function perform(task) {
+    if (state.busy) return;
+    state.busy = true;
+    controls();
+    try {
+      await task();
+    } catch (error) {
+      say(
+        error.message || "The request failed. Your current session was kept.",
+      );
+    } finally {
+      state.busy = false;
+      controls();
+    }
+  }
+  function editCandidate(add = false) {
+    const row = add ? null : selected();
+    state.editingId = row?.id || null;
+    $("correction-title").textContent = row ? "Correct " + row.id : "Add a new record";
+    $("correction-note").value = "";
+    const nodes = state.view.job.packet.schema.fields.map((f) => {
+      const section = document.createElement("section");
+      section.dataset.column = f.name;
+      const field = row?.fields[f.name], first = field?.evidence[0];
+      const valueLabel = text("label", f.name + " value");
+      const value = document.createElement("input");
+      value.dataset.part = "value"; value.required = true;
+      value.type = f.type === "number" ? "number" : "text";
+      if (f.type === "number") value.step = "any";
+      value.value = field?.value ?? "";
+      valueLabel.append(value);
+      const passageLabel = text("label", "Supporting paragraph");
+      const passage = document.createElement("select"); passage.dataset.part = "passage";
+      for (const p of state.view.job.packet.passages) {
+        const option = text("option", p.id + " \xB7 " + p.text.slice(0, 70));
+        option.value = p.id; passage.append(option);
+      }
+      passage.value = first?.passage_id || state.view.job.packet.passages[0].id;
+      passageLabel.append(passage);
+      const quoteLabel = text("label", "Exact quotation");
+      const quote = document.createElement("textarea"); quote.dataset.part = "quote";
+      quote.required = true; quote.maxLength = 2048; quote.value = first?.quote || "";
+      quoteLabel.append(quote);
+      const occurrenceLabel = text("label", "Quotation occurrence (zero-based)");
+      const occurrence = document.createElement("input"); occurrence.type = "number"; occurrence.min = "0";
+      occurrence.step = "1"; occurrence.required = true; occurrence.dataset.part = "occurrence";
+      occurrence.value = first?.occurrence ?? 0; occurrenceLabel.append(occurrence);
+      section.append(valueLabel, passageLabel, quoteLabel, occurrenceLabel);
+      return section;
+    });
+    $("correction-fields").replaceChildren(...nodes);
+    controls();
+  }
+  $("edit-selected").onclick = () => editCandidate();
+  $("add-record").onclick = () => editCandidate(true);
+  $("custom-input").onsubmit = (event) => {
+    event.preventDefault();
+    perform(async () => {
+      const response = await request("/api/interpretation/start", {
+        example_id: "custom-text",
+        source: { text: $("source-text").value, url: $("source-url").value.trim() || null },
+        schema: { fields: [
+          { name: $("name-column").value.trim(), type: "string", required: true },
+          { name: $("number-column").value.trim(), type: "number", required: true },
+        ] },
+      });
+      state.view = await response.json(); state.rowId = null; state.field = null;
+      clearDecision(); render(); editCandidate();
+      say("Parsed your supplied text with limited name/number rules. No AI calls. Review each candidate; unmatched paragraphs remain visible.");
+    });
+  };
+  $("correction-form").onsubmit = (event) => {
+    event.preventDefault();
+    if (!$("reviewer").value.trim()) { say("Enter your reviewer name above before saving a candidate."); return; }
+    perform(async () => {
+      const fields = {};
+      for (const section of document.querySelectorAll("#correction-fields section")) {
+        const field = state.view.job.packet.schema.fields.find(f => f.name === section.dataset.column);
+        const part = key => section.querySelector('[data-part="' + key + '"]').value;
+        fields[field.name] = { value: field.type === "number" ? Number(part("value")) : part("value"),
+          evidence: [{ passage_id: part("passage"), quote: part("quote"), occurrence: Number(part("occurrence")) }] };
+      }
+      const response = await request("/api/interpretation/action", { action: "correct", job: state.view.job,
+        correction: { record_id: state.editingId, fields, reviewer: $("reviewer").value.trim(), note: $("correction-note").value.trim() } });
+      state.view = await response.json();
+      state.rowId = state.editingId || state.view.validation.records.at(-1)?.id;
+      state.field = state.view.job.packet.schema.fields[0].name;
+      clearDecision(); render(); editCandidate();
+      say("Candidate revision saved and evidence revalidated. All current approvals reset; earlier decisions retained in revision history. Review the revised candidates before exporting.");
+    });
+  };
+  $("load").onclick = () =>
+    perform(async () => {
+      say("Loading a fictional scripted example\u2026");
+      const response = await request("/api/interpretation/start", {
+        example_id: $("example").value,
+      });
+      const view = await response.json();
+      state.view = view;
+      state.rowId = null;
+      state.field = null;
+      clearDecision();
+      render();
+      editCandidate();
+      say(
+        "Example loaded. Every candidate requires review; no AI inference was performed.",
+      );
+    });
+  $("confirm").onchange = controls;
+  $("reviewer").oninput = controls;
+  $("note").oninput = controls;
+  $("review").onsubmit = (event) => {
+    event.preventDefault();
+    const row = selected(),
+      decision = event.submitter?.dataset.decision;
+    if (!row || !decision) return;
+    if (!$("reviewer").value.trim() || !$("note").value.trim()) {
+      say("Enter a reviewer name and a meaningful review note.");
+      return;
+    }
+    if (decision === "approved" && (blocking(row) || !$("confirm").checked)) {
+      say(
+        "Approval requires clean checks and explicit association confirmation.",
+      );
+      return;
+    }
+    perform(async () => {
+      const response = await request("/api/interpretation/action", {
+        action: "review",
+        job: state.view.job,
+        decision: {
+          record_id: row.id,
+          decision,
+          reviewer: $("reviewer").value.trim(),
+          note: $("note").value.trim(),
+          confirmed_association: $("confirm").checked,
+        },
+      });
+      state.view = await response.json();
+      clearDecision();
+      render();
+      say(
+        "Appended " +
+          labels[decision].toLowerCase() +
+          " decision for " +
+          row.id +
+          ". Earlier events were kept.",
+      );
+    });
+  };
+  $("revalidate").onclick = () =>
+    perform(async () => {
+      const response = await request("/api/interpretation/action", {
+        action: "revalidate",
+        job: state.view.job,
+      });
+      state.view = await response.json();
+      render();
+      say(
+        "Cached scripted response revalidated. No interpreter or AI call was made.",
+      );
+    });
+  async function download(format, diagnostic) {
+    const response = await request("/api/interpretation/action", {
+      action: "export",
+      job: state.view.job,
+      format,
+      diagnostic,
+    });
+    const blob = await response.blob(),
+      url = URL.createObjectURL(blob),
+      anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download =
+      (diagnostic ? "interpretation-diagnostic" : "interpretation-approved") +
+      "." +
+      format;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    say(
+      "Downloaded " +
+        response.headers.get("X-Exported-Records") +
+        " " +
+        (diagnostic ? "diagnostic" : "approved") +
+        " records.",
+    );
+  }
+  $("approved-csv").onclick = () => perform(() => download("csv", false));
+  $("approved-json").onclick = () => perform(() => download("json", false));
+  $("diagnostic-json").onclick = () => perform(() => download("json", true));
+  controls();
+})();
+`;
 
 // src/interpretation/lab-api.js
 var examples = {
@@ -935,22 +1488,53 @@ async function readBody(request) {
   }
   return body;
 }
-async function checkJob(job) {
-  if (!only(job, ["example_id", "packet", "cache_entry", "events"]) || !Object.hasOwn(examples, job.example_id) || !Array.isArray(job.events) || job.events.length > 64)
-    fail(
-      "invalid_lab_job",
-      "Invalid lab session. Only the built-in fictional examples and up to 64 review events are supported."
-    );
-  const fixture = examples[job.example_id];
-  if (job.packet?.source?.text !== fixture.source.text || job.packet?.source?.url !== fixture.source.url || canonical(job.packet?.schema) !== canonical(fixture.schema) || canonical(job.cache_entry?.raw_response) !== canonical(fixture.scripted_response))
-    fail(
-      "example_mismatch",
-      "The lab accepts only its unchanged fictional source, columns and scripted response. Start the example again."
-    );
-  await revalidate(job.packet, job.cache_entry);
-  return exportInterpretation(job.packet, job.cache_entry, job.events, {
-    approvedOnly: false
+async function entryFor(packet, response) {
+  return (await runInterpretation(packet, await scriptedInterpreter(response))).cache_entry;
+}
+function applyCorrection(packet, response, change) {
+  if (!only(change, ["record_id", "fields", "reviewer", "note", "at", "prior_events"]) || typeof change.reviewer !== "string" || !change.reviewer.trim() || change.reviewer.length > 80 || typeof change.note !== "string" || !change.note.trim() || change.note.length > 1e3 || typeof change.at !== "string" || !Number.isFinite(Date.parse(change.at)) || !Array.isArray(change.prior_events) || change.prior_events.length > 64 || !plain(change.fields))
+    fail("invalid_correction", "A correction requires a reviewer, note, timestamp and requested fields.");
+  const next = structuredClone(response);
+  const index = next.records.findIndex((r) => r.id === change.record_id);
+  if (change.record_id !== null && index < 0) fail("unknown_record", "Select an existing record to correct.");
+  const candidate = { id: index < 0 ? "manual-" + (next.records.length + 1) : change.record_id, fields: change.fields };
+  if (index < 0) next.records.push(candidate);
+  else next.records[index] = candidate;
+  next.outcomes = packet.passages.map((p) => {
+    const ids = next.records.filter((r) => Object.values(r.fields).some((f) => Array.isArray(f?.evidence) && f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
+    return {
+      passage_id: p.id,
+      status: ids.length ? "records" : "no_result",
+      record_ids: ids,
+      reason: ids.length ? "Candidate evidence references this paragraph; associations require human review." : "No current candidate cites this paragraph. This is not proof that it contains no useful data."
+    };
   });
+  return next;
+}
+async function checkJob(job) {
+  if (!only(job, ["example_id", "packet", "cache_entry", "events", "revisions", "parser_version"]) || !Array.isArray(job.events) || job.events.length > 64 || job.revisions !== void 0 && (!Array.isArray(job.revisions) || job.revisions.length > 8))
+    fail("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
+  await revalidate(job.packet, job.cache_entry);
+  let response;
+  if (job.example_id === "custom-text") {
+    if (job.parser_version !== "name-number-v1") fail("parser_version", "Unsupported text parser version.");
+    response = extractTextRules(job.packet);
+  } else {
+    if (!Object.hasOwn(examples, job.example_id)) fail("invalid_lab_job", "Unknown example.");
+    const fixture = examples[job.example_id];
+    if (job.packet.source.text !== fixture.source.text || job.packet.source.url !== fixture.source.url || canonical(job.packet.schema) !== canonical(fixture.schema))
+      fail("example_mismatch", "The fictional example source or columns changed. Start again.");
+    response = fixture.scripted_response;
+  }
+  for (const change of job.revisions || []) {
+    const prior = await entryFor(job.packet, response);
+    await exportInterpretation(job.packet, prior, change.prior_events, { approvedOnly: false });
+    response = applyCorrection(job.packet, response, change);
+    await revalidate(job.packet, await entryFor(job.packet, response));
+  }
+  if (canonical(job.cache_entry.raw_response) !== canonical(response))
+    fail("example_mismatch", "Candidate data differs from its rule output and recorded corrections.");
+  return exportInterpretation(job.packet, job.cache_entry, job.events, { approvedOnly: false });
 }
 function view(job, result) {
   const records = result.json.validation.records;
@@ -963,7 +1547,7 @@ function view(job, result) {
       rejected: records.filter((r) => r.review_status === "rejected").length,
       pending: records.filter((r) => r.review_status === "needs_review").length
     },
-    notice: "Fictional scripted examples. No AI inference. Session-only, self-declared review; not an authenticated audit service."
+    notice: "Rule-based or scripted candidates, with optional human corrections. No AI inference. Session-only, self-declared review; not an authenticated audit service."
   };
 }
 async function labFetch(request) {
@@ -1007,29 +1591,50 @@ async function labFetch(request) {
   try {
     const body = await readBody(request);
     if (url.pathname === "/api/interpretation/start") {
-      if (!only(body, ["example_id"]) || !Object.hasOwn(examples, body.example_id))
-        fail(
-          "unknown_example",
-          "Choose one of the built-in fictional examples."
-        );
-      const fixture = examples[body.example_id], packet = await createPacket(fixture);
+      let packet, response;
+      if (body?.example_id === "custom-text") {
+        if (!only(body, ["example_id", "source", "schema"])) fail("invalid_input", "Send source text and two requested columns.");
+        packet = await createPacket({ source: body.source, schema: body.schema });
+        response = extractTextRules(packet);
+      } else {
+        if (!only(body, ["example_id"]) || !Object.hasOwn(examples, body.example_id))
+          fail("unknown_example", "Choose an example or paste your own text.");
+        const fixture = examples[body.example_id];
+        packet = await createPacket(fixture);
+        response = fixture.scripted_response;
+      }
       const run = await runInterpretation(
         packet,
-        await scriptedInterpreter(fixture.scripted_response)
+        await scriptedInterpreter(response)
       );
       const job = {
         example_id: body.example_id,
         packet,
         cache_entry: run.cache_entry,
-        events: []
+        events: [],
+        revisions: [],
+        ...body.example_id === "custom-text" ? { parser_version: "name-number-v1" } : {}
       };
       return reply(view(job, await checkJob(job)));
     }
     if (url.pathname !== "/api/interpretation/action")
       return reply({ error: "Not found", code: "not_found" }, 404);
-    if (!only(body, ["action", "job", "decision", "format", "diagnostic"]) || !["revalidate", "review", "export"].includes(body.action))
-      fail("invalid_action", "Choose revalidate, review or export.");
+    if (!only(body, ["action", "job", "decision", "format", "diagnostic", "correction"]) || !["revalidate", "review", "export", "correct"].includes(body.action))
+      fail("invalid_action", "Choose revalidate, review, correct or export.");
     const result = await checkJob(body.job);
+    if (body.action === "correct") {
+      if ((body.job.revisions || []).length >= 8) fail("revision_limit", "Maximum 8 revisions. Download diagnostic JSON before starting a new session.");
+      if (!only(body.correction, ["record_id", "fields", "reviewer", "note"])) fail("invalid_correction", "Unexpected correction fields.");
+      const change = { ...body.correction, at: (/* @__PURE__ */ new Date()).toISOString(), prior_events: body.job.events };
+      const response = applyCorrection(body.job.packet, body.job.cache_entry.raw_response, change);
+      const job = {
+        ...body.job,
+        revisions: [...body.job.revisions || [], change],
+        events: [],
+        cache_entry: await entryFor(body.job.packet, response)
+      };
+      return reply(view(job, await checkJob(job)));
+    }
     if (body.action === "review") {
       if (body.job.events.length >= 64)
         fail(
@@ -1058,6 +1663,10 @@ async function labFetch(request) {
       body.job.events,
       { approvedOnly: !body.diagnostic }
     );
+    exported.json.candidate_revision_history = body.job.revisions || [];
+    exported.json.original_candidates = body.job.example_id === "custom-text" ? extractTextRules(body.job.packet) : examples[body.job.example_id].scripted_response;
+    exported.json.method = body.job.example_id === "custom-text" ? "name-number-v1" : "fictional-scripted-example";
+    exported.json.notice = "Limited rules or scripted examples, with optional human corrections. No AI inference. Original automated findings are retained separately from human review.";
     const prefix = body.diagnostic ? "interpretation-diagnostic" : "interpretation-approved";
     return new Response(
       body.format === "csv" ? exported.csv : JSON.stringify(exported.json, null, 2) + "\n",

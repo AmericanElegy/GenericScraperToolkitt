@@ -251,3 +251,85 @@ test("lab rejects changed fixtures, modified history, cross-origin posts and exc
     await mf.dispose();
   }
 });
+
+const custom = (mf, text, fields = [
+  { name: 'name', type: 'string', required: true },
+  { name: 'score', type: 'number', required: true },
+]) => post(mf, '/api/interpretation/start', { example_id: 'custom-text', source: { text, url: null }, schema: { fields } });
+const correctedFields = (name, value, passage_id, quote) => ({
+  corps_name: { value: name, evidence: [{ passage_id, quote, occurrence: 0 }] },
+  score: { value, evidence: [{ passage_id, quote, occurrence: 0 }] },
+});
+test('pasted text uses bounded versioned rules, accounts for unsupported passages and never fetches', async () => {
+  const { mf, calls } = await setup();
+  try {
+    const response = await custom(mf, 'Alpha scored 98.6.\nBeta: -2.5\n\nA narrative with no supported pair.\n\nGamma scored 95.1. A correction says its score was 95.4.');
+    assert.equal(response.status, 200);
+    const value = await response.json();
+    assert.equal(value.counts.candidates, 3);
+    assert.equal(value.counts.approved, 0);
+    assert.equal(value.validation.records[1].fields.score.value, -2.5);
+    assert.equal(value.validation.outcomes[1].status, 'no_result');
+    assert.ok(value.validation.records[2].issues.some(i => i.code === 'interpreter_flag'));
+    assert.equal((await action(mf, value.job, 'revalidate')).status, 200);
+    assert.equal((await custom(mf, 'x'.repeat(16001))).status, 400);
+    assert.equal((await custom(mf, 'Alpha: 1', [
+      { name: 'constructor', type: 'string', required: true },
+      { name: 'score', type: 'number', required: true },
+    ])).status, 400);
+    const repeated = await (await custom(mf, 'Alpha: 1\nAlpha: 1')).json();
+    assert.equal(repeated.validation.records[1].fields.name.evidence[0].occurrence, 1);
+    assert.equal(repeated.validation.records[1].fields.name.evidence[0].source_start, 9);
+    assert.equal((await custom(mf, Array.from({length: 51}, (_, i) => 'Entity' + i + ': 1').join('\n'))).status, 400);
+    assert.equal(calls(), 0);
+  } finally { await mf.dispose(); }
+});
+test('candidate corrections preserve original decisions, reset approvals, and require new evidence review', async () => {
+  const { mf, calls } = await setup();
+  try {
+    let value = await start(mf);
+    value = await (await action(mf, value.job, 'review', { decision })).json();
+    const quote = 'Another Corps scored 95.1. A correction says its score was 95.4.';
+    const correction = { record_id: 'row-2', fields: correctedFields('Another Corps', 95.4, 'p002', quote), reviewer: 'Test simulation', note: 'Replace superseded score using the full correction passage.' };
+    const changed = await action(mf, value.job, 'correct', { correction });
+    assert.equal(changed.status, 200);
+    value = await changed.json();
+    assert.equal(value.counts.approved, 0);
+    assert.equal(value.job.revisions[0].prior_events[0].decision, 'approved');
+    assert.equal(value.validation.records[1].fields.score.value, 95.4);
+    assert.ok(!value.validation.records[1].issues.some(i => i.code === 'interpreter_flag'));
+    value = await (await action(mf, value.job, 'review', { decision: { ...decision, record_id: 'row-2' } })).json();
+    assert.equal(value.counts.approved, 1);
+    const exported = await (await action(mf, value.job, 'export', { format: 'json' })).json();
+    assert.equal(exported.validation.records[0].fields.score.value, 95.4);
+    assert.equal(exported.original_candidates.records[1].fields.score.value, 95.1);
+    assert.equal(exported.candidate_revision_history[0].prior_events.length, 1);
+    const invalid = await (await action(mf, value.job, 'correct', { correction: { ...correction, fields: correctedFields('Another Corps', 99.9, 'p002', 'fabricated quote') } })).json();
+    assert.ok(invalid.validation.records[1].fields.score.issues.length);
+    assert.equal((await action(mf, invalid.job, 'review', { decision: { ...decision, record_id: 'row-2' } })).status, 400);
+    const tampered = structuredClone(value.job);
+    tampered.revisions[0].prior_events[0].note = 'Changed without updating journal';
+    assert.equal((await action(mf, tampered, 'revalidate')).status, 400);
+    assert.equal(calls(), 0);
+  } finally { await mf.dispose(); }
+});
+test('unmatched pasted text permits a manually supplied candidate with exact evidence and independent checks', async () => {
+  const { mf } = await setup();
+  try {
+    let value = await (await custom(mf, 'The published result for Delta was 82.25 points.')).json();
+    assert.equal(value.counts.candidates, 0);
+    const quote = value.job.packet.passages[0].text;
+    const correction = { record_id: null, reviewer: 'Test simulation', note: 'Manual reading of the supplied passage.', fields: {
+      name: { value: 'Delta', evidence: [{ passage_id: 'p001', quote }] },
+      score: { value: 82.25, evidence: [{ passage_id: 'p001', quote }] },
+    } };
+    const response = await action(mf, value.job, 'correct', { correction });
+    assert.equal(response.status, 200);
+    value = await response.json();
+    assert.equal(value.counts.candidates, 1);
+    assert.equal(value.validation.outcomes[0].status, 'records');
+    const result = await action(mf, value.job, 'review', { decision: { ...decision, record_id: 'manual-1' } });
+    assert.equal(result.status, 200);
+    assert.equal((await result.json()).counts.approved, 1);
+  } finally { await mf.dispose(); }
+});

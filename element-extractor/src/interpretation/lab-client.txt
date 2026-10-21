@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { view: null, rowId: null, field: null, busy: false };
+  const state = { view: null, rowId: null, field: null, busy: false, editingId: null };
   const labels = {
     approved: "Approved",
     rejected: "Rejected",
@@ -31,7 +31,7 @@
     return blockers(row).length > 0;
   }
   function controls() {
-    for (const id of ["load", "example"]) $(id).disabled = state.busy;
+    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column"]) $(id).disabled = state.busy;
     for (const id of [
       "revalidate",
       "approved-csv",
@@ -42,10 +42,16 @@
       "reviewer",
       "note",
       "confirm",
+      "edit-selected",
+      "add-record",
+      "save-correction",
+      "correction-note",
     ])
       $(id).disabled = state.busy || !state.view;
     for (const button of document.querySelectorAll("#candidate-rows button"))
       button.disabled = state.busy;
+    for (const field of document.querySelectorAll('#correction-fields input, #correction-fields select, #correction-fields textarea')) field.disabled = state.busy;
+    $("edit-selected").disabled = state.busy || !selected();
     const row = selected();
     const missing = [];
     if (!$("reviewer").value.trim()) missing.push("enter your reviewer name");
@@ -113,7 +119,7 @@
       field = row?.fields[state.field];
     $("source-info").textContent =
       packet.passages.length +
-      " passages · Fictional source attribution: " +
+      " passages · Source attribution (not fetched): " +
       (packet.source.url || "none") +
       ". The URL was not fetched.";
     $("source-hash").textContent = "SHA-256: " + packet.source.text_hash;
@@ -183,10 +189,12 @@
             String(state.rowId === row.id && state.field === f.name),
           );
           button.onclick = () => {
-            if (state.rowId !== row.id) clearDecision();
+            const changed = state.rowId !== row.id;
+            if (changed) clearDecision();
             state.rowId = row.id;
             state.field = f.name;
             render();
+            if (changed) editCandidate();
           };
           td.append(button);
           tr.append(td);
@@ -205,7 +213,13 @@
   function renderEvidence() {
     const row = selected(),
       field = row?.fields[state.field];
-    if (!row || !field) return;
+    if (!row || !field) {
+      $("field-title").textContent = "No candidates yet";
+      $("evidence").replaceChildren(text("p", "No supported pattern matched. Add a record manually using an exact quotation, or start a new session with a supported format."));
+      $("findings").replaceChildren();
+      $("review-title").textContent = "Add a candidate to review";
+      return;
+    }
     $("field-title").textContent =
       "Evidence for " + state.field + " · " + row.id;
     const evidence = [];
@@ -246,7 +260,7 @@
     ])
       list.append(text("li", finding.message));
     $("findings").replaceChildren(
-      text("strong", "System findings — retained after review"),
+      text("strong", row.review_status === "approved" ? "Original automated findings · human association review completed" : "System findings — retained after review"),
       list,
     );
     $("review-title").textContent =
@@ -295,6 +309,8 @@
         ),
       ),
     );
+    $("revision-history").replaceChildren(...(state.view.job.revisions || []).map((r, i) => text("li",
+      "Revision " + (i + 1) + " · " + r.reviewer + " · " + (r.record_id || "new record") + " — " + r.note + " · retained " + r.prior_events.length + " earlier review decisions")));
     $("empty-history").hidden = state.view.job.events.length > 0;
     $("workspace").hidden = false;
     controls();
@@ -314,6 +330,82 @@
       controls();
     }
   }
+  function editCandidate(add = false) {
+    const row = add ? null : selected();
+    state.editingId = row?.id || null;
+    $("correction-title").textContent = row ? "Correct " + row.id : "Add a new record";
+    $("correction-note").value = "";
+    const nodes = state.view.job.packet.schema.fields.map((f) => {
+      const section = document.createElement("section");
+      section.dataset.column = f.name;
+      const field = row?.fields[f.name], first = field?.evidence[0];
+      const valueLabel = text("label", f.name + " value");
+      const value = document.createElement("input");
+      value.dataset.part = "value"; value.required = true;
+      value.type = f.type === "number" ? "number" : "text";
+      if (f.type === "number") value.step = "any";
+      value.value = field?.value ?? "";
+      valueLabel.append(value);
+      const passageLabel = text("label", "Supporting paragraph");
+      const passage = document.createElement("select"); passage.dataset.part = "passage";
+      for (const p of state.view.job.packet.passages) {
+        const option = text("option", p.id + " · " + p.text.slice(0, 70));
+        option.value = p.id; passage.append(option);
+      }
+      passage.value = first?.passage_id || state.view.job.packet.passages[0].id;
+      passageLabel.append(passage);
+      const quoteLabel = text("label", "Exact quotation");
+      const quote = document.createElement("textarea"); quote.dataset.part = "quote";
+      quote.required = true; quote.maxLength = 2048; quote.value = first?.quote || "";
+      quoteLabel.append(quote);
+      const occurrenceLabel = text("label", "Quotation occurrence (zero-based)");
+      const occurrence = document.createElement("input"); occurrence.type = "number"; occurrence.min = "0";
+      occurrence.step = "1"; occurrence.required = true; occurrence.dataset.part = "occurrence";
+      occurrence.value = first?.occurrence ?? 0; occurrenceLabel.append(occurrence);
+      section.append(valueLabel, passageLabel, quoteLabel, occurrenceLabel);
+      return section;
+    });
+    $("correction-fields").replaceChildren(...nodes);
+    controls();
+  }
+  $("edit-selected").onclick = () => editCandidate();
+  $("add-record").onclick = () => editCandidate(true);
+  $("custom-input").onsubmit = (event) => {
+    event.preventDefault();
+    perform(async () => {
+      const response = await request("/api/interpretation/start", {
+        example_id: "custom-text",
+        source: { text: $("source-text").value, url: $("source-url").value.trim() || null },
+        schema: { fields: [
+          { name: $("name-column").value.trim(), type: "string", required: true },
+          { name: $("number-column").value.trim(), type: "number", required: true },
+        ] },
+      });
+      state.view = await response.json(); state.rowId = null; state.field = null;
+      clearDecision(); render(); editCandidate();
+      say("Parsed your supplied text with limited name/number rules. No AI calls. Review each candidate; unmatched paragraphs remain visible.");
+    });
+  };
+  $("correction-form").onsubmit = (event) => {
+    event.preventDefault();
+    if (!$("reviewer").value.trim()) { say("Enter your reviewer name above before saving a candidate."); return; }
+    perform(async () => {
+      const fields = {};
+      for (const section of document.querySelectorAll("#correction-fields section")) {
+        const field = state.view.job.packet.schema.fields.find(f => f.name === section.dataset.column);
+        const part = key => section.querySelector('[data-part="' + key + '"]').value;
+        fields[field.name] = { value: field.type === "number" ? Number(part("value")) : part("value"),
+          evidence: [{ passage_id: part("passage"), quote: part("quote"), occurrence: Number(part("occurrence")) }] };
+      }
+      const response = await request("/api/interpretation/action", { action: "correct", job: state.view.job,
+        correction: { record_id: state.editingId, fields, reviewer: $("reviewer").value.trim(), note: $("correction-note").value.trim() } });
+      state.view = await response.json();
+      state.rowId = state.editingId || state.view.validation.records.at(-1)?.id;
+      state.field = state.view.job.packet.schema.fields[0].name;
+      clearDecision(); render(); editCandidate();
+      say("Candidate revision saved and evidence revalidated. All current approvals reset; earlier decisions retained in revision history. Review the revised candidates before exporting.");
+    });
+  };
   $("load").onclick = () =>
     perform(async () => {
       say("Loading a fictional scripted example…");
@@ -326,6 +418,7 @@
       state.field = null;
       clearDecision();
       render();
+      editCandidate();
       say(
         "Example loaded. Every candidate requires review; no AI inference was performed.",
       );

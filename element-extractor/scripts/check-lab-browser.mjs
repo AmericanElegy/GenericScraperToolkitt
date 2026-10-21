@@ -323,6 +323,33 @@ try {
     await evaluate('document.getElementById("approve").disabled'),
     true,
   );
+  // Replace the deliberately swapped score through the real candidate editor.
+  await evaluate(`document.getElementById("correction-panel").open=true;document.getElementById("edit-selected").click();document.querySelector('#correction-fields [data-column=score] [data-part=value]').value="98.6";document.getElementById("correction-note").value="Corrected the swapped score using the source.";document.getElementById("save-correction").click()`);
+  await waitFor(() => evaluate('document.querySelectorAll("#revision-history li").length===1 && !document.getElementById("load").disabled'));
+  assert.doesNotMatch(await evaluate('document.getElementById("findings").textContent'), /association is wrong/);
+  await evaluate('document.getElementById("note").value="Checked Alpha and 98.6 in the quotation.";document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"));document.getElementById("approve").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled'));
+  // Custom paste, unmatched paragraph and inert markup.
+  await evaluate('document.getElementById("source-text").value=' + JSON.stringify('Alpha scored 12.5.\n\nThe result for Delta was 82.25 points. <img src=x onerror=alert(1)>') + ';document.getElementById("extract").click()');
+  await waitFor(() => evaluate('document.getElementById("status").textContent.includes("Parsed your supplied text") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("counts").textContent'), /1 candidate.*0 approved/);
+  assert.equal(await evaluate('document.querySelectorAll("#passages img").length'), 0);
+  assert.match(await evaluate('document.getElementById("passages").textContent'), /No supported name/);
+  await evaluate('document.getElementById("correction-panel").open=true;document.getElementById("add-record").click()');
+  const manualQuote = 'The result for Delta was 82.25 points. <img src=x onerror=alert(1)>';
+  await evaluate(`(() => {
+    for (const [name,value] of [["entity_name","Delta"],["score","82.25"]]) {
+      const section = document.querySelector('#correction-fields [data-column='+name+']');
+      section.querySelector('[data-part=value]').value=value;
+      section.querySelector('[data-part=passage]').value='p002';
+      section.querySelector('[data-part=quote]').value=${JSON.stringify(manualQuote)};
+    }
+    document.getElementById('correction-note').value='Manual extraction from the unsupported paragraph.';
+    document.getElementById('save-correction').click();
+  })()`);
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("2 candidates") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("candidate-rows").textContent'), /Delta.*82.25/);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
   await send("Page.reload");
   await waitFor(() =>
     evaluate(
@@ -336,7 +363,7 @@ try {
   assert.equal(errors.length, 0, JSON.stringify(errors));
   assert.equal(outboundCalls, 0);
   console.log(
-    "PASS: lab evidence highlighting, review guards, approve/reject/pending history, offline revalidation, real CSV/JSON downloads, inert review text, mobile layout and session reset; no outbound calls.",
+    "PASS: lab evidence highlighting, review guards, approve/reject/pending history, offline revalidation, real CSV/JSON downloads, inert review text, mobile layout, custom text, manual addition, candidate correction and session reset; no outbound calls.",
   );
 } finally {
   ws?.close();
