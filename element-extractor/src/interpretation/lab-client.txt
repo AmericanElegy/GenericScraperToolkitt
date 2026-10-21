@@ -18,17 +18,17 @@
   function say(message) {
     $("status").textContent = message;
   }
+  function blockers(row) {
+    return [
+      ...state.view.validation.issues,
+      ...row.issues.filter(
+        (issue) => !["association_unverified", "cross_passage_association"].includes(issue.code),
+      ),
+      ...Object.values(row.fields).flatMap((field) => field.issues),
+    ];
+  }
   function blocking(row) {
-    return (
-      state.view.validation.issues.length > 0 ||
-      row.issues.some(
-        (issue) =>
-          !["association_unverified", "cross_passage_association"].includes(
-            issue.code,
-          ),
-      ) ||
-      Object.values(row.fields).some((field) => field.issues.length)
-    );
+    return blockers(row).length > 0;
   }
   function controls() {
     for (const id of ["load", "example"]) $(id).disabled = state.busy;
@@ -47,8 +47,24 @@
     for (const button of document.querySelectorAll("#candidate-rows button"))
       button.disabled = state.busy;
     const row = selected();
+    const missing = [];
+    if (!$("reviewer").value.trim()) missing.push("enter your reviewer name");
+    if (!$("note").value.trim()) missing.push("enter a review note");
+    if (!$("confirm").checked) missing.push("check the source confirmation box");
+    const approved = row?.review_status === "approved";
+    $("approve").textContent = approved ? "Already approved" : "Approve selected record";
     $("approve").disabled =
-      state.busy || !row || blocking(row) || !$("confirm").checked;
+      state.busy || !row || approved || blocking(row) || missing.length > 0;
+    $("approve").setAttribute("aria-describedby", "approval-note");
+    $("approval-note").textContent = !row
+      ? "Select a candidate to review."
+      : approved
+        ? "This record is already approved and will be included in Approved CSV and Approved JSON. No further approval is needed."
+        : blocking(row)
+          ? "Cannot approve this record: " + blockers(row).map((issue) => issue.message).join(" ") + " You can reject it or leave it pending."
+          : missing.length
+            ? "To approve " + row.id + ": " + missing.join("; ") + "."
+            : "Ready to approve " + row.id + ". Approval confirms that you checked the values against their source.";
   }
   async function request(path, body) {
     const response = await fetch(path, {
@@ -238,9 +254,7 @@
       row.id +
       " · " +
       (labels[row.review_status] || row.review_status);
-    $("approval-note").textContent = blocking(row)
-      ? "Approval blocked by validation or interpreter findings. Reject or leave pending; corrected candidates require a new validation."
-      : "Literal checks passed. They do not verify the association. Review the source, enter a note and explicitly confirm before approving.";
+
   }
   function render() {
     if (!state.view) return;
@@ -317,6 +331,8 @@
       );
     });
   $("confirm").onchange = controls;
+  $("reviewer").oninput = controls;
+  $("note").oninput = controls;
   $("review").onsubmit = (event) => {
     event.preventDefault();
     const row = selected(),

@@ -134,6 +134,17 @@ try {
     await evaluate('document.getElementById("approve").disabled'),
     true,
   );
+  assert.match(
+    await evaluate('document.getElementById("approval-note").textContent'),
+    /reviewer name.*review note.*confirmation box/,
+  );
+  await evaluate('document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"))');
+  assert.equal(await evaluate('document.getElementById("approve").disabled'), true);
+  await evaluate('document.getElementById("reviewer").value="BrowserTestSimulation";document.getElementById("reviewer").dispatchEvent(new Event("input"))');
+  assert.match(await evaluate('document.getElementById("approval-note").textContent'), /enter a review note/);
+  assert.equal(await evaluate('document.getElementById("approve").disabled'), true);
+  await evaluate('document.getElementById("note").value="Checked fictional source pairing.";document.getElementById("note").dispatchEvent(new Event("input"))');
+  assert.equal(await evaluate('document.getElementById("approve").disabled'), false);
   await evaluate(
     'document.querySelector("button[data-record=row-1][data-field=score]").click()',
   );
@@ -155,6 +166,14 @@ try {
     evaluate(
       'document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled',
     ),
+  );
+  assert.equal(
+    await evaluate('document.getElementById("approve").textContent'),
+    "Already approved",
+  );
+  assert.match(
+    await evaluate('document.getElementById("approval-note").textContent'),
+    /already approved.*included in Approved CSV/,
   );
   assert.equal(
     await evaluate('document.querySelectorAll("#history li").length'),
@@ -208,6 +227,10 @@ try {
   assert.equal(
     await evaluate('document.getElementById("approve").disabled'),
     true,
+  );
+  assert.match(
+    await evaluate('document.getElementById("approval-note").textContent'),
+    /Cannot approve.*correction/,
   );
   await evaluate('document.getElementById("reject").click()');
   await waitFor(() =>
