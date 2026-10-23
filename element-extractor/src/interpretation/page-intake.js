@@ -1,6 +1,6 @@
 // Full-page intake retains the complete source and maps bounded selections back to it.
 import { ContractError, canonical, LIMITS } from './pipeline.js';
-import { PROSE_SCHEMA, PROSE_VERSION } from './prose-rules.js';
+import { PROSE_SCHEMA, PROSE_VERSION, LEGACY_PROSE_VERSION } from './prose-rules.js';
 import { WAGE_SCHEMA } from './wage-table.js';
 export const PAGE_TABLE_VERSION = 'pasted-page-table-v1';
 export const PAGE_LIMIT = 64000;
@@ -48,7 +48,7 @@ export function needsPageIntake(source) {
   const text = source.text.replace(/\r\n?/g, '\n');
   return text.length > LIMITS.text || paragraphs(text).length > LIMITS.passages || pageHeaders(text).length > 1;
 }
-export function planPage(source) {
+export function planPage(source, proseVersion = PROSE_VERSION) {
   if (!source || Object.keys(source).some(k => !['text', 'url'].includes(k)) || typeof source.text !== 'string' || !source.text.trim() || source.text.length > PAGE_LIMIT)
     throw new ContractError('page_limit', 'Paste nonempty page text up to 64,000 characters. Nothing is silently truncated.');
   const text = source.text.replace(/\r\n?/g, '\n');
@@ -90,7 +90,7 @@ export function planPage(source) {
   for (const r of consumed) { rest.push(...paragraphs(text, at, r.start)); at = r.end; }
   rest.push(...paragraphs(text, at));
   let batch = [], size = 0, part = 0;
-  const flush = () => { if (batch.length) { add('Other page text · part ' + (++part), batch, PROSE_SCHEMA, PROSE_VERSION, 'prose'); batch = []; size = 0; } };
+  const flush = () => { if (batch.length) { add('Other page text · part ' + (++part), batch, PROSE_SCHEMA, proseVersion, 'prose'); batch = []; size = 0; } };
   for (const p of rest) {
     if (p.text.length > 12000) throw new ContractError('section_limit', 'A single page paragraph exceeds 12,000 characters. Add paragraph breaks before parsing.');
     if (batch.length >= 24 || size + p.text.length + 2 > 12000) flush();

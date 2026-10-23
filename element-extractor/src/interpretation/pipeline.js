@@ -757,36 +757,25 @@ async function replayReviews(packet, validation, events = []) {
   }
   return states;
 }
-export async function appendReview(
-  packet,
-  entry,
-  events,
-  decision,
-  now = new Date().toISOString(),
-) {
+export async function appendReview(packet, entry, events, decision, now = new Date().toISOString()) {
+  return appendReviewBatch(packet, entry, events, [decision], now);
+}
+export async function appendReviewBatch(packet, entry, events, decisions, now = new Date().toISOString()) {
+  check(Array.isArray(decisions) && decisions.length > 0 && decisions.length <= LIMITS.records,
+    "invalid_review", "Provide a bounded set of review decisions.");
   const validation = await revalidate(packet, entry);
   await replayReviews(packet, validation, events);
-  check(
-    keys(decision, [
-      "record_id",
-      "decision",
-      "reviewer",
-      "note",
-      "confirmed_association",
-    ]),
-    "invalid_review",
-    "Unexpected review fields.",
-  );
-  const body = {
-    ...copy(decision),
-    confirmed_association: decision.confirmed_association ?? false,
-    sequence: events.length + 1,
-    previous_hash: events.at(-1)?.hash ?? null,
-    packet_hash: packet.hash,
-    validation_hash: await digest(validation),
-    at: now,
-  };
-  const updated = [...copy(events), { ...body, hash: await digest(body) }];
+  const validationHash = await digest(validation), updated = copy(events);
+  for (const decision of decisions) {
+    check(keys(decision, ["record_id", "decision", "reviewer", "note", "confirmed_association"]),
+      "invalid_review", "Unexpected review fields.");
+    const body = { ...copy(decision), confirmed_association: decision.confirmed_association ?? false,
+      sequence: updated.length + 1, previous_hash: updated.at(-1)?.hash ?? null,
+      packet_hash: packet.hash, validation_hash: validationHash, at: now };
+    updated.push({ ...body, hash: await digest(body) });
+  }
+  // Check the whole proposed journal before returning it; callers retain the old
+  // state on any failure. Validation is shared, while every row has its own event.
   await replayReviews(packet, validation, updated);
   return freeze(updated);
 }

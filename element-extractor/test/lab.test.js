@@ -362,7 +362,7 @@ test('automatic prose mode suggests columns for the full BLS passage and preserv
     assert.equal(value.counts.approved, 1);
     assert.equal((await action(mf, value.job, 'revalidate')).status, 200);
     const exported = await (await action(mf, value.job, 'export', { format: 'json' })).json();
-    assert.equal(exported.method, 'prose-facts-v1');
+    assert.equal(exported.method, 'prose-facts-v2');
     assert.equal(exported.original_candidates.records.length, 4);
     assert.equal(exported.validation.records.length, 1);
     assert.equal(exported.validation.records[0].fields.measure.value, 'establishments');
@@ -549,5 +549,98 @@ test('portable full-page sessions restore the selected batch, document mapping a
     assert.equal(restored.validation.records[0].fields.annual_wage_dollars.value, 49690);
     const evidence = restored.validation.records[0].fields.annual_wage_dollars.evidence[0];
     assert.equal(restored.document.text.slice(evidence.document_start, evidence.document_end), evidence.quote);
+  } finally { await mf.dispose(); }
+});
+
+const batch = (mf, job, ids, extra = {}) => action(mf, job, 'review_batch', {
+  record_ids: ids, reviewer: 'BatchTestSimulation', note: 'Checked the typed header mapping and row alignment.', confirmed_mapping: true, ...extra,
+});
+test('table batch review is explicit and atomic, creates a separate human journal decision per eligible row, and survives session restore', async () => {
+  const { mf, calls } = await setup();
+  try {
+    const text = await readFile(new URL('./fixtures/pasted-wage-table.txt', import.meta.url), 'utf8');
+    const value = await (await autoText(mf, text)).json();
+    assert.equal(value.review_queue.eligible_ids.length, 23);
+    assert.equal(value.review_queue.exception_ids.length, 0);
+    assert.equal((await batch(mf, value.job, value.review_queue.eligible_ids, { confirmed_mapping: false })).status, 400);
+    assert.equal((await batch(mf, value.job, ['row-1', 'row-1'])).status, 400);
+    assert.equal((await batch(mf, value.job, ['row-1', 'not-a-row'])).status, 400);
+    const response = await batch(mf, value.job, value.review_queue.eligible_ids);
+    assert.equal(response.status, 200);
+    const approved = await response.json();
+    assert.equal(approved.counts.approved, 23);
+    assert.equal(approved.job.events.length, 23);
+    assert.ok(approved.job.events.every(e => e.reviewer === 'BatchTestSimulation' && e.note.startsWith('Batch table review')));
+    assert.equal(approved.review_queue.eligible_ids.length, 0);
+    assert.equal((await batch(mf, approved.job, ['row-1'])).status, 400);
+    const csv = await (await action(mf, approved.job, 'export', { format: 'csv' })).text();
+    assert.equal(csv.trim().split('\r\n').length, 24);
+    const session = await (await action(mf, approved.job, 'save')).json();
+    const restored = await (await post(mf, '/api/interpretation/action', { action: 'restore', session })).json();
+    assert.equal(restored.counts.approved, 23);
+    assert.equal(value.job.events.length, 0);
+    assert.equal(calls(), 0);
+  } finally { await mf.dispose(); }
+});
+test('batch routing excludes prose, validation exceptions and manually changed table rows', async () => {
+  const { mf } = await setup();
+  try {
+    const prose = await (await autoText(mf, 'Participation was 20 percent.')).json();
+    assert.equal(prose.review_queue.eligible_ids.length, 0);
+    assert.equal(prose.review_queue.individual_ids.length, 1);
+    assert.equal((await batch(mf, prose.job, ['row-1'])).status, 400);
+    const header = 'Major occupational group Percent of total employment Mean hourly wage ($) United States Jacksonville United States Jacksonville';
+    const value = await (await autoText(mf, header + '\n\nAlpha 10 12 20 21\n\nBeta 120 12 20 21')).json();
+    assert.deepEqual(value.review_queue.eligible_ids, ['row-1']);
+    assert.deepEqual(value.review_queue.exception_ids, ['row-2']);
+    assert.equal((await batch(mf, value.job, ['row-1', 'row-2'])).status, 400);
+    const fields = structuredClone(value.job.cache_entry.raw_response.records[0].fields);
+    const changed = await (await action(mf, value.job, 'correct', { correction: { record_id: 'row-1', fields, reviewer: 'Test simulation', note: 'Explicitly rechecked this candidate.' } })).json();
+    assert.equal(changed.review_queue.eligible_ids.length, 0);
+    assert.deepEqual(changed.review_queue.individual_ids, ['row-1']);
+    assert.equal((await batch(mf, changed.job, ['row-1'])).status, 400);
+  } finally { await mf.dispose(); }
+});
+test('new prose grammar preserves the measured subject instead of confusing it with a following list; legacy sessions remain replayable', async () => {
+  const { mf } = await setup();
+  try {
+    const text = 'Office and administrative support occupations accounted for 12.6 percent of Jacksonville area employment, followed by transportation and material moving occupations (9.9 percent), sales and related occupations (9.8 percent).';
+    const value = await (await autoText(mf, text)).json();
+    assert.equal(value.job.parser_version, 'prose-facts-v2');
+    assert.equal(value.validation.records[0].fields.measure.value, 'Office and administrative support occupations');
+    assert.equal(value.validation.records[0].fields.value.value, 12.6);
+    assert.equal(value.review_queue.eligible_ids.length, 0);
+    const full = text + ' Major occupational groups on the lower end of local employment included life, physical, and social science (0.5 percent) and legal (0.9 percent).';
+    // The screenshot also has a 9.4% food-service item.
+    const six = full.replace('sales and related occupations (9.8 percent).', 'sales and related occupations (9.8 percent), and food preparation and serving related occupations (9.4 percent).');
+    const list = await (await autoText(mf, six)).json();
+    assert.deepEqual(list.validation.records.map(r => [r.fields.measure.value, r.fields.value.value]), [
+      ['Office and administrative support occupations', 12.6],
+      ['transportation and material moving occupations', 9.9],
+      ['sales and related occupations', 9.8],
+      ['food preparation and serving related occupations', 9.4],
+      ['life, physical, and social science', 0.5],
+      ['legal', 0.9],
+    ]);
+    assert.equal(list.review_queue.individual_ids.length, 6);
+    assert.equal(list.review_queue.eligible_ids.length, 0);
+    for (const row of list.validation.records) {
+      assert.equal(row.fields.measure.issues.length, 0);
+      assert.equal(row.fields.value.issues.length, 0);
+      const e = row.fields.value.evidence[0];
+      assert.equal(list.job.packet.source.text.slice(e.source_start, e.source_end), e.quote);
+    }
+    assert.equal(list.validation.records[1].fields.value.evidence[0].quote, 'transportation and material moving occupations (9.9 percent)');
+    const { extractProseRules, LEGACY_PROSE_VERSION } = await import('../src/interpretation/prose-rules.js');
+    const { runInterpretation, scriptedInterpreter } = await import('../src/interpretation/pipeline.js');
+    const job = structuredClone(value.job);
+    job.parser_version = LEGACY_PROSE_VERSION;
+    job.cache_entry = (await runInterpretation(job.packet, await scriptedInterpreter(extractProseRules(job.packet, LEGACY_PROSE_VERSION)))).cache_entry;
+    assert.equal((await action(mf, job, 'revalidate')).status, 200);
+    const pageText = await readFile(new URL('./fixtures/bls-full-page.txt', import.meta.url), 'utf8');
+    const page = await (await post(mf, '/api/interpretation/start', { example_id: 'custom-text', mode: 'auto', source: { text: pageText }, dataset_id: 'section-4' })).json();
+    page.job.parser_version = LEGACY_PROSE_VERSION;
+    page.job.cache_entry = (await runInterpretation(page.job.packet, await scriptedInterpreter(extractProseRules(page.job.packet, LEGACY_PROSE_VERSION)))).cache_entry;
+    assert.equal((await action(mf, page.job, 'revalidate')).status, 200);
   } finally { await mf.dispose(); }
 });

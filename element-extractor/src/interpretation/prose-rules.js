@@ -1,7 +1,8 @@
 // Versioned, offline fact suggestions. These patterns do not understand arbitrary prose.
 import { ContractError, LIMITS, canonical } from './pipeline.js';
 import { extractTextRules } from './text-rules.js';
-export const PROSE_VERSION = 'prose-facts-v1';
+export const PROSE_VERSION = 'prose-facts-v2';
+export const LEGACY_PROSE_VERSION = 'prose-facts-v1';
 export const PROSE_SCHEMA = { fields: [
   { name: 'measure', type: 'string', required: true },
   { name: 'value', type: 'number', required: true },
@@ -12,7 +13,7 @@ const number = '[-+]?\\d+(?:\\.\\d+)?';
 const qualifiers = 'over|more than|at least|about|approximately|roughly|nearly|under|less than|up to|at most';
 const counts = 'areas|states|employees|workers|establishments|respondents|participants|schools|hospitals|people|households|companies|students|patients';
 const flags = /\b(correct(?:ion|ed)?|revised|no|not|never|instead|however|previously|disputed|forecast|projected|estimated)\b/i;
-export function extractProseRules(packet) {
+export function extractProseRules(packet, version = PROSE_VERSION) {
   if (canonical(packet.schema) !== canonical(PROSE_SCHEMA))
     throw new ContractError('prose_schema', 'Automatic prose mode uses its suggested measure/value/unit/qualifier columns.');
   const records = [], outcomes = [];
@@ -25,35 +26,67 @@ export function extractProseRules(packet) {
     for (const sentence of sentences) {
       const raw = passage.text.slice(sentence.index, sentence.index + sentence[0].length).trim();
       const searchable = sentence[0].trim();
-      const add = (measure, value, unit = null, qualifier = null, uncertain = false) => {
+      const add = (measure, value, unit = null, qualifier = null, uncertain = false, quoteOverride = null) => {
+        const quote = quoteOverride || raw;
         measure = measure.trim().replace(/[\s,;:.]+$/, '');
         if (!measure || !/[\p{L}]/u.test(measure)) return;
-        if (raw.length > LIMITS.quote) throw new ContractError('quote_limit', 'A matched sentence exceeds the 2,048-character evidence limit. Paste a smaller section.');
+        if (quote.length > LIMITS.quote) throw new ContractError('quote_limit', 'A matched sentence exceeds the 2,048-character evidence limit. Paste a smaller section.');
         const key = canonical([measure, value, unit, qualifier, sentence.index]);
         if (seen.has(key)) return;
         seen.add(key);
         if (records.length >= LIMITS.records) throw new ContractError('record_limit', 'More than 50 suggested facts. Paste a smaller section; nothing was silently truncated.');
         const id = 'row-' + (records.length + 1);
-        const local = passage.text.indexOf(raw, sentence.index);
-        let occurrence = 0, found = passage.text.indexOf(raw);
-        while (found >= 0 && found < local) { occurrence++; found = passage.text.indexOf(raw, found + 1); }
-        const evidence = [{ passage_id: passage.id, quote: raw, occurrence }];
+        const local = passage.text.indexOf(quote, sentence.index);
+        let occurrence = 0, found = passage.text.indexOf(quote);
+        while (found >= 0 && found < local) { occurrence++; found = passage.text.indexOf(quote, found + 1); }
+        const evidence = [{ passage_id: passage.id, quote, occurrence }];
         const field = v => ({ value: v, evidence: v === null ? [] : evidence });
         const candidate = { id, fields: { measure: field(measure), value: field(value), unit: field(unit), qualifier: field(qualifier) } };
         if (flags.test(searchable) || uncertain)
-          candidate.issues = ['This sentence contains uncertainty, correction, negation or a percentage outside 0–100. Inspect the context and explicitly correct the candidate before approval.'];
+          candidate.issues = [version === LEGACY_PROSE_VERSION ? 'This sentence contains uncertainty, correction, negation or a percentage outside 0–100. Inspect the context and explicitly correct the candidate before approval.' : 'This sentence contains uncertainty, correction, negation, ambiguous context or a percentage outside 0–100. Inspect the context and explicitly correct the candidate before approval.'];
         records.push(candidate); ids.push(id);
       };
+      const current = version !== LEGACY_PROSE_VERSION;
+      let accountedMatch = false;
+      // Explicit subject → share → context. The context is not the measured subject.
+      if (current) {
+        const share = searchable.match(new RegExp('^(.{1,240}?)\\s+accounted for\\s+('+number+')\\s*(percent|%)\\s+of\\s+(.+?)(?:,\\s+followed by\\s+.+)?\\.?$', 'i'));
+        if (share) {
+          const listAt = searchable.search(/,\s+followed by\b/i);
+          add(share[1], Number(share[2]), share[3], null, Number(share[2]) < 0 || Number(share[2]) > 100,
+            listAt >= 0 ? raw.slice(0, listAt) : raw);
+          accountedMatch = true;
+        }
+      }
+      // Parenthetical list items retain their own subject, including commas and
+      // internal conjunctions in names such as "life, physical, and social science".
+      if (current) {
+        let previousEnd = 0;
+        for (const m of searchable.matchAll(new RegExp('\\(\\s*('+number+')\\s*(percent|%)\\s*\\)', 'gi'))) {
+          let subject = searchable.slice(previousEnd, m.index).trim();
+          previousEnd = m.index + m[0].length;
+          const listIntro = [...subject.matchAll(/\b(?:followed by|included|include|including)\s+/gi)].at(-1);
+          if (listIntro) subject = subject.slice(listIntro.index + listIntro[0].length);
+          else if (subject.includes(":")) subject = subject.slice(subject.lastIndexOf(":") + 1);
+          subject = subject.replace(/^[\s,;]+/, "").replace(/^(?:and|or)\s+/i, "").trim();
+          if (!subject || subject.length > 180 || /\d|[.!?]/.test(subject)) continue;
+          const subjectAt = searchable.lastIndexOf(subject, m.index);
+          add(subject, Number(m[1]), m[2], null, Number(m[1]) < 0 || Number(m[1]) > 100,
+            subjectAt >= 0 ? raw.slice(subjectAt, m.index + m[0].length) : raw);
+        }
+      }
       // Each rate is associated only with its immediately following "based on" label.
       const based = new RegExp('(?<![\\w.,-])(?:('+qualifiers+')\\s+)?('+number+')\\s*(percent|%)\\s+(?:based on|of)\\s+([^.;!?]+?)(?=\\s+(?:and|or)\\s+(?:(?:'+qualifiers+')\\s+)?'+number+'\\s*(?:percent|%)|[.;!?]|$)', 'gi');
       let rateFound = false;
       for (const m of searchable.matchAll(based)) {
-        add(m[4], Number(m[2]), m[3], m[1] || null, Number(m[2]) < 0 || Number(m[2]) > 100);
+        if (current && accountedMatch) continue;
+        const ambiguous = current && /\b(?:followed by|compared (?:to|with)|respectively|whereas|while)\b/i.test(m[4]);
+        add(m[4], Number(m[2]), m[3], m[1] || null, Number(m[2]) < 0 || Number(m[2]) > 100 || ambiguous);
         rateFound = true;
       }
       // Conservative single-clause labels. Multiple unassociated rates are left unmatched.
       const percentCount = [...searchable.matchAll(new RegExp(number+'\\s*(?:percent|%)', 'gi'))].length;
-      if (!rateFound && percentCount === 1) {
+      if (!accountedMatch && !rateFound && percentCount === 1) {
         const m = searchable.match(new RegExp('^(.{1,180}?)\\s*(?::\\s*|\\s+(?:was|were|is|are|reached|totaled|at)\\s+)(?:('+qualifiers+')\\s+)?('+number+')\\s*(percent|%)\\.?$', 'i'));
         if (m) add(m[1], Number(m[3]), m[4], m[2] || null, Number(m[3]) < 0 || Number(m[3]) > 100);
       }

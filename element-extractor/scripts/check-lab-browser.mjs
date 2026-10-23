@@ -150,7 +150,7 @@ try {
   );
   assert.match(
     await evaluate('document.getElementById("field-title").textContent'),
-    /score/,
+    /score/i,
   );
   assert.ok(
     await evaluate('document.querySelectorAll("#passages mark").length>0'),
@@ -376,6 +376,35 @@ try {
   assert.equal(await evaluate('document.querySelectorAll("#evidence blockquote").length'), 2);
   assert.match(await evaluate('document.getElementById("evidence").textContent'), /Mean hourly wage/);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
+  assert.equal(await evaluate('document.getElementById("input-panel").open'), false);
+  assert.equal(await evaluate('document.getElementById("source-details").open'), false);
+  assert.equal(await evaluate('document.querySelector("#passages h3").textContent'), 'Passage 1');
+  assert.match(await evaluate('document.getElementById("queue-summary").textContent'), /23 ready for batch review/);
+  await evaluate('document.getElementById("record-filter").value="attention";document.getElementById("record-filter").dispatchEvent(new Event("change"))');
+  assert.match(await evaluate('document.getElementById("candidate-rows").textContent'), /No records match/);
+  await evaluate('document.getElementById("record-filter").value="all";document.getElementById("record-filter").dispatchEvent(new Event("change"));document.getElementById("select-eligible").click()');
+  assert.equal(await evaluate('document.querySelectorAll("#candidate-rows input:checked").length'), 23);
+  assert.equal(await evaluate('document.getElementById("approve-batch").disabled'), true);
+  await evaluate('document.getElementById("batch-reviewer").value="BrowserBatchSimulation";document.getElementById("batch-note").value="Checked percent and dollar header mapping.";document.getElementById("batch-confirm").checked=true;document.getElementById("batch-confirm").dispatchEvent(new Event("change"))');
+  assert.equal(await evaluate('document.getElementById("approve-batch").disabled'), false);
+  if (process.env.LAB_SCREENSHOT_DIR) {
+    await evaluate('document.getElementById("correction-panel").open=false');
+    await send("Emulation.setDeviceMetricsOverride", {width:1440,height:1100,deviceScaleFactor:1,mobile:false});
+    const shot = await send("Page.captureScreenshot", {captureBeyondViewport:true});
+    await writeFile(join(process.env.LAB_SCREENSHOT_DIR,"interpretation-batch-desktop.png"),Buffer.from(shot.data,"base64"));
+    await send("Emulation.setDeviceMetricsOverride", {width:390,height:844,deviceScaleFactor:1,mobile:true});
+    const mobileShot = await send("Page.captureScreenshot", {captureBeyondViewport:true});
+    await writeFile(join(process.env.LAB_SCREENSHOT_DIR,"interpretation-batch-mobile.png"),Buffer.from(mobileShot.data,"base64"));
+  }
+  await evaluate('document.getElementById("approve-batch").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("23 approved") && !document.getElementById("load").disabled'));
+  assert.equal(await evaluate('document.querySelectorAll("#history li").length'), 23);
+  assert.equal(await evaluate('document.getElementById("batch-panel").hidden'), true);
+  await rm(join(dir,"interpretation-approved.csv"));
+  await evaluate('document.getElementById("approved-csv").click()');
+  await waitFor(async () => (await readdir(dir)).includes("interpretation-approved.csv"));
+  await waitFor(() => evaluate('!document.getElementById("load").disabled'));
+  assert.equal((await readFile(join(dir,"interpretation-approved.csv"),"utf8")).trim().split("\r\n").length,24);
   const fullPage = await readFile(new URL("../test/fixtures/bls-full-page.txt", import.meta.url), "utf8");
   await evaluate('document.getElementById("source-text").value=' + JSON.stringify(fullPage) + ';document.getElementById("extract").click()');
   await waitFor(() => evaluate('!document.getElementById("page-sections").hidden && document.getElementById("counts").textContent.includes("23 candidates") && !document.getElementById("load").disabled'));

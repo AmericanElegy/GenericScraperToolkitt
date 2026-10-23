@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { view: null, rowId: null, field: null, busy: false, editingId: null };
+  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null };
   const labels = {
     approved: "Approved",
     rejected: "Rejected",
@@ -15,6 +15,24 @@
   };
   const selected = () =>
     state.view?.validation.records.find((row) => row.id === state.rowId);
+  const columnLabels = {
+    measure: "Measure", value: "Value", unit: "Unit", qualifier: "Qualifier", entity_name: "Name", corps_name: "Corps", score: "Score",
+    occupational_group: "Occupational group", occupation: "Occupation", employment_count: "Jobs", location_quotient: "Location quotient",
+    employment_percent_national: "National %", employment_percent_local: "Local %", hourly_wage_national_dollars: "National $/hour", hourly_wage_local_dollars: "Local $/hour",
+    hourly_wage_dollars: "Hourly wage ($)", annual_wage_dollars: "Annual wage ($)",
+  };
+  const columnLabel = name => columnLabels[name] || name.replaceAll("_", " ");
+  const passageLabel = id => "Passage " + Number(id.slice(1));
+  const queue = () => state.view?.review_queue || { structured: false, eligible_ids: [], exception_ids: [], individual_ids: [], remaining_review_events: 0 };
+  function visibleRows() {
+    const rows = state.view?.validation.records || [];
+    if ($("record-filter").value === "pending") return rows.filter(r => r.review_status === "needs_review");
+    if ($("record-filter").value === "attention") {
+      const ids = new Set([...queue().exception_ids, ...queue().individual_ids]);
+      return rows.filter(r => ids.has(r.id));
+    }
+    return rows;
+  }
   function say(message) {
     $("status").textContent = message;
   }
@@ -34,6 +52,17 @@
     for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode", "session-file", "restore-session"]) $(id).disabled = state.busy;
     $("dataset").disabled = state.busy || !state.view?.document;
     $("open-section").disabled = state.busy || !state.view?.document;
+    $("record-filter").disabled = state.busy || !state.view;
+    const q = queue();
+    $("batch-panel").hidden = !q.structured || !q.eligible_ids.length;
+    $("batch-count").textContent = state.checked.size + " rows selected";
+    $("batch-help").textContent = q.eligible_ids.length + " pending table rows passed the checks. Confirm their source header mapping first. Selection covers this section, including rows outside the current filter.";
+    for (const id of ["batch-reviewer", "batch-note", "batch-confirm"]) $(id).disabled = state.busy || !q.structured;
+    $("select-eligible").disabled = state.busy || !q.eligible_ids.length || !q.remaining_review_events;
+    $("clear-selection").disabled = state.busy || !state.checked.size;
+    $("approve-batch").textContent = "Approve selected rows" + (state.checked.size ? " (" + state.checked.size + ")" : "");
+    $("approve-batch").disabled = state.busy || !state.checked.size || !$("batch-confirm").checked || !$("batch-reviewer").value.trim() || !$("batch-note").value.trim();
+    for (const input of document.querySelectorAll("#candidate-rows input[type=checkbox]")) input.disabled = state.busy || !q.eligible_ids.includes(input.dataset.record);
     $("manual-columns").disabled = state.busy || $("text-mode").value !== "pair";
     $("manual-columns").hidden = $("text-mode").value !== "pair";
     for (const id of [
@@ -136,7 +165,7 @@
         const article = document.createElement("article");
         article.className = "passage" + (spans.length ? " focused" : "");
         article.dataset.passage = p.id;
-        article.append(text("h3", p.id));
+        article.append(text("h3", passageLabel(p.id)));
         const content = document.createElement("p");
         content.append(highlight(p.text, spans));
         article.append(content);
@@ -174,8 +203,9 @@
     const columns = state.view.job.packet.schema.fields;
     const head = document.createElement("tr");
     for (const value of [
+      ...(queue().structured ? ["Select"] : []),
       "Record",
-      ...columns.map((f) => f.name),
+      ...columns.map((f) => columnLabel(f.name)),
       "Review status",
     ]) {
       const th = text("th", value);
@@ -184,13 +214,23 @@
     }
     $("candidate-head").replaceChildren(head);
     $("candidate-rows").replaceChildren(
-      ...state.view.validation.records.map((row) => {
+      ...visibleRows().map((row) => {
         const tr = document.createElement("tr");
         tr.dataset.record = row.id;
-        tr.append(text("td", row.id));
+        tr.classList.toggle("is-selected", state.rowId === row.id);
+        if (queue().structured) {
+          const cell = document.createElement("td"), check = document.createElement("input");
+          check.type = "checkbox"; check.dataset.record = row.id;
+          check.setAttribute("aria-label", "Select " + row.id + " for batch review");
+          check.checked = state.checked.has(row.id); check.disabled = !queue().eligible_ids.includes(row.id);
+          check.onchange = () => { if (check.checked) state.checked.add(row.id); else state.checked.delete(row.id); $("batch-confirm").checked = false; controls(); };
+          cell.append(check); tr.append(cell);
+        }
+        tr.append(text("td", row.id.replace(/^row-/, "")));
         for (const f of columns) {
           const td = document.createElement("td"),
             button = text("button", displayValue(row, f), "value");
+          td.classList.toggle("numeric", f.type === "number");
           button.type = "button";
           button.dataset.record = row.id;
           button.dataset.field = f.name;
@@ -216,7 +256,9 @@
         tr.append(
           text(
             "td",
-            labels[row.review_status] || row.review_status,
+            row.review_status === "needs_review"
+              ? queue().exception_ids.includes(row.id) ? "Check needed" : queue().eligible_ids.includes(row.id) ? "Ready for batch" : "Individual review"
+              : labels[row.review_status] || row.review_status,
             "status " + row.review_status,
           ),
         );
@@ -228,29 +270,22 @@
     const row = selected(),
       field = row?.fields[state.field];
     if (!row || !field) {
-      $("field-title").textContent = "No candidates yet";
-      $("evidence").replaceChildren(text("p", "No supported pattern matched. Add a record manually using an exact quotation, or start a new session with a supported format."));
+      $("field-title").textContent = state.view.validation.records.length ? "No records in this view" : "No candidates yet";
+      $("evidence").replaceChildren(text("p", state.view.validation.records.length ? "Choose All records to see completed or batch-ready rows." : "No supported pattern matched. You can add a record manually with supporting text."));
+      $("findings-details").open = false;
       $("findings").replaceChildren();
       $("review-title").textContent = "Add a candidate to review";
       return;
     }
     $("field-title").textContent =
-      "Evidence for " + state.field + " · " + row.id;
+      columnLabel(state.field) + " · record " + row.id.replace(/^row-/, "");
     const evidence = [];
     for (const e of field.evidence) {
-      evidence.push(
-        text("blockquote", e.quote),
-        text(
-          "p",
-          "Validated literal quotation · " +
-            e.passage_id +
-            " · snapshot offsets " +
-            e.source_start +
-            "–" +
-            e.source_end + (e.document_start !== undefined ? " · original page offsets " + e.document_start + "–" + e.document_end : ""),
-          "hint",
-        ),
-      );
+      const reference = document.createElement("details");
+      reference.append(text("summary", passageLabel(e.passage_id) + " · source reference"),
+        text("p", "Internal ID " + e.passage_id + " · snapshot offsets " + e.source_start + "–" + e.source_end +
+          (e.document_start !== undefined ? " · original page offsets " + e.document_start + "–" + e.document_end : ""), "hint"));
+      evidence.push(text("blockquote", e.quote), reference);
     }
     if (!field.evidence.length) {
       evidence.push(
@@ -266,6 +301,7 @@
         );
     }
     $("evidence").replaceChildren(...evidence);
+    $("findings-details").open = blocking(row);
     const list = document.createElement("ul");
     for (const finding of [
       ...state.view.validation.issues,
@@ -286,8 +322,14 @@
   }
   function render() {
     if (!state.view) return;
-    if (!selected()) {
-      state.rowId = state.view.validation.records[0]?.id;
+    if (state.lastPacket !== state.view.job.packet.hash) {
+      state.checked.clear(); $("record-filter").value = "all";
+      $("input-panel").open = false; $("batch-confirm").checked = false;
+      $("batch-note").value = ""; state.lastPacket = state.view.job.packet.hash;
+    }
+    for (const id of state.checked) if (!queue().eligible_ids.includes(id)) state.checked.delete(id);
+    if (!selected() || !visibleRows().some(r => r.id === state.rowId)) {
+      state.rowId = visibleRows()[0]?.id;
       state.field = state.view.job.packet.schema.fields[0]?.name;
     }
     $("page-sections").hidden = !state.view.document;
@@ -311,7 +353,13 @@
       " rejected · " +
       c.pending +
       " pending";
+    const q = queue();
+    $("queue-summary").textContent = !c.candidates ? "No records suggested. Inspect the source or add a record manually." : !c.pending ? "Review complete. Approved records are ready to export." : q.eligible_ids.length + " ready for batch review · " + q.exception_ids.length + " exceptions · " + q.individual_ids.length + " need individual review";
     renderTable();
+    if (!visibleRows().length) {
+      const tr = document.createElement("tr"), cell = text("td", "No records match this view.", "empty");
+      cell.colSpan = state.view.job.packet.schema.fields.length + 3; tr.append(cell); $("candidate-rows").append(tr);
+    }
     renderSource();
     renderEvidence();
     $("history").replaceChildren(
@@ -445,6 +493,25 @@
       say("Candidate revision saved and evidence revalidated. All current approvals reset; earlier decisions retained in revision history. Review the revised candidates before exporting.");
     });
   };
+  $("record-filter").onchange = () => { clearDecision(); render(); editCandidate(); };
+  $("select-eligible").onclick = () => {
+    state.checked = new Set(queue().eligible_ids.slice(0, queue().remaining_review_events));
+    $("batch-confirm").checked = false; render();
+  };
+  $("clear-selection").onclick = () => { state.checked.clear(); $("batch-confirm").checked = false; render(); };
+  for (const id of ["batch-reviewer", "batch-note"]) $(id).oninput = controls;
+  $("batch-confirm").onchange = controls;
+  $("batch-form").onsubmit = event => {
+    event.preventDefault();
+    perform(async () => {
+      const ids = [...state.checked];
+      const response = await request("/api/interpretation/action", { action: "review_batch", job: state.view.job,
+        record_ids: ids, reviewer: $("batch-reviewer").value.trim(), note: $("batch-note").value.trim(), confirmed_mapping: $("batch-confirm").checked });
+      state.view = await response.json(); state.checked.clear(); $("batch-confirm").checked = false; $("batch-note").value = "";
+      clearDecision(); render();
+      say("Approved " + ids.length + " table rows in one human batch review. Each decision is recorded in the review history.");
+    });
+  };
   $("load").onclick = () =>
     perform(async () => {
       say("Loading a fictional scripted example…");
@@ -539,6 +606,7 @@
       $("source-text").value = state.view.job.document?.source.text || state.view.job.packet.source.text;
       $("source-url").value = state.view.job.packet.source.url || "";
       $("reviewer").value = "";
+      $("batch-reviewer").value = "";
       $("text-mode").value = state.view.job.parser_version === "name-number-v1" ? "pair" : "auto";
       if ($("text-mode").value === "pair") {
         $("name-column").value = state.view.job.packet.schema.fields[0].name;

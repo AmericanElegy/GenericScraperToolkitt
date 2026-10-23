@@ -1,6 +1,7 @@
+import { reviewQueue } from './review-queue.js';
 import { planPage, needsPageIntake, extractPageTable, PAGE_TABLE_VERSION, documentEvidence } from './page-intake.js';
 import { wageHeader, extractWageTable, WAGE_SCHEMA, WAGE_VERSION } from './wage-table.js';
-import { extractProseRules, PROSE_SCHEMA, PROSE_VERSION } from './prose-rules.js';
+import { extractProseRules, PROSE_SCHEMA, PROSE_VERSION, LEGACY_PROSE_VERSION } from './prose-rules.js';
 import { extractTextRules } from './text-rules.js';
 import sample from "../../examples/interpretation-scripted.json";
 import {
@@ -9,6 +10,7 @@ import {
   runInterpretation,
   revalidate,
   appendReview,
+  appendReviewBatch,
   exportInterpretation,
   canonical,
   digest,
@@ -163,14 +165,14 @@ function originalResponse(job) {
   if (job.parser_version === 'name-number-v1') return extractTextRules(job.packet);
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if (job.parser_version === WAGE_VERSION) return extractWageTable(job.packet);
-  if (job.parser_version === PROSE_VERSION) return extractProseRules(job.packet);
+  if ([PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version)) return extractProseRules(job.packet, job.parser_version);
   fail('parser_version', 'Unsupported text parser version.');
 }
 async function documentInfo(job) {
   if (!job.document) return null;
   if (job.example_id !== 'custom-text' || !only(job.document, ['source', 'dataset_id']))
     fail('invalid_document', 'Invalid full-page source or selection.');
-  const plan = planPage(job.document.source);
+  const plan = planPage(job.document.source, job.parser_version === LEGACY_PROSE_VERSION ? LEGACY_PROSE_VERSION : PROSE_VERSION);
   const selected = plan.datasets.find(d => d.id === job.document.dataset_id);
   if (!selected || job.parser_version !== selected.parser_version)
     fail('invalid_document', 'The selected section or parser does not match the retained page.');
@@ -223,6 +225,7 @@ async function view(job, result) {
     job,
     ...(info ? { document: publicDocument(info, job) } : {}),
     validation: result.json.validation,
+    review_queue: reviewQueue(job, result.json.validation),
     counts: {
       candidates: records.length,
       approved: records.filter((r) => r.review_status === "approved").length,
@@ -236,7 +239,7 @@ async function view(job, result) {
         ? 'Full page retained. Current section: ' + info.selected.label + '. Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets.'
         : job.parser_version === WAGE_VERSION
         ? 'Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = ' + wageHeader(job.packet).local + '. Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval.'
-        : job.parser_version === PROSE_VERSION
+        : [PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version)
         ? 'Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding.'
         : 'Limited name/number rules or prewritten examples. All candidates require review.',
     },
@@ -340,8 +343,8 @@ export async function labFetch(request) {
     if (url.pathname !== "/api/interpretation/action")
       return reply({ error: "Not found", code: "not_found" }, 404);
     if (
-      !only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session"]) ||
-      !["revalidate", "review", "export", "correct", "save", "restore"].includes(body.action)
+      !only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session", "record_ids", "reviewer", "note", "confirmed_mapping"]) ||
+      !["revalidate", "review", "export", "correct", "save", "restore", "review_batch"].includes(body.action)
     )
       fail("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
     if (body.action === "restore") {
@@ -351,6 +354,25 @@ export async function labFetch(request) {
       return reply(await view(body.session.job, await checkJob(body.session.job)));
     }
     const result = await checkJob(body.job);
+    if (body.action === "review_batch") {
+      const queue = reviewQueue(body.job, result.json.validation);
+      if (!only(body, ["action", "job", "record_ids", "reviewer", "note", "confirmed_mapping"]) ||
+          !Array.isArray(body.record_ids) || !body.record_ids.length || body.record_ids.length > 50 ||
+          new Set(body.record_ids).size !== body.record_ids.length ||
+          body.record_ids.some(id => !queue.eligible_ids.includes(id)) || body.confirmed_mapping !== true)
+        fail("batch_not_eligible", "Select pending, unchanged table rows with clean checks and explicitly confirm the column mapping. Prose and exceptions need individual review.");
+      if (body.record_ids.length > queue.remaining_review_events)
+        fail("review_limit", "This batch exceeds the session review limit. Save the session and reduce the selection.", 413);
+      if (typeof body.reviewer !== "string" || !body.reviewer.trim() || body.reviewer.length > 80 ||
+          typeof body.note !== "string" || !body.note.trim() || body.note.length > 900)
+        fail("invalid_review", "Enter a reviewer name and a batch review note (up to 900 characters).");
+      // One independent validation per batch, with an individual journal event per row.
+      const events = await appendReviewBatch(body.job.packet, body.job.cache_entry, body.job.events,
+        body.record_ids.map(id => ({ record_id: id, decision: "approved", reviewer: body.reviewer.trim(),
+          note: "Batch table review (" + body.record_ids.length + " selected rows): " + body.note.trim(), confirmed_association: true })));
+      const job = { ...body.job, events };
+      return reply(await view(job, await checkJob(job)));
+    }
     if (body.action === "save") {
       const session = JSON.stringify({ format: "toolkit-review-session-v1", job: body.job });
       // Leave room for the restore request envelope, so every saved file can reopen.
