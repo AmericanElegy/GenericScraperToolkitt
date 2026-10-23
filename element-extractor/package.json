@@ -16,7 +16,8 @@
     "check:browser": "npm run build && node scripts/check-browser.mjs",
     "interpretation:demo": "node scripts/interpret.mjs demo",
     "interpretation": "node scripts/interpret.mjs",
-    "check:lab-browser": "npm run build && node scripts/check-lab-browser.mjs"
+    "check:lab-browser": "npm run build && node scripts/check-lab-browser.mjs",
+    "release:check": "node scripts/release-check.mjs"
   },
   "repository": {
     "type": "git",

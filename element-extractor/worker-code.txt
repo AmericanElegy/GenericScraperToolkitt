@@ -1184,8 +1184,8 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 <section class="card"><h2>Use your own text</h2><p class="hint">Paste ordinary prose as written. Start with automatic suggestions\u2014no column names or special formatting needed. It recognizes some explicit percentages, counts and name/number pairs, plus pasted occupational wage tables with their grouped headers. Review the suggested preview; other facts may remain unrecognized. You can add or correct records manually.</p>
 <form id="custom-input"><label for="source-text">Paste source text</label><textarea id="source-text" required placeholder="Paste a passage or full page here (up to 64,000 characters). Automatic mode splits long pages into bounded sections."></textarea><label for="source-url">Source URL (optional attribution, never fetched)</label><input id="source-url" type="url" placeholder="https://example.org/article"><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Suggest columns and facts from prose</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><div class="bar"><div><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div><div><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"></div></div><p class="hint">Two columns for this first parser: text, then number. Use lowercase names with underscores. Numbers are signed, ungrouped decimals. No score range is assumed.</p></fieldset><button id="extract" type="submit">Preview suggested records</button></form></section>
 <div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load">Load example</button></div>
-<p class="hint">Session only: extracting new text, loading another example or reloading this page clears the current review. Download diagnostic JSON to retain the evidence and history. Reviewer names are self-declared; this is not an authenticated audit service.</p>
-<section id="page-sections" class="card" hidden><h2>Sections detected in this page</h2><p id="page-scope" class="hint"></p><label for="dataset">Section to review</label><select id="dataset"></select><button id="open-section" type="button">Open selected section</button><p class="hint">Current records and exports cover the selected section only. Download its review/export before switching; opening another section starts a new review session. The full original page is retained.</p><details><summary>Full retained page text</summary><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section><p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
+<p class="hint">In-memory session: extracting new text, loading another example or reloading this page clears the current review. Save a review session file to reopen it later, or download diagnostic JSON for a report. Reviewer names are self-declared; this is not an authenticated audit service.</p>
+<section id="page-sections" class="card" hidden><h2>Sections detected in this page</h2><p id="page-scope" class="hint"></p><label for="dataset">Section to review</label><select id="dataset"></select><button id="open-section" type="button">Open selected section</button><p class="hint">Current records and exports cover the selected section only. Save its session or download its export before switching; opening another section starts a new review session. The full original page is retained.</p><details><summary>Full retained page text</summary><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section><section class="card" style="margin-top:20px"><h2>Continue on another computer</h2><div class="bar"><button id="save-session" type="button">Save review session</button><form id="restore-form" class="bar"><label for="session-file">Saved session JSON</label><input id="session-file" type="file" accept=".json,application/json" required><button id="restore-session" type="submit" class="secondary">Open saved session</button></form></div><p class="hint">A session file retains the current section, source text, corrections and review history. Transfer it to your other computer and open it here to continue. It contains the full source text; it is not a redacted export. Imported reviewers are self-declared. No cloud account or automatic storage is used.</p></section><p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
 <section id="workspace" hidden><div class="bar"><strong id="counts"></strong><button id="revalidate" class="secondary">Revalidate evidence</button></div><p class="hint">Literal matches do not prove that a value belongs to a measure. No record is approved automatically.</p>
 <p id="interpretation-summary" class="hint"></p><div class="grid"><section class="card" aria-labelledby="source-title"><h2 id="source-title">Source passages</h2><p id="source-info" class="hint"></p><div id="passages"></div><details><summary>Source integrity</summary><p class="hint">Offsets refer to the retained text in UTF-16 code units, start inclusive and end exclusive.</p><p id="source-hash" class="hash"></p></details></section>
 <section class="card" aria-labelledby="candidates-title"><h2 id="candidates-title">Proposed records</h2><p class="hint">Click a value to inspect its evidence. Selecting a different record clears the review note and confirmation.</p><div class="scroll"><table><caption class="hint">Candidates in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
@@ -1229,13 +1229,14 @@ var lab_client_default = `"use strict";
     return blockers(row).length > 0;
   }
   function controls() {
-    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode"]) $(id).disabled = state.busy;
+    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode", "session-file", "restore-session"]) $(id).disabled = state.busy;
     $("dataset").disabled = state.busy || !state.view?.document;
     $("open-section").disabled = state.busy || !state.view?.document;
     $("manual-columns").disabled = state.busy || $("text-mode").value !== "pair";
     $("manual-columns").hidden = $("text-mode").value !== "pair";
     for (const id of [
       "revalidate",
+      "save-session",
       "approved-csv",
       "approved-json",
       "diagnostic-json",
@@ -1713,6 +1714,38 @@ var lab_client_default = `"use strict";
         "Cached scripted response revalidated. No interpreter or AI call was made.",
       );
     });
+  function saveBlob(blob, filename) {
+    const url = URL.createObjectURL(blob), anchor = document.createElement("a");
+    anchor.href = url; anchor.download = filename; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  $("save-session").onclick = () => perform(async () => {
+    const response = await request("/api/interpretation/action", { action: "save", job: state.view.job });
+    saveBlob(await response.blob(), "toolkit-review-session.json");
+    say("Saved the current review session. Open this file on either computer to continue. Other sections have separate reviews.");
+  });
+  $("restore-form").onsubmit = event => {
+    event.preventDefault();
+    perform(async () => {
+      const file = $("session-file").files[0];
+      if (!file || file.size > 1000001) throw Error("Choose a saved session JSON file up to 1,000,001 bytes.");
+      let session;
+      try { session = JSON.parse(await file.text()); } catch { throw Error("This file is not valid session JSON. Your current review was kept."); }
+      const response = await request("/api/interpretation/action", { action: "restore", session });
+      state.view = await response.json(); state.rowId = null; state.field = null;
+      clearDecision(); render(); editCandidate();
+      $("source-text").value = state.view.job.document?.source.text || state.view.job.packet.source.text;
+      $("source-url").value = state.view.job.packet.source.url || "";
+      $("reviewer").value = "";
+      $("text-mode").value = state.view.job.parser_version === "name-number-v1" ? "pair" : "auto";
+      if ($("text-mode").value === "pair") {
+        $("name-column").value = state.view.job.packet.schema.fields[0].name;
+        $("number-column").value = state.view.job.packet.schema.fields[1].name;
+      }
+      controls();
+      say("Saved session opened and independently revalidated. Imported review names are self-declared; compare the retained source before relying on them.");
+    });
+  };
   async function download(format, diagnostic) {
     const response = await request("/api/interpretation/action", {
       action: "export",
@@ -1720,16 +1753,7 @@ var lab_client_default = `"use strict";
       format,
       diagnostic,
     });
-    const blob = await response.blob(),
-      url = URL.createObjectURL(blob),
-      anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download =
-      (diagnostic ? "interpretation-diagnostic" : "interpretation-approved") +
-      "." +
-      format;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveBlob(await response.blob(), (diagnostic ? "interpretation-diagnostic" : "interpretation-approved") + "." + format);
     say(
       "Downloaded " +
         response.headers.get("X-Exported-Records") +
@@ -2044,9 +2068,24 @@ async function labFetch(request) {
     }
     if (url.pathname !== "/api/interpretation/action")
       return reply({ error: "Not found", code: "not_found" }, 404);
-    if (!only(body, ["action", "job", "decision", "format", "diagnostic", "correction"]) || !["revalidate", "review", "export", "correct"].includes(body.action))
-      fail("invalid_action", "Choose revalidate, review, correct or export.");
+    if (!only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session"]) || !["revalidate", "review", "export", "correct", "save", "restore"].includes(body.action))
+      fail("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
+    if (body.action === "restore") {
+      if (!only(body, ["action", "session"]) || !only(body.session, ["format", "job"]) || body.session.format !== "toolkit-review-session-v1")
+        fail("invalid_session", "Choose a toolkit review session JSON file, not a CSV or data export.");
+      return reply(await view(body.session.job, await checkJob(body.session.job)));
+    }
     const result = await checkJob(body.job);
+    if (body.action === "save") {
+      const session = JSON.stringify({ format: "toolkit-review-session-v1", job: body.job });
+      if (new TextEncoder().encode(session).byteLength > 1e6)
+        fail("session_limit", "This review session exceeds the portable file limit. Export diagnostic JSON instead.", 413);
+      return new Response(session + "\n", { headers: {
+        ...headers,
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="toolkit-review-session.json"'
+      } });
+    }
     if (body.action === "correct") {
       if ((body.job.revisions || []).length >= 8) fail("revision_limit", "Maximum 8 revisions. Download diagnostic JSON before starting a new session.");
       if (!only(body.correction, ["record_id", "fields", "reviewer", "note"])) fail("invalid_correction", "Unexpected correction fields.");

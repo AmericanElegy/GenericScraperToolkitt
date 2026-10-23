@@ -389,6 +389,11 @@ try {
   assert.match(await evaluate('document.getElementById("evidence").textContent'), /original page offsets/);
   await evaluate('document.getElementById("note").value="Confirmed annual wage and table header.";document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"));document.getElementById("approve").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled'));
+  await evaluate('document.getElementById("save-session").click()');
+  await waitFor(async () => (await readdir(dir)).includes("toolkit-review-session.json"));
+  await waitFor(() => evaluate('!document.getElementById("load").disabled'));
+  const portable = await readFile(join(dir, "toolkit-review-session.json"), "utf8");
+  assert.equal(JSON.parse(portable).format, "toolkit-review-session-v1");
   await evaluate('document.getElementById("dataset").value="section-3";document.getElementById("open-section").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("24 candidates") && document.getElementById("counts").textContent.includes("0 approved") && !document.getElementById("load").disabled'));
   assert.match(await evaluate('document.getElementById("interpretation-summary").textContent'), /25–48/);
@@ -409,10 +414,31 @@ try {
     await evaluate('document.querySelectorAll("#history li").length'),
     0,
   );
+  await evaluate(`(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([${JSON.stringify(portable)}], "toolkit-review-session.json", {type:"application/json"}));
+    document.getElementById("session-file").files=transfer.files;
+    document.getElementById("restore-session").click();
+  })()`);
+  await waitFor(() => evaluate('document.getElementById("status").textContent.includes("Saved session opened") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("counts").textContent'), /24 candidates.*1 approved/);
+  assert.equal(await evaluate('document.getElementById("dataset").value'), "section-2");
+  assert.equal(await evaluate('document.querySelectorAll("#history li").length'), 1);
+  await evaluate(`(() => {
+    const bad = JSON.parse(${JSON.stringify(portable)});
+    bad.job.events[0].note = "Tampered import";
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([JSON.stringify(bad)], "changed.json", {type:"application/json"}));
+    document.getElementById("session-file").files=transfer.files;
+    document.getElementById("restore-session").click();
+  })()`);
+  await waitFor(() => evaluate('!document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("counts").textContent'), /24 candidates.*1 approved/);
+  assert.ok(await evaluate('!document.getElementById("status").textContent.includes("Saved session opened")'));
   assert.equal(errors.length, 0, JSON.stringify(errors));
   assert.equal(outboundCalls, 0);
   console.log(
-    "PASS: lab evidence highlighting, review guards, approve/reject/pending history, offline revalidation, real CSV/JSON downloads, inert review text, mobile layout, custom text, manual addition, candidate correction, full-page section switching, grouped numbers and session reset; no outbound calls.",
+    "PASS: lab evidence highlighting, review guards, approve/reject/pending history, offline revalidation, real CSV/JSON downloads, inert review text, mobile layout, custom text, manual addition, candidate correction, full-page section switching, grouped numbers, portable save/restore and session reset; no outbound calls.",
   );
 } finally {
   ws?.close();

@@ -1,6 +1,15 @@
-# Web Table Toolkit — Stage 1
+# Web Table Toolkit — local first release
 
-A standalone Cloudflare Worker for discovering HTML tables on public HTTPS pages, choosing a table, searching its rows, and downloading CSV/JSON. It has no FantasyBrief dependencies or paid service bindings.
+A standalone Cloudflare Worker for discovering HTML tables and turning pasted page text into reviewable data with CSV/JSON exports. It has no FantasyBrief dependencies or paid service bindings.
+
+## Release workflow
+
+- **Public URL:** find supported native/accessible tables, preview/search and export. The original 118-element example and DCI score adapter remain available.
+- **Pasted text:** open **Interpretation Lab**, paste ordinary text or a whole page, and preview suggested records/columns. Supported table sections keep percentages, job counts and dollar amounts separate.
+- **Review:** inspect source quotations, correct/add candidates, revalidate, then approve or reject. Unsupported content stays visible with an explanation.
+- **Move computers:** use **Save review session**, transfer that JSON file, and **Open saved session** on the other computer. Source, corrections, selected section and existing decisions are revalidated. Review names are self-declared; these are local portable files, not authenticated cloud storage.
+
+See [the release guide](docs/local-release.md) for the exact boundary and verification. This release uses limited deterministic rules, not general AI interpretation.
 
 ## PowerShell quick start
 
@@ -26,11 +35,11 @@ Useful public examples:
 - `https://www.dci.org/scores/final-scores/2026-dci-all-age-world-championship-finals/` — a verified 12-row div-based score grid.
 - `/example` — the preserved, specialized chemical-elements demo with 118-element validation and cached exports. Its `/api/elements` and `/elements.csv` endpoints are unchanged.
 
-## Supported in Stage 1
+## Supported public-page tables
 
 UTF-8 HTML tables returned directly by public HTTPS webpages. DCI final-score pages also have a targeted adapter for their single-division div-based score grid (Place / Corps / Score); it validates headings and score formatting and excludes sponsor/recap rows. This does not imply arbitrary div layouts are supported. Multiple divisions in one score grid are rejected rather than combined incorrectly. Tables with a single header row or no explicit header row are supported; headerless tables receive positional column names. Text entities are decoded and whitespace collapsed. Scripts, styles and templates are ignored.
 
-Merged cells, nested tables, multiple full header rows, and inconsistent row widths are marked unsupported and cannot be exported from the UI. JavaScript rendering, authenticated pages, anti-bot bypasses, saved jobs, batch extraction, scheduling, videos, accounts and billing are outside this stage. Access denial or no tables produces an actionable message; no automatic retry is made.
+Merged cells, nested tables, multiple full header rows, and inconsistent row widths are marked unsupported and cannot be exported from the UI. JavaScript rendering, authenticated pages, anti-bot bypasses, server-stored jobs, scheduled source batches, videos, accounts and billing are outside this release. Interpretation reviews can be saved/reopened as local session files. Access denial or no tables produces an actionable message; no automatic retry is made.
 
 Limits: 2 MiB per source page, 15-second overall source fetch deadline, three redirects, 20 tables, 5,000 total rows, 100 columns, 50,000 cells and 10,000 characters per cell. Limit violations reject the page rather than silently truncating data.
 
@@ -45,6 +54,15 @@ DNS checks are a preflight, **not connection-level IP pinning**. Native Workers 
 Outbound access requires `cloudflare-dns.com` plus each source hostname (including redirect destinations). Example domains are `www.w3schools.com` and `en.wikipedia.org`. Builds require `registry.npmjs.org`; GitHub synchronization requires `github.com`. Cloudflare authentication/deployment uses `dash.cloudflare.com` and `api.cloudflare.com`.
 
 ## Validation
+
+The complete local release gate requires Chromium (or `CHROMIUM_PATH`) and runs the Workers suite, both browser workflows and a Cloudflare deployment dry run:
+
+```powershell
+npm.cmd run release:check
+```
+
+It stops on failure and records actual outcomes plus the tested Worker hash in ignored `.wrangler/release-report.json`. No deployment is performed. For smaller checks:
+
 
 ```powershell
 npm.cmd test

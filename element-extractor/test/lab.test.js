@@ -52,7 +52,7 @@ test("lab serves its page and self-contained script and never makes an outbound 
       page.headers.get("content-security-policy"),
       /script-src 'self'/,
     );
-    assert.match(await page.text(), /Session only/);
+    assert.match(await page.text(), /Save review session/);
     const client = await mf.dispatchFetch(host + "/interpretation-client.js");
     assert.equal(client.status, 200);
     assert.match(client.headers.get("content-type"), /javascript/);
@@ -506,5 +506,48 @@ test('full-page intake rejects oversize input and invalid section selection with
     assert.equal(v.counts.candidates, 24);
     const wrong = await post(mf, '/api/interpretation/start', { example_id: 'custom-text', mode: 'auto', source: { text }, dataset_id: 'missing' });
     assert.equal(wrong.status, 400);
+  } finally { await mf.dispose(); }
+});
+
+test('portable sessions restore source, candidate revisions and explicit reviews after independent validation', async () => {
+  const { mf, calls } = await setup();
+  try {
+    let value = await start(mf);
+    const correction = { record_id: 'row-2', reviewer: 'TransferTestSimulation', note: 'Correct the fictional old score before portability testing.', fields: correctedFields('Another Corps', 95.4, 'p002', 'Another Corps scored 95.1. A correction says its score was 95.4.') };
+    value = await (await action(mf, value.job, 'correct', { correction })).json();
+    value = await (await action(mf, value.job, 'review', { decision: { ...decision, record_id: 'row-2' } })).json();
+    const saved = await action(mf, value.job, 'save');
+    assert.equal(saved.status, 200);
+    assert.match(saved.headers.get('content-disposition'), /toolkit-review-session.json/);
+    const session = await saved.json();
+    assert.equal(session.format, 'toolkit-review-session-v1');
+    const restore = await post(mf, '/api/interpretation/action', { action: 'restore', session });
+    assert.equal(restore.status, 200);
+    const restored = await restore.json();
+    assert.equal(restored.counts.approved, 1);
+    assert.equal(restored.job.revisions.length, 1);
+    assert.deepEqual(restored.job.events, value.job.events);
+    assert.equal(restored.validation.records[1].fields.score.value, 95.4);
+    assert.equal((await action(mf, restored.job, 'export', { format: 'csv' })).status, 200);
+    const altered = structuredClone(session);
+    altered.job.events[0].note = 'This review was altered after saving.';
+    assert.equal((await post(mf, '/api/interpretation/action', { action: 'restore', session: altered })).status, 400);
+    assert.equal((await post(mf, '/api/interpretation/action', { action: 'restore', session: { format: 'interpretation_diagnostic_export', job: value.job } })).status, 400);
+    assert.equal(calls(), 0);
+  } finally { await mf.dispose(); }
+});
+test('portable full-page sessions restore the selected batch, document mapping and grouped dollar values', async () => {
+  const { mf } = await setup();
+  try {
+    const text = await readFile(new URL('./fixtures/bls-full-page.txt', import.meta.url), 'utf8');
+    let value = await (await post(mf, '/api/interpretation/start', { example_id: 'custom-text', mode: 'auto', source: { text }, dataset_id: 'section-2' })).json();
+    value = await (await action(mf, value.job, 'review', { decision })).json();
+    const session = await (await action(mf, value.job, 'save')).json();
+    const restored = await (await post(mf, '/api/interpretation/action', { action: 'restore', session })).json();
+    assert.equal(restored.document.selected_id, 'section-2');
+    assert.equal(restored.counts.approved, 1);
+    assert.equal(restored.validation.records[0].fields.annual_wage_dollars.value, 49690);
+    const evidence = restored.validation.records[0].fields.annual_wage_dollars.evidence[0];
+    assert.equal(restored.document.text.slice(evidence.document_start, evidence.document_end), evidence.quote);
   } finally { await mf.dispose(); }
 });

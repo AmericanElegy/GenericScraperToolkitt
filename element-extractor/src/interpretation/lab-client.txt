@@ -31,13 +31,14 @@
     return blockers(row).length > 0;
   }
   function controls() {
-    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode"]) $(id).disabled = state.busy;
+    for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode", "session-file", "restore-session"]) $(id).disabled = state.busy;
     $("dataset").disabled = state.busy || !state.view?.document;
     $("open-section").disabled = state.busy || !state.view?.document;
     $("manual-columns").disabled = state.busy || $("text-mode").value !== "pair";
     $("manual-columns").hidden = $("text-mode").value !== "pair";
     for (const id of [
       "revalidate",
+      "save-session",
       "approved-csv",
       "approved-json",
       "diagnostic-json",
@@ -515,6 +516,38 @@
         "Cached scripted response revalidated. No interpreter or AI call was made.",
       );
     });
+  function saveBlob(blob, filename) {
+    const url = URL.createObjectURL(blob), anchor = document.createElement("a");
+    anchor.href = url; anchor.download = filename; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  $("save-session").onclick = () => perform(async () => {
+    const response = await request("/api/interpretation/action", { action: "save", job: state.view.job });
+    saveBlob(await response.blob(), "toolkit-review-session.json");
+    say("Saved the current review session. Open this file on either computer to continue. Other sections have separate reviews.");
+  });
+  $("restore-form").onsubmit = event => {
+    event.preventDefault();
+    perform(async () => {
+      const file = $("session-file").files[0];
+      if (!file || file.size > 1000001) throw Error("Choose a saved session JSON file up to 1,000,001 bytes.");
+      let session;
+      try { session = JSON.parse(await file.text()); } catch { throw Error("This file is not valid session JSON. Your current review was kept."); }
+      const response = await request("/api/interpretation/action", { action: "restore", session });
+      state.view = await response.json(); state.rowId = null; state.field = null;
+      clearDecision(); render(); editCandidate();
+      $("source-text").value = state.view.job.document?.source.text || state.view.job.packet.source.text;
+      $("source-url").value = state.view.job.packet.source.url || "";
+      $("reviewer").value = "";
+      $("text-mode").value = state.view.job.parser_version === "name-number-v1" ? "pair" : "auto";
+      if ($("text-mode").value === "pair") {
+        $("name-column").value = state.view.job.packet.schema.fields[0].name;
+        $("number-column").value = state.view.job.packet.schema.fields[1].name;
+      }
+      controls();
+      say("Saved session opened and independently revalidated. Imported review names are self-declared; compare the retained source before relying on them.");
+    });
+  };
   async function download(format, diagnostic) {
     const response = await request("/api/interpretation/action", {
       action: "export",
@@ -522,16 +555,7 @@
       format,
       diagnostic,
     });
-    const blob = await response.blob(),
-      url = URL.createObjectURL(blob),
-      anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download =
-      (diagnostic ? "interpretation-diagnostic" : "interpretation-approved") +
-      "." +
-      format;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveBlob(await response.blob(), (diagnostic ? "interpretation-diagnostic" : "interpretation-approved") + "." + format);
     say(
       "Downloaded " +
         response.headers.get("X-Exported-Records") +

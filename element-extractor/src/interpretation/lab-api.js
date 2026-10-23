@@ -340,11 +340,27 @@ export async function labFetch(request) {
     if (url.pathname !== "/api/interpretation/action")
       return reply({ error: "Not found", code: "not_found" }, 404);
     if (
-      !only(body, ["action", "job", "decision", "format", "diagnostic", "correction"]) ||
-      !["revalidate", "review", "export", "correct"].includes(body.action)
+      !only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session"]) ||
+      !["revalidate", "review", "export", "correct", "save", "restore"].includes(body.action)
     )
-      fail("invalid_action", "Choose revalidate, review, correct or export.");
+      fail("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
+    if (body.action === "restore") {
+      if (!only(body, ["action", "session"]) || !only(body.session, ["format", "job"]) ||
+          body.session.format !== "toolkit-review-session-v1")
+        fail("invalid_session", "Choose a toolkit review session JSON file, not a CSV or data export.");
+      return reply(await view(body.session.job, await checkJob(body.session.job)));
+    }
     const result = await checkJob(body.job);
+    if (body.action === "save") {
+      const session = JSON.stringify({ format: "toolkit-review-session-v1", job: body.job });
+      // Leave room for the restore request envelope, so every saved file can reopen.
+      if (new TextEncoder().encode(session).byteLength > 1000000)
+        fail("session_limit", "This review session exceeds the portable file limit. Export diagnostic JSON instead.", 413);
+      return new Response(session + "\n", { headers: { ...headers,
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="toolkit-review-session.json"',
+      } });
+    }
     if (body.action === 'correct') {
       if ((body.job.revisions || []).length >= 8) fail('revision_limit', 'Maximum 8 revisions. Download diagnostic JSON before starting a new session.');
       if (!only(body.correction, ['record_id', 'fields', 'reviewer', 'note'])) fail('invalid_correction', 'Unexpected correction fields.');
