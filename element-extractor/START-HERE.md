@@ -35,7 +35,7 @@ npm.cmd run dev
 Default addresses while that server is running:
 
 - [Web Table Toolkit](http://127.0.0.1:8787/).
-- [Interpretation Lab](http://127.0.0.1:8787/interpretation) — pasted prose/tables, automatic column mapping, evidence, review, portable sessions and approved exports.
+- [Interpretation Lab](http://127.0.0.1:8787/interpretation) — source URL fetching with targeted local JavaScript fallback, pasted prose/tables, column mapping, evidence, review, portable sessions and approved exports.
 
 The isolated Windows launcher instead prints its own available port.
 
@@ -59,4 +59,4 @@ From the app folder:
 npm.cmd run release:check
 ```
 
-This runs the regression suite, three real browser workflows and a Cloudflare bundle dry run. It requires Chromium on the test path (`CHROMIUM_PATH` may select an executable); the existing browser check scripts are verified in Linux, not Windows. It performs no deployment. No paid inference, paid browser service or FantasyBrief dependency is enabled.
+This runs the regression suite, four real browser workflows and a Cloudflare bundle dry run. It requires Chromium on the test path (`CHROMIUM_PATH` may select an executable); the existing browser check scripts are verified in Linux, not Windows. It performs no deployment. No paid inference, paid browser service or FantasyBrief dependency is enabled.

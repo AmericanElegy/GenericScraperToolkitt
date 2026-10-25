@@ -1,6 +1,6 @@
 # Local JavaScript table renderer
 
-The optional renderer executes webpage JavaScript in a fresh installed Chrome, Edge, or Chromium profile and extracts native HTML tables and simple accessible tables/grids from the resulting DOM. It is a separate local Node companion. The Cloudflare Worker and Interpretation Lab do not acquire browser execution or paid bindings.
+The optional renderer executes webpage JavaScript in a fresh installed Chrome, Edge, or Chromium profile and extracts native HTML tables and simple accessible tables/grids from the resulting DOM. It is a separate local Node companion. The Cloudflare Worker has no native browser or paid binding. The normal local Interpretation Lab server can call this renderer automatically through its explicit Fetch page workflow; the standalone companion remains available too.
 
 From the updated `element-extractor` folder in PowerShell:
 

@@ -1,3 +1,4 @@
+import { sourceFetch } from './interpretation/source-fetch.js';
 import { InputError, publicURL, publicAddress } from './public-network.js';
 import { labFetch } from './interpretation/lab-api.js';
 import { decodeHTML } from 'entities';
@@ -311,6 +312,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (['/interpretation','/interpretation-client.js','/api/interpretation/start','/api/interpretation/action'].includes(url.pathname)) return labFetch(request);
+    if (url.pathname === '/api/interpretation/fetch') return sourceFetch(request,url,env,{fetchPage:fetchPublicPage,analyze:analyzePage});
     if (url.pathname === '/api/tables') return tablesAPI(request, url);
     if (request.method !== 'GET') return new Response('Method not allowed', {status:405, headers:{Allow:'GET'}});
     if (url.pathname === '/example') return new Response(PAGE, {headers:{...SECURITY, 'Content-Type':'text/html; charset=utf-8'}});

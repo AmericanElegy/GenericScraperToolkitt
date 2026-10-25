@@ -200,11 +200,15 @@ function publicDocument(info, job) {
     notice: 'Only the selected section is parsed/reviewed/exported as current records. The full page is retained; other sections are not implicitly approved. Switching sections starts a new review session.' };
 }
 async function checkJob(job) {
-  if (!only(job, ['example_id', 'packet', 'cache_entry', 'events', 'revisions', 'parser_version', 'document', 'mapping']) ||
+  if (!only(job, ['example_id', 'packet', 'cache_entry', 'events', 'revisions', 'parser_version', 'document', 'mapping', 'retrieval']) ||
       !Array.isArray(job.events) || job.events.length > 64 ||
       (job.revisions !== undefined && (!Array.isArray(job.revisions) || job.revisions.length > 8)))
     fail('invalid_lab_job', 'Invalid session. Maximum 64 review events and 8 candidate revisions.');
   if (job.mapping !== undefined && job.parser_version !== MAPPING_VERSION) fail('column_mapping', 'Recorded column mappings require a mapped table session.');
+  if(job.retrieval!==undefined){
+    const r=job.retrieval;
+    if(!only(r,['method','source','retrieved_at','snapshot_hash','label']) || !['static-html','local-chromium'].includes(r.method) || r.source!==job.packet.source.url || r.snapshot_hash!==job.packet.source.text_hash || typeof r.label!=='string'||r.label.length>1000||typeof r.retrieved_at!=='string'||!Number.isFinite(Date.parse(r.retrieved_at))) fail('retrieval_metadata','Retrieval description does not match the retained text snapshot.');
+  }
   await revalidate(job.packet, job.cache_entry);
   await documentInfo(job);
   let response;
@@ -328,7 +332,7 @@ export async function labFetch(request) {
     if (url.pathname === "/api/interpretation/start") {
       let packet, response, parserVersion, document, mapping;
       if (body?.example_id === 'custom-text') {
-        if (!only(body, ['example_id', 'source', 'schema', 'mode', 'dataset_id', 'mapping']) ||
+        if (!only(body, ['example_id', 'source', 'schema', 'mode', 'dataset_id', 'mapping', 'retrieval']) ||
             (body.mode !== undefined && !['auto', 'pair'].includes(body.mode)))
           fail('invalid_input', 'Choose automatic suggestions or manual pair columns.');
         if (body.mapping !== undefined && (body.mode !== 'auto' || body.dataset_id !== undefined)) fail('column_mapping', 'Column mapping requires automatic mode on one pasted table.');
@@ -369,6 +373,7 @@ export async function labFetch(request) {
         packet,
         await scriptedInterpreter(response),
       );
+      if(body.retrieval&&document&&body.retrieval.snapshot_hash!==await digest(body.source.text.replace(/\r\n?/g,'\n')))fail('retrieval_metadata','The retained page differs from the recorded retrieved snapshot.');
       const job = {
         example_id: body.example_id,
         packet,
@@ -377,6 +382,7 @@ export async function labFetch(request) {
         revisions: [],
         ...(document ? { document } : {}),
         ...(mapping ? {mapping} : {}),
+        ...(body.retrieval ? {retrieval:document?{...body.retrieval,snapshot_hash:packet.source.text_hash}:body.retrieval} : {}),
         ...(body.example_id === "custom-text" ? { parser_version: parserVersion } : {}),
       };
       return reply(await view(job, await checkJob(job)));
@@ -471,6 +477,7 @@ export async function labFetch(request) {
     }
     exported.json.candidate_revision_history = body.job.revisions || [];
     exported.json.original_candidates = originalResponse(body.job);
+    if(body.job.retrieval)exported.json.source_retrieval={...body.job.retrieval,notice:'Descriptive session metadata, not authenticated source provenance. Snapshot hash is revalidated.'};
     exported.json.method = body.job.parser_version || 'fictional-scripted-example';
     exported.json.notice = 'Limited rules or scripted examples, with optional human corrections. No AI inference. Original automated findings are retained separately from human review.';
     const prefix = body.diagnostic

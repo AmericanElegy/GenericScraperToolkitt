@@ -24,6 +24,12 @@ function readTables() {
   return {id:'rendered-'+(index+1),caption:root.querySelector('caption')?.textContent.trim()||root.getAttribute('aria-label')||'Table '+(index+1),headers,rows,issues,supported:issues.length===0};
  });
 }
+function readArticleBlocks() {
+ const root=document.querySelector('main,article')||document.body;
+ const blocks=[...root.querySelectorAll('h1,h2,h3,p,li')].filter(el=>el.getClientRects().length&&!el.closest('table,nav,header,footer,form')&&!(el.tagName==='LI'&&el.querySelector('p'))).map(el=>el.innerText.replace(/\s+/g,' ').trim()).filter(Boolean);
+ if(blocks.length>512||blocks.reduce((n,b)=>n+b.length,0)>64000||blocks.some(b=>b.length>12000))throw Error('Rendered article exceeds source text limits.');
+ return blocks;
+}
 export async function renderPage(input,{loadResource=loadPublicResource,timeoutMs=12000}={}) {
  const source=publicURL(input).href;const browser=await launchBrowser();
  const cancellation=new AbortController();let active=0;
@@ -82,7 +88,8 @@ export async function renderPage(input,{loadResource=loadPublicResource,timeoutM
   }
   await nav;if(mainError)throw Error(mainError);
   const finalURL=await browser.evaluate('location.href');publicURL(finalURL);
-  return {source,final_url:finalURL,retrieved_at:new Date().toISOString(),method:'local-chromium-v1',tables,
+  const article_blocks=tables.some(t=>t.supported&&t.rows.length)?[]:await browser.evaluate('('+readArticleBlocks.toString()+')()');
+  return {source,article_blocks,final_url:finalURL,retrieved_at:new Date().toISOString(),method:'local-chromium-v1',tables,
    diagnostics:{requests,resource_bytes:bytes,script_errors:scriptErrors,blocked_resources:blocked,
     message:tables.length?'Rendered table snapshot captured. Later updates, pagination, scrolling and virtualized rows may be absent; review before export.':'No supported tables appeared within the render window. Canvas, images, login barriers and non-table layouts are not interpreted.'}};
  }finally{finished=true;cancellation.abort();await browser.close();}

@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null };
+  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null };
   const labels = {
     approved: "Approved",
     rejected: "Rejected",
@@ -70,6 +70,9 @@
     return blockers(row).length > 0;
   }
   function controls() {
+    $("fetch-source").disabled=state.busy;
+    $("open-retrieved").disabled=state.busy||!state.retrieved;
+    $("retrieved-dataset").disabled=state.busy||!state.retrieved;
     for (const input of document.querySelectorAll('#mapping-columns input, #mapping-columns select')) input.disabled = state.busy;
     $("apply-mapping").disabled = state.busy || !state.view?.column_mapping?.editable;
     for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode", "session-file", "restore-session"]) $(id).disabled = state.busy;
@@ -176,11 +179,8 @@
     const { packet } = state.view.job,
       row = selected(),
       field = row?.fields[state.field];
-    $("source-info").textContent =
-      packet.passages.length +
-      " passages in current section · Source attribution (not fetched): " +
-      (packet.source.url || "none") +
-      ". The URL was not fetched.";
+    const retrieval=state.view.job.retrieval;
+    $("source-info").textContent=packet.passages.length+" passages in current section · Source: "+(packet.source.url||"none")+ (retrieval ? ". Recorded retrieval: "+(retrieval.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML")+". This review uses the retained snapshot; revalidation does not fetch the URL again." : ". Reference only; this pasted review did not fetch the URL.");
     $("source-hash").textContent = "SHA-256: " + packet.source.text_hash;
     $("passages").replaceChildren(
       ...packet.passages.map((p) => {
@@ -483,6 +483,7 @@
     const response = await request("/api/interpretation/start", {
       example_id: "custom-text", mode: "auto", source: state.view.job.document.source,
       dataset_id: id,
+      ...(state.view.job.retrieval?{retrieval:state.view.job.retrieval}:{}),
     });
     state.view = await response.json(); state.rowId = null; state.field = null;
     clearDecision(); render(); editCandidate();
@@ -500,12 +501,37 @@
         name:document.querySelector('#mapping-columns input[data-index="'+i+'"]').value.trim(),
         kind:document.querySelector('#mapping-columns select[data-index="'+i+'"]').value,
       }));
-      const response=await request("/api/interpretation/start",{example_id:"custom-text",source,mode:"auto",mapping});
+      const response=await request("/api/interpretation/start",{example_id:"custom-text",source,mode:"auto",mapping,...(state.view.job.retrieval?{retrieval:state.view.job.retrieval}:{})});
       state.view=await response.json();state.rowId=null;state.field=null;state.checked.clear();
       clearDecision();render();editCandidate();
       say("Column mapping applied to a new review. No previous approval was carried over. " + state.view.extraction.message);
     });
   };
+  function clearRetrieved() {state.retrieved=null;$("retrieved-panel").hidden=true;$("retrieved-dataset").replaceChildren();}
+  async function openRetrieved() {
+    const dataset=state.retrieved.datasets.find(d=>d.id===$("retrieved-dataset").value);
+    if(!dataset)throw Error("Select retrieved content first.");
+    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.label};
+    const response=await request("/api/interpretation/start",{example_id:"custom-text",mode:"auto",source:{text:dataset.text,url:state.retrieved.source},retrieval});
+    state.view=await response.json();state.rowId=null;state.field=null;
+    $("source-text").value=dataset.text;$("source-url").value=state.retrieved.source;$("text-mode").value="auto";
+    clearDecision();render();editCandidate();
+    say("Fetched using "+(state.retrieved.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML")+". "+dataset.label+". "+state.view.extraction.message);
+  }
+  $("fetch-source").onclick=()=>perform(async()=>{
+    if(!$("source-url").value.trim())throw Error("Enter a public HTTPS source URL first.");
+    say("Fetching ordinary HTML; local JavaScript rendering will be tried only when indicated…");
+    const response=await fetch("/api/interpretation/fetch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:$("source-url").value.trim()})});
+    const value=await response.json();
+    $("retrieval-checks").textContent=JSON.stringify({checks:value.checks,issues:value.issues},null,2);
+    $("retrieved-panel").hidden=false;
+    if(!response.ok){state.retrieved=null;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
+    state.retrieved=value;
+    $("retrieved-method").textContent=value.method==="local-chromium"?"Retrieved with local JavaScript rendering":"Retrieved with ordinary HTML";
+    $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text("option",d.label);o.value=d.id;return o;}));
+    await openRetrieved();
+  });
+  $("open-retrieved").onclick=()=>perform(openRetrieved);
   $("custom-input").onsubmit = (event) => {
     event.preventDefault();
     perform(async () => {
@@ -521,7 +547,7 @@
         ] } } : {}),
       });
       state.view = await response.json(); state.rowId = null; state.field = null;
-      clearDecision(); render(); editCandidate();
+      clearRetrieved();clearDecision(); render(); editCandidate();
       say(state.view.document ? "Full page accepted and divided into sections. " + state.view.extraction.message + " Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. " + state.view.extraction.message + " No AI calls.");
     });
   };
@@ -572,7 +598,7 @@
         example_id: $("example").value,
       });
       const view = await response.json();
-      state.view = view;
+      state.view = view;clearRetrieved();
       state.rowId = null;
       state.field = null;
       clearDecision();
@@ -655,7 +681,7 @@
       try { session = JSON.parse(await file.text()); } catch { throw Error("This file is not valid session JSON. Your current review was kept."); }
       const response = await request("/api/interpretation/action", { action: "restore", session });
       state.view = await response.json(); state.rowId = null; state.field = null;
-      clearDecision(); render(); editCandidate();
+      clearRetrieved();clearDecision(); render(); editCandidate();
       $("source-text").value = state.view.job.document?.source.text || state.view.job.packet.source.text;
       $("source-url").value = state.view.job.packet.source.url || "";
       $("reviewer").value = "";

@@ -19,6 +19,7 @@ try {
     ['Table browser workflow', ['scripts/check-browser.mjs']],
     ['Interpretation browser workflow', ['scripts/check-lab-browser.mjs']],
     ['JavaScript renderer browser workflow', ['scripts/check-renderer-browser.mjs']],
+    ['Source URL fetch and fallback browser workflow', ['scripts/check-source-browser.mjs']],
     ['Cloudflare bundle dry run', ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--dry-run']],
   ]) {
     process.stdout.write('\nChecking: ' + name + '\n');

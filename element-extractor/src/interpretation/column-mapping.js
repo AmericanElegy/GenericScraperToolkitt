@@ -35,7 +35,7 @@ export function detectColumns(text) {
     return value.split(delimiter).map(v => v.trim());
   };
   const labels = split(header.quote);
-  if (!labels || labels.length < 2 || labels.length > LIMITS.fields || labels.some(l => !/[\p{L}]/u.test(l) || l.length > 100 || /[\d\n<>]/.test(l))) return null;
+  if (!labels || labels.length < 2 || labels.length > LIMITS.fields || labels.some(l => !/[\p{L}]/u.test(l) || l.length > 100 || /[\n<>]/.test(l) || (delimiter === ',' && /\d/.test(l)))) return null;
   const rows = [], skipped = [];
   for (const line of lines.slice(headerAt + 1)) {
     if (delimiter === '|' && /^\|?[\s:|-]+\|?$/.test(line.quote)) continue;

@@ -13,7 +13,7 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-Restart the development server after a code update. Use **Interpretation Lab** for copied text. Use the URL workflow on the toolkit home page for supported public tables. Merely pasting a URL into source attribution does not fetch it.
+Restart the development server after a code update. Use **Interpretation Lab** for copied text. Use the URL workflow on the toolkit home page for supported public tables. Merely pasting a URL into source attribution does not fetch it. The lab now has an explicit Fetch page action with ordinary HTML first and targeted local browser fallback; see the Interpretation Lab guide.
 
 Save the current review with **Save review session** before switching computers or sections. Open that JSON on the other machine with **Open saved session**. CSV/approved JSON are data deliveries; diagnostic JSON is a report; the session file is the reopenable review. Session files contain full source/history, not just approved rows. There is no automatic synchronization or hosted customer storage.
 

@@ -24,7 +24,7 @@ Rows currently require exactly four ungrouped decimal values, optionally with do
 
 ## Whole-page intake and section selection
 
-Automatic mode accepts up to **64,000 UTF-16 characters** and **512 source paragraphs**. A paste is not clipped by the textarea; an oversized paste stays in the box with an error instead of being silently truncated. The URL is still only attribution and is never fetched.
+Automatic mode accepts up to **64,000 UTF-16 characters** and **512 source paragraphs**. A paste is not clipped by the textarea; an oversized paste stays in the box with an error instead of being silently truncated. Pasting text uses the URL only as attribution and never fetches it. The separate **Fetch page** action below explicitly retrieves content.
 
 Pages exceeding one packet, or containing multiple recognized table headers, enter full-page intake. The complete normalized source is retained. The UI lists sections; the first recognized table is previewed automatically. Use **Open selected section** to review another table batch or the surrounding prose. Each section gets its own schema, candidate cache, review and export. Switching starts a new review session: save its session file or download its export before leaving. Decisions do not transfer between sections and are not saved to a durable workspace. Current approved exports cover only the selected section, never the entire document.
 
@@ -40,7 +40,7 @@ Intake currently allows at most 32 sections, with up to 24 table rows per batch.
 
 Choose **Manual name/number column names** if you want to specify a two-column schema for the original narrow parser.
 
-1. Paste your passage into **Use your own text**. The optional HTTPS URL is attribution only; it is never fetched. The pasted text, rather than the URL, is the source snapshot.
+1. Paste your passage into **Use your own text**. When previewing pasted text, the optional HTTPS URL is attribution only and is not fetched; the separate Fetch page button explicitly retrieves it. The pasted text, rather than the URL, is the source snapshot.
 2. Set two requested column names: one text field, then one numeric field. Defaults are `entity_name` and `score`. Use distinct lowercase identifiers with underscores. The core validator supports other schemas, but manual pair mode is limited to this pair.
 3. Click **Preview suggested records**. The `name-number-v1` grammar supports simple lines/sentences such as `Alpha scored 98.6.`, `Alpha received a score of 98.6.` or `Alpha: 98.6`. It accepts signed, ungrouped decimals; there is no assumed 0–100 range. It does not infer arbitrary relationships or handle all natural-language wording. Sentence splitting is basic; abbreviations and complex clauses may need manual correction.
 4. Inspect every candidate against its highlighted exact quotation. Every candidate starts pending. Paragraphs without a supported match stay visible with an explicit no-result explanation; that is not proof of absent data. Keywords for correction, negation or uncertainty block rule candidates in that paragraph, but this heuristic is not complete semantic analysis.
@@ -127,3 +127,15 @@ Optional name/format edits start a new unapproved review; save the current sessi
 Full-page tables show a prominent recognized-row total, current source-row range and batch number, such as **48 recognized table rows · viewing 25–48 · batch 2 of 2**. Previous/Next batch navigate within that table; the section selector also opens other tables or surrounding prose. Table-row numbers continue across batches while internal record IDs remain scoped to each review. These are recognized source rows, not proof of complete webpage coverage.
 
 Candidate/review counts and approved CSV/JSON exports cover only the current batch or section. The export note shows the current approved-record count and explains when a CSV contains headers only. JSON retains full source text alongside the approved records; it is not source redaction. Batches are not combined. Save the current session before switching: navigation starts a new review, and approval does not carry between batches. Reopening a saved session restores that batch and its decisions.
+
+## Fetch a source URL and automatically try the local renderer
+
+Enter a public HTTPS URL in **Add source text** and click **Fetch page**. Merely entering a URL or previewing pasted text stays offline. Fetching uses the existing public-URL/DNS, redirect, UTF-8, size and time checks, then captures supported HTML/ARIA tables, supported adapters and article paragraphs/headings. Known grouped employment/wage headers reuse the existing explicit layout parser; other merged/nested structures remain unsupported.
+
+The first retrieved selection opens automatically as a new unapproved review. Other tables, bounded row batches and article sections appear in **Retrieved content**. Save the current session before opening another selection. Normalized snapshots carry a server-computed text hash, source URL, retrieval time, selection label and recorded method. Descriptive retrieval metadata survives save/restore and approved JSON exports; it is not authenticated proof of an external source. Review revalidation does not fetch the URL again.
+
+When ordinary HTML provides no usable tables or recognized prose facts, and an application container plus linked scripts indicate client rendering, the standard local `npm run dev` server automatically tries the installed Chrome/Edge/Chromium renderer. No separate renderer terminal is required for this fallback. Private/reserved destinations, source HTTP errors, login/verification indicators, image responses and ambiguous merged structures are not retried as JavaScript failures. Failure messages show which methods were attempted; a failed fetch leaves the previous review intact.
+
+Without the local renderer binding (for example a deployed Worker or `dev:wrangler`), ordinary fetching still works and JavaScript candidates explain that the local server is needed. No paid browser binding is configured. Browser snapshots can omit later updates, scrolling, pagination and POST-driven content. Rendered article blocks are imported when available if no supported table appears.
+
+Retrieved tables use bounded snapshots of up to 24 rows, eight columns, 12,000 characters and the existing evidence limits. At most 32 selections / 128,000 derived text characters are returned. Article extraction retains at most 512 blocks / 64,000 characters, preferring main/article content and excluding navigation, forms, scripts and tables. Oversized results fail rather than truncate. Unsupported items and blocked renderer resources are listed in fetch diagnostics; successful snapshots do not establish full page coverage.

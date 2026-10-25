@@ -46,7 +46,7 @@ export function pageHeaders(text) {
 export function needsPageIntake(source) {
   if (typeof source?.text !== 'string') return false;
   const text = source.text.replace(/\r\n?/g, '\n');
-  return text.length > LIMITS.text || paragraphs(text).length > LIMITS.passages || pageHeaders(text).length > 1;
+  return text.length > LIMITS.text || paragraphs(text).length > LIMITS.passages || pageHeaders(text).length > 1 || pageHeaders(text).some(h=>h.kind==='employment');
 }
 export function planPage(source, proseVersion = PROSE_VERSION) {
   if (!source || Object.keys(source).some(k => !['text', 'url'].includes(k)) || typeof source.text !== 'string' || !source.text.trim() || source.text.length > PAGE_LIMIT)

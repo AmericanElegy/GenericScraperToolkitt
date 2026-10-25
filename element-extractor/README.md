@@ -9,6 +9,7 @@ For pages that build their tables with JavaScript, the optional [local browser r
 ## Release workflow
 
 - **Public URL:** find supported native/accessible tables, preview/search and export. The original 118-element example and DCI score adapter remain available.
+- **Fetch into the lab:** enter a source URL and click **Fetch page**. Ordinary HTML is tried first; the normal local server can automatically use the installed browser when client rendering is indicated. Paste-only previews remain offline. See [the source-fetch guide](docs/interpretation-lab.md#fetch-a-source-url-and-automatically-try-the-local-renderer).
 - **Pasted text:** open **Interpretation Lab**, paste ordinary text or a whole page, and preview suggested records/columns. Supported table sections keep percentages, job counts and dollar amounts separate.
 - **Review:** inspect source quotations, correct/add candidates, revalidate, then approve or reject. Unsupported content stays visible with an explanation.
 - **Move computers:** use **Save review session**, transfer that JSON file, and **Open saved session** on the other computer. Source, corrections, selected section and existing decisions are revalidated. Review names are self-declared; these are local portable files, not authenticated cloud storage.
