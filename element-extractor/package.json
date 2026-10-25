@@ -20,7 +20,8 @@
     "release:check": "node scripts/release-check.mjs",
     "dev:browser": "node scripts/browser-render-server.mjs",
     "check:renderer-browser": "node scripts/check-renderer-browser.mjs",
-    "check:source-browser": "npm run build && node scripts/check-source-browser.mjs"
+    "check:source-browser": "npm run build && node scripts/check-source-browser.mjs",
+    "test:live-sources": "npm run build && node scripts/check-live-sources.mjs"
   },
   "repository": {
     "type": "git",

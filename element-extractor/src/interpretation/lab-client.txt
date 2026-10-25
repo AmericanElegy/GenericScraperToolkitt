@@ -71,7 +71,15 @@
   }
   function controls() {
     $("fetch-source").disabled=state.busy;
-    $("open-retrieved").disabled=state.busy||!state.retrieved;
+    const chosen=state.retrieved?.datasets.find(d=>d.id===$("retrieved-dataset").value);
+    const current=state.view?.job.retrieval;
+    const alreadyOpen=chosen&&current?.source===state.retrieved.source&&current.snapshot_hash===chosen.snapshot_hash&&current.label===chosen.label;
+    $("open-retrieved").disabled=state.busy||!chosen||alreadyOpen;
+    $("open-retrieved").textContent=alreadyOpen?"Already open in review":"Open selected content";
+    if(state.retrieved){
+      $("retrieved-current").textContent=current?"Open in review: "+current.label+". Counts and exports below cover this selection only.":"No retrieved selection is open in the current review.";
+      $("retrieved-preview").textContent=chosen?(chosen.kind==="table"?"Table snapshot · "+chosen.row_count+" captured rows · "+chosen.column_count+" columns":"Article snapshot · "+chosen.text.split(/\n\s*\n/).length+" text blocks")+(alreadyOpen?" · currently open.":" · selected but not open yet."):"";
+    }
     $("retrieved-dataset").disabled=state.busy||!state.retrieved;
     for (const input of document.querySelectorAll('#mapping-columns input, #mapping-columns select')) input.disabled = state.busy;
     $("apply-mapping").disabled = state.busy || !state.view?.column_mapping?.editable;
@@ -523,15 +531,19 @@
     say("Fetching ordinary HTML; local JavaScript rendering will be tried only when indicated…");
     const response=await fetch("/api/interpretation/fetch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:$("source-url").value.trim()})});
     const value=await response.json();
-    $("retrieval-checks").textContent=JSON.stringify({checks:value.checks,issues:value.issues},null,2);
+    $("retrieval-checks").textContent=(value.checks||[]).map(c=>(c.method==="static-html"?"Ordinary HTML":"Local JavaScript renderer")+" — "+c.status.replaceAll("_"," ")+": "+c.message).join("\n\n")+((value.issues||[]).length?"\n\nCapture notes:\n"+value.issues.map(i=>"• "+i).join("\n"):"");
     $("retrieved-panel").hidden=false;
-    if(!response.ok){state.retrieved=null;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
+    if(!response.ok){state.retrieved=null;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";$("retrieved-source").textContent="";$("retrieved-source").removeAttribute("href");$("retrieved-summary").textContent="No new content was imported.";$("retrieved-preview").textContent="";$("retrieved-current").textContent=state.view?"The existing review below is unchanged.":"";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
     state.retrieved=value;
+    $("retrieved-source").href=value.source;$("retrieved-source").textContent=value.source;
+    const tables=value.datasets.filter(d=>d.kind==="table"),articles=value.datasets.filter(d=>d.kind==="prose");
+    $("retrieved-summary").textContent=tables.length+" table selection"+(tables.length===1?"":"s")+" · "+tables.reduce((n,d)=>n+d.row_count,0)+" captured table rows · "+articles.length+" article section"+(articles.length===1?"":"s")+" · retrieved "+new Date(value.retrieved_at).toLocaleString()+"."+((value.issues||[]).length?" "+value.issues.length+" capture notes below.":"");
     $("retrieved-method").textContent=value.method==="local-chromium"?"Retrieved with local JavaScript rendering":"Retrieved with ordinary HTML";
     $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text("option",d.label);o.value=d.id;return o;}));
     await openRetrieved();
   });
   $("open-retrieved").onclick=()=>perform(openRetrieved);
+  $("retrieved-dataset").onchange=controls;
   $("custom-input").onsubmit = (event) => {
     event.preventDefault();
     perform(async () => {

@@ -23,7 +23,7 @@ function tableDatasets(tables,issues) {
    const flat=t.headers.join(' ')+' '+(t.rows[0]||[]).join(' ')+'\n\n'+t.rows.slice(1).map(row=>row.join(' ')).join('\n\n');
    const plan=planPage({text:flat});
    if(plan.datasets.some(d=>d.kind!=='prose')){
-    for(const d of plan.datasets)datasets.push({kind:d.kind==='prose'?'prose':'table',label:(t.title||'Table')+' · '+d.label,text:d.text,row_count:d.row_count});
+    for(const d of plan.datasets)datasets.push({kind:d.kind==='prose'?'prose':'table',label:(t.title||'Table')+' · '+d.label,text:d.text,row_count:d.row_count,column_count:d.kind==='prose'?null:d.schema.fields.length});
     continue;
    }
   }
@@ -34,7 +34,7 @@ function tableDatasets(tables,issues) {
   const header=line(t.headers);
   if(header.length>2048)error('source_limit','A table header exceeds the evidence limit.');
   let batch=[],length=header.length,start=1;
-  const flush=()=>{if(!batch.length)return;datasets.push({kind:'table',label:(t.title||t.caption||'Table '+(index+1))+' · rows '+start+'–'+(start+batch.length-1)+' of '+t.rows.length,text:header+'\n'+batch.join('\n'),row_count:batch.length});start+=batch.length;batch=[];length=header.length;};
+  const flush=()=>{if(!batch.length)return;datasets.push({kind:'table',label:(t.title||t.caption||'Table '+(index+1))+' · rows '+start+'–'+(start+batch.length-1)+' of '+t.rows.length,text:header+'\n'+batch.join('\n'),row_count:batch.length,column_count:t.headers.length});start+=batch.length;batch=[];length=header.length;};
   for(const row of t.rows){const value=line(row);if(value.length>2048)error('source_limit','A table row exceeds the 2,048-character evidence limit.');if(batch.length===24||length+value.length+1>12000)flush();batch.push(value);length+=value.length+1;}
   flush();
  }

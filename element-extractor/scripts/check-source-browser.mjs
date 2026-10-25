@@ -37,6 +37,10 @@ try{
  await browser.evaluate('document.getElementById("fetch-source").click()');
  await waitFor(()=>browser.evaluate('document.getElementById("counts").textContent.includes("2 candidates")&&!document.getElementById("fetch-source").disabled'));
  assert.equal(renderCalls,0);assert.equal(sourceCalls,1);
+ assert.match(await browser.evaluate('document.getElementById("retrieved-summary").textContent'),/1 table selection · 2 captured table rows · 1 article section/);
+ assert.match(await browser.evaluate('document.getElementById("retrieved-source").href'),/static.example.org/);
+ assert.equal(await browser.evaluate('document.getElementById("open-retrieved").disabled'),true);
+ assert.match(await browser.evaluate('document.getElementById("retrieved-preview").textContent'),/Table snapshot · 2 captured rows · 2 columns · currently open/);
  assert.match(await browser.evaluate('document.getElementById("retrieved-method").textContent'),/ordinary HTML/);
  assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=score]").textContent'),'98.6');
  await browser.evaluate('document.getElementById("select-eligible").click();document.getElementById("batch-reviewer").value="Source Browser Test";document.getElementById("batch-note").value="Checked fetched row and header.";document.getElementById("batch-confirm").checked=true;document.getElementById("batch-confirm").dispatchEvent(new Event("change"));document.getElementById("approve-batch").click()');
@@ -46,13 +50,15 @@ try{
  const exported=JSON.parse(await readFile(join(dir,'interpretation-approved.json'),'utf8'));
  assert.equal(exported.source_retrieval.method,'static-html');assert.equal(exported.source_retrieval.source,'https://static.example.org/');assert.equal(exported.validation.records.length,2);
  await waitFor(()=>browser.evaluate('!document.getElementById("load").disabled'));
- await browser.evaluate('document.getElementById("retrieved-dataset").value="retrieved-2";document.getElementById("open-retrieved").click()');
+ await browser.evaluate('document.getElementById("retrieved-dataset").value="retrieved-2";document.getElementById("retrieved-dataset").dispatchEvent(new Event("change"));document.getElementById("open-retrieved").click()');
  await waitFor(()=>browser.evaluate('document.getElementById("counts").textContent.includes("1 candidate")&&!document.getElementById("load").disabled'));
  assert.match(await browser.evaluate('document.getElementById("candidate-rows").textContent'),/Widgets.*12.6/);
+ assert.match(await browser.evaluate('document.getElementById("retrieved-preview").textContent'),/Article snapshot.*currently open/);
+ assert.match(await browser.evaluate('document.getElementById("retrieved-current").textContent'),/Article text/);
  await browser.evaluate('document.getElementById("source-url").value="https://dynamic.example.org/";document.getElementById("fetch-source").click()');
  await waitFor(()=>browser.evaluate('document.getElementById("retrieved-method").textContent.includes("JavaScript")&&document.getElementById("counts").textContent.includes("2 candidates")&&!document.getElementById("fetch-source").disabled'));
  assert.equal(renderCalls,1);assert.match(await browser.evaluate('document.getElementById("candidate-rows").textContent'),/Gamma.*88.1/);
- assert.match(await browser.evaluate('document.getElementById("retrieval-checks").textContent'),/no_supported_records/);
+ assert.match(await browser.evaluate('document.getElementById("retrieval-checks").textContent'),/no supported records/);
  if(process.env.SOURCE_SCREENSHOT){await browser.evaluate('window.scrollTo(0,0)');const shot=await browser.send('Page.captureScreenshot',{captureBeyondViewport:true});await writeFile(process.env.SOURCE_SCREENSHOT,Buffer.from(shot.data,'base64'));}
  await browser.evaluate('document.getElementById("source-url").value="https://blocked.example.org/";document.getElementById("fetch-source").click()');
  await waitFor(()=>browser.evaluate('document.getElementById("status").textContent.includes("HTTP 403")&&!document.getElementById("fetch-source").disabled'));
