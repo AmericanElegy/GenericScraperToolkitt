@@ -700,7 +700,7 @@ test('automatic column mapping preserves units, identifiers, exact evidence and 
  try {
   const text='Name\tShare (%)\tPay ($)\tZIP Code\nAlpha\t12.6%\t$1,234.50\t00123\nBeta\t9.9%\t$31.59\t04567';
   let value=await (await autoText(mf,text)).json();
-  assert.equal(value.job.parser_version,'mapped-table-v1');
+  assert.equal(value.job.parser_version,'mapped-table-v2');
   assert.equal(value.counts.candidates,2);
   assert.deepEqual(value.column_mapping.columns.map(c=>c.kind),['text','percent','dollars','text']);
   const row=value.validation.records[0];
@@ -746,6 +746,6 @@ test('mapping dialects, malformed rows and type changes do not silently accept i
   const tampered=structuredClone(value.job);tampered.mapping[1].kind='number';
   assert.equal((await action(mf,tampered,'revalidate')).status,400);
   const quoted=await (await autoText(mf,'Name,Score\n"Alpha, Inc",98.6')).json();
-  assert.notEqual(quoted.job.parser_version,'mapped-table-v1');
+  assert.notEqual(quoted.job.parser_version,'mapped-table-v2');
  } finally {await mf.dispose();}
 });

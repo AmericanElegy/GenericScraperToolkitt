@@ -16,6 +16,8 @@ For pages that build their tables with JavaScript, the optional [local browser r
 
 See [the release guide](docs/local-release.md) for the exact boundary and verification. This release uses limited deterministic rules, not general AI interpretation.
 
+For pages with many navigation/layout tables, the lab URL importer uses bounded candidate discovery and lists unsupported tables separately. Wide URL tables are split into labeled column groups; some merged tables still require a narrower source or manual mapping.
+
 ## PowerShell quick start
 
 Run these commands from the repository's `element-extractor` directory (Node 22+ and curl required):

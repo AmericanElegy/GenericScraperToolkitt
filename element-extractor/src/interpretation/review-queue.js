@@ -1,5 +1,5 @@
 // Routing is derived from independent validation, never from client confidence labels.
-const tableMethods = new Set(['mapped-table-v1', 'pasted-wage-table-v1', 'pasted-wage-table-v2', 'pasted-page-table-v1']);
+const tableMethods = new Set(['mapped-table-v1', 'mapped-table-v2', 'pasted-wage-table-v1', 'pasted-wage-table-v2', 'pasted-page-table-v1']);
 const reviewOnly = new Set(['association_unverified', 'cross_passage_association']);
 export function reviewQueue(job, validation) {
   const structured = tableMethods.has(job.parser_version);

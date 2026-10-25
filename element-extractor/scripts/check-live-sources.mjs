@@ -19,10 +19,22 @@ try{
   await waitFor(()=>browser.evaluate('!document.getElementById("fetch-source").disabled'));
   const result=await browser.evaluate(`({method:document.getElementById('retrieved-method').textContent,summary:document.getElementById('retrieved-summary').textContent,status:document.getElementById('status').textContent,counts:document.getElementById('counts').textContent,selection:document.getElementById('retrieved-current').textContent,samples:[...document.querySelectorAll('#candidate-rows tr')].slice(0,3).map(tr=>[...tr.querySelectorAll('button.value')].map(b=>b.textContent))})`);
   const success=!result.method.includes('stopped')&&Number(result.counts.match(/^\d+/)?.[0])>0;
-  results.push({url,success,...result});
+  const selection_checks=[];
+  if(process.env.LIVE_SOURCE_TABLE_SELECTIONS==='1'&&success){
+   const choices=await browser.evaluate('[...document.getElementById("retrieved-dataset").options].filter(o=>!o.textContent.startsWith("Article text ·")).map(o=>({id:o.value,label:o.textContent}))');
+   for(const [j,choice]of choices.entries()){
+    const same=await browser.evaluate('document.getElementById("retrieved-dataset").value==='+JSON.stringify(choice.id));
+    if(!same){await browser.evaluate('(()=>{const select=document.getElementById("retrieved-dataset");select.value='+JSON.stringify(choice.id)+';select.dispatchEvent(new Event("change"));document.getElementById("open-retrieved").click()})()');await waitFor(()=>browser.evaluate('!document.getElementById("load").disabled'));}
+    const check=await browser.evaluate('({counts:document.getElementById("counts").textContent,current:document.getElementById("retrieved-current").textContent,status:document.getElementById("status").textContent,header:document.getElementById("candidate-head").textContent})');
+    const opened=check.current.includes('Open in review: '+choice.label+'.');
+    selection_checks.push({label:choice.label,success:opened&&Number(check.counts.match(/^\d+/)?.[0])>0,...check});
+    if(process.env.LIVE_SOURCE_OUTPUT_DIR){await mkdir(process.env.LIVE_SOURCE_OUTPUT_DIR,{recursive:true});await browser.evaluate('window.scrollTo(0,0)');const shot=await browser.send('Page.captureScreenshot',{captureBeyondViewport:true});await writeFile(join(process.env.LIVE_SOURCE_OUTPUT_DIR,'selection-'+(j+1)+'.png'),Buffer.from(shot.data,'base64'));}
+   }
+  }
+  results.push({url,success,...result,selection_checks});
   if(process.env.LIVE_SOURCE_OUTPUT_DIR){await mkdir(process.env.LIVE_SOURCE_OUTPUT_DIR,{recursive:true});await browser.evaluate('window.scrollTo(0,0)');const shot=await browser.send('Page.captureScreenshot',{captureBeyondViewport:true});await writeFile(join(process.env.LIVE_SOURCE_OUTPUT_DIR,'live-source-'+(i+1)+'.png'),Buffer.from(shot.data,'base64'));}
   console.log(JSON.stringify({url,success,method:result.method,counts:result.counts}));
  }
  if(process.env.LIVE_SOURCE_OUTPUT_DIR)await writeFile(join(process.env.LIVE_SOURCE_OUTPUT_DIR,'live-source-results.json'),JSON.stringify({retrieved_at:new Date().toISOString(),results},null,2)+'\n');
- if(results.some(r=>!r.success))process.exitCode=1;
+ if(results.some(r=>!r.success||r.selection_checks?.some(c=>!c.success)))process.exitCode=1;
 }finally{await browser?.close();const exited=new Promise(r=>child.once('exit',r));child.kill('SIGTERM');await exited;}

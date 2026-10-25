@@ -25,7 +25,7 @@
     employment_percent_national: "National %", employment_percent_local: "Local %", hourly_wage_national_dollars: "National $/hour", hourly_wage_local_dollars: "Local $/hour",
     hourly_wage_dollars: "Hourly wage ($)", annual_wage_dollars: "Annual wage ($)",
   };
-  const columnLabel = name => columnLabels[name] || name.replaceAll("_", " ");
+  const columnLabel = name => (state.view?.job.parser_version==="mapped-table-v2"?state.view.column_mapping?.columns.find(c=>c.name===name)?.source_label:null)||columnLabels[name]||name.replaceAll("_"," ");
   const passageLabel = id => "Passage " + Number(id.slice(1));
   const queue = () => state.view?.review_queue || { structured: false, eligible_ids: [], exception_ids: [], individual_ids: [], remaining_review_events: 0 };
   function visibleRows() {
@@ -44,7 +44,7 @@
     $("mapping-issues").textContent = mapping.skipped_rows.length ? mapping.skipped_rows.length + " rows were not mapped: " + mapping.skipped_rows.map(r => r.quote + " — " + r.reason).join("; ") : "No rows were skipped by the column mapper. Review source evidence before approving; complete fact coverage is not guaranteed.";
     $("mapping-columns").replaceChildren(...mapping.columns.map((c,index) => {
       const tr = document.createElement("tr");
-      const source = text("td",c.source_label); source.title = c.reason || "Source column";
+      const source = text("td",c.source_label); source.title = c.reason || "Source column";if(c.required===false)source.append(text("small"," · blanks allowed","hint"));
       const name = document.createElement("input"); name.value=c.name; name.dataset.index=index; name.dataset.mapping="name"; name.required=true; name.maxLength=40; name.pattern="[a-z][a-z0-9_]*"; name.setAttribute("aria-label","Export column for " + c.source_label);
       const kind = document.createElement("select"); kind.dataset.index=index; kind.dataset.mapping="kind"; kind.setAttribute("aria-label","Format for " + c.source_label);
       for (const [value,label] of [["text","Text"],["number","Number"],["percent","Percent"],["dollars","Dollars ($)"]]) { const o=text("option",label);o.value=value;kind.append(o); }
@@ -78,7 +78,7 @@
     $("open-retrieved").textContent=alreadyOpen?"Already open in review":"Open selected content";
     if(state.retrieved){
       $("retrieved-current").textContent=current?"Open in review: "+current.label+". Counts and exports below cover this selection only.":"No retrieved selection is open in the current review.";
-      $("retrieved-preview").textContent=chosen?(chosen.kind==="table"?"Table snapshot · "+chosen.row_count+" captured rows · "+chosen.column_count+" columns":"Article snapshot · "+chosen.text.split(/\n\s*\n/).length+" text blocks")+(alreadyOpen?" · currently open.":" · selected but not open yet."):"";
+      $("retrieved-preview").textContent=chosen?(chosen.kind==="table"?"Table snapshot · "+chosen.row_count+" captured rows · "+chosen.column_count+(chosen.total_columns>chosen.column_count?" of "+chosen.total_columns+" source columns (shared first column)":" columns"):"Article snapshot · "+chosen.text.split(/\n\s*\n/).length+" text blocks")+(alreadyOpen?" · currently open.":" · selected but not open yet."):"";
     }
     $("retrieved-dataset").disabled=state.busy||!state.retrieved;
     for (const input of document.querySelectorAll('#mapping-columns input, #mapping-columns select')) input.disabled = state.busy;
@@ -519,7 +519,7 @@
   async function openRetrieved() {
     const dataset=state.retrieved.datasets.find(d=>d.id===$("retrieved-dataset").value);
     if(!dataset)throw Error("Select retrieved content first.");
-    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.label};
+    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.label,content_kind:dataset.kind};
     const response=await request("/api/interpretation/start",{example_id:"custom-text",mode:"auto",source:{text:dataset.text,url:state.retrieved.source},retrieval});
     state.view=await response.json();state.rowId=null;state.field=null;
     $("source-text").value=dataset.text;$("source-url").value=state.retrieved.source;$("text-mode").value="auto";
@@ -532,12 +532,14 @@
     const response=await fetch("/api/interpretation/fetch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:$("source-url").value.trim()})});
     const value=await response.json();
     $("retrieval-checks").textContent=(value.checks||[]).map(c=>(c.method==="static-html"?"Ordinary HTML":"Local JavaScript renderer")+" — "+c.status.replaceAll("_"," ")+": "+c.message).join("\n\n")+((value.issues||[]).length?"\n\nCapture notes:\n"+value.issues.map(i=>"• "+i).join("\n"):"");
+    if(value.discovery)$("retrieval-checks").textContent+="\n\nTable discovery: "+value.discovery.scanned_tables+" table elements scanned; "+value.discovery.ignored_tables+" navigation/layout candidates excluded.\n"+value.discovery.inventory.map(t=>t.title+" — "+t.status+" · "+t.rows+" rows · "+t.columns+" columns"+(t.reason?" · "+t.reason:"")).join("\n");
     $("retrieved-panel").hidden=false;
     if(!response.ok){state.retrieved=null;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";$("retrieved-source").textContent="";$("retrieved-source").removeAttribute("href");$("retrieved-summary").textContent="No new content was imported.";$("retrieved-preview").textContent="";$("retrieved-current").textContent=state.view?"The existing review below is unchanged.":"";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
     state.retrieved=value;
     $("retrieved-source").href=value.source;$("retrieved-source").textContent=value.source;
     const tables=value.datasets.filter(d=>d.kind==="table"),articles=value.datasets.filter(d=>d.kind==="prose");
-    $("retrieved-summary").textContent=tables.length+" table selection"+(tables.length===1?"":"s")+" · "+tables.reduce((n,d)=>n+d.row_count,0)+" captured table rows · "+articles.length+" article section"+(articles.length===1?"":"s")+" · retrieved "+new Date(value.retrieved_at).toLocaleString()+"."+((value.issues||[]).length?" "+value.issues.length+" capture notes below.":"");
+    const sourceRows=new Set();for(const d of tables)for(let row=0;row<d.row_count;row++)sourceRows.add((d.table_key||d.id)+":"+((d.row_start||1)+row));
+    $("retrieved-summary").textContent=tables.length+" table selection"+(tables.length===1?"":"s")+" · "+sourceRows.size+" captured table rows · "+articles.length+" article section"+(articles.length===1?"":"s")+" · retrieved "+new Date(value.retrieved_at).toLocaleString()+"."+((value.issues||[]).length?" "+value.issues.length+" capture notes below.":"");
     $("retrieved-method").textContent=value.method==="local-chromium"?"Retrieved with local JavaScript rendering":"Retrieved with ordinary HTML";
     $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text("option",d.label);o.value=d.id;return o;}));
     await openRetrieved();

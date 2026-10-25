@@ -2,38 +2,6 @@ var __freeze = Object.freeze;
 var __defProp = Object.defineProperty;
 var __template = (cooked, raw) => __freeze(__defProp(cooked, "raw", { value: __freeze(raw || cooked.slice()) }));
 
-// src/public-network.js
-var InputError = class extends Error {
-  constructor(message, status = 400) {
-    super(message);
-    this.status = status;
-  }
-};
-function publicURL(input) {
-  if (!input || input.length > 2048) throw new InputError("Enter a public HTTPS URL (up to 2048 characters).");
-  let url;
-  try {
-    url = new URL(input);
-  } catch {
-    throw new InputError("Enter a valid public HTTPS URL.");
-  }
-  const host = url.hostname.toLowerCase();
-  if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || host.length > 253 || host.endsWith(".") || !host.includes(".") || !/^[a-z0-9.-]+$/.test(host) || host.split(".").some((label) => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) || /^[0-9.]+$/.test(host) || /(?:^|\.)(localhost|local|internal|test|invalid|example|onion|home|lan)$/.test(host)) {
-    throw new InputError("Use a public HTTPS hostname without credentials, IP addresses, or custom ports.");
-  }
-  url.hash = "";
-  return url;
-}
-function publicAddress(ip) {
-  if (ip.includes(":")) {
-    return /^[23][0-9a-f]{3}:/i.test(ip) && !/^200[12]:|^3fff:/i.test(ip);
-  }
-  const octets = ip.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
-  const [a, b, c] = octets;
-  return !(a === 0 || a === 10 || a === 127 || a >= 224 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 168 || b === 0 || b === 88 && c === 99) || a === 198 && (b === 18 || b === 19 || b === 51 && c === 100) || a === 203 && b === 0 && c === 113);
-}
-
 // src/interpretation/pipeline.js
 var PACKET_VERSION = "passages-v1";
 var RESPONSE_VERSION = "candidates-v1";
@@ -751,6 +719,186 @@ async function exportInterpretation(packet, entry, events = [], { approvedOnly =
     ])
   ].map((row) => row.map(quoteCSV).join(",")).join("\r\n") + "\r\n";
   return { json: json2, csv };
+}
+
+// src/interpretation/column-mapping.js
+var MAPPING_VERSION = "mapped-table-v2";
+var LEGACY_MAPPING_VERSION = "mapped-table-v1";
+var fail = (message) => {
+  throw new ContractError("column_mapping", message);
+};
+var literal = /^([+-]?)\$?([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(%)?$/;
+function numeric(raw, version = MAPPING_VERSION) {
+  const value = raw.trim(), m = value.match(version === LEGACY_MAPPING_VERSION ? literal : /^([+-]?)\s*\$?\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?:\s*(%|percent))?$/i);
+  if (!m || m[1] && /^[+-]/.test(m[2])) return null;
+  const number2 = Number((m[1] || "") + m[2].replaceAll(",", ""));
+  return Number.isFinite(number2) ? { value: number2, dollar: value.includes("$"), percent: !!m[3] } : null;
+}
+var kinds = /* @__PURE__ */ new Set(["text", "number", "percent", "dollars"]);
+var reserved = /* @__PURE__ */ new Set(["constructor", "prototype", "__proto__", "record_id", "review_status", "validation_issues"]);
+function nameFor(label, index, used, suffix = "") {
+  let name = label.toLowerCase().replace(/%/g, " percent ").replace(/\$/g, " dollars ").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
+  if (!/^[a-z]/.test(name) || reserved.has(name)) name = "column_" + (index + 1);
+  if (suffix && !name.endsWith(suffix)) name = name.slice(0, 32 - suffix.length) + suffix;
+  const base = name;
+  let duplicate = 2;
+  while (used.has(name)) name = base + "_" + duplicate++;
+  used.add(name);
+  return name;
+}
+function detectColumns(text, version = MAPPING_VERSION, explicitHeader = false) {
+  const legacy = version === LEGACY_MAPPING_VERSION;
+  if (typeof text !== "string" || text.length > LIMITS.text) return null;
+  const lines = [];
+  let start = 0;
+  for (const raw of text.split("\n")) {
+    const quote = legacy ? raw.trim() : raw.replace(/^ +| +$/g, "");
+    if (quote.trim() || !legacy && quote.includes("	")) lines.push({ quote, start: start + raw.indexOf(quote) });
+    start += raw.length + 1;
+  }
+  if (lines.length < 2) return null;
+  const headerAt = lines.findIndex((l) => /\t|\||,/.test(l.quote));
+  if (headerAt < 0 || headerAt > 3) return null;
+  const header = lines[headerAt];
+  const delimiter = header.quote.includes("	") ? "	" : header.quote.includes("|") ? "|" : ",";
+  const split = (quote) => {
+    if (delimiter === "," && quote.includes('"')) return null;
+    let value = quote;
+    if (delimiter === "|") value = value.replace(/^\|/, "").replace(/\|$/, "");
+    return value.split(delimiter).map((v) => v.trim());
+  };
+  if (!header.quote.trim()) return null;
+  const labels = split(header.quote);
+  if (!labels || labels.length < 2 || labels.length > LIMITS.fields || labels.some((l) => !/[\p{L}]/u.test(l) && !(!legacy && (/^#\s*\d+$/.test(l) || explicitHeader)) || l.length > 100 || (legacy || !explicitHeader) && /[\n<>]/.test(l) || delimiter === "," && /\d/.test(l))) return null;
+  const rows = [], skipped = [];
+  for (const line of lines.slice(headerAt + 1)) {
+    if (delimiter === "|" && /^\|?[\s:|-]+\|?$/.test(line.quote)) continue;
+    const cells = split(line.quote);
+    if (!cells || cells.length !== labels.length || line.quote.length > LIMITS.quote) {
+      skipped.push({ quote: line.quote.slice(0, 120), reason: "Row has a different cell count, unsupported CSV quoting or exceeds the evidence limit." });
+      continue;
+    }
+    if (!legacy && cells.every((v) => !v)) {
+      skipped.push({ quote: line.quote, reason: "Row has no readable text; image-only content was not read." });
+      continue;
+    }
+    rows.push({ ...line, cells });
+  }
+  if (!rows.length) return null;
+  if (rows.length > LIMITS.records) fail("More than 50 mapped rows. Paste a smaller table; no rows were truncated.");
+  if (header.quote.length > LIMITS.quote) fail("The header exceeds the evidence limit.");
+  const used = /* @__PURE__ */ new Set();
+  const columns = labels.map((label, index) => {
+    const values = rows.map((r) => r.cells[index]).filter(Boolean), numbers = values.map((v) => numeric(v, version));
+    let kind = "text", reason = "Retained as text; no numeric conversion was assumed.";
+    const identifier = /\b(id|identifier|code|zip|postal|date|year)\b/i.test(label) || values.some((v) => /^[-+]?0\d/.test(v));
+    if (!identifier && /%|\bpercent(?:age)?\b/i.test(label)) {
+      kind = "percent";
+      reason = "Percentage heading; values remain on the 0\u2013100 scale.";
+    } else if (!identifier && /\$|\bdollars?\b/i.test(label)) {
+      kind = "dollars";
+      reason = "Explicit dollar heading; no currency conversion or ISO currency inference.";
+    } else if (!legacy && !identifier && /^(?:count|number of .+)$/i.test(label)) {
+      kind = "number";
+      reason = "Explicit count heading; annotated or malformed values require review rather than guessed conversion.";
+    } else if (!identifier && values.length && numbers.every(Boolean)) {
+      if (numbers.every((n) => n.percent && !n.dollar)) kind = "percent";
+      else if (numbers.every((n) => n.dollar && !n.percent)) kind = "dollars";
+      else if (numbers.every((n) => !n.dollar && !n.percent)) kind = "number";
+      reason = kind === "text" ? "Mixed unit markers retained as text." : "Consistent literal cell format; verify the heading before approval.";
+    }
+    if (!legacy && kind === "text" && numbers.some(Boolean) && !numbers.every(Boolean)) reason = "Mixed numeric/annotated text retained as text; no annotation was stripped.";
+    const required = legacy || kind !== "text" || !rows.some((r) => !r.cells[index]);
+    if (!required) reason += " Empty text cells remain null; images are not read.";
+    const suffix = !legacy ? kind === "percent" ? "_percent" : kind === "dollars" ? "_dollars" : "" : "";
+    const exportLabel = !legacy && /^#?\s*\d[\d.,]*$/.test(label) ? "column " + label.replace("#", "") : label;
+    return { label, name: nameFor(exportLabel, index, used, suffix), kind, reason, required };
+  });
+  return { delimiter: delimiter === "	" ? "tab" : delimiter, header, rows, columns, skipped, prefix_lines: headerAt, version };
+}
+function mappedSchema(plan, overrides) {
+  const columns = overrides === void 0 ? plan.columns.map(({ name, kind }) => ({ name, kind })) : overrides;
+  if (!Array.isArray(columns) || columns.length !== plan.columns.length || columns.some((c) => !c || Object.keys(c).some((k) => !["name", "kind"].includes(k)) || typeof c.name !== "string" || !kinds.has(c.kind))) fail("Choose one valid mapping for every source column.");
+  const schema = { fields: columns.map((c) => ({
+    name: c.name,
+    type: c.kind === "text" ? "string" : "number",
+    required: plan.version === LEGACY_MAPPING_VERSION || c.kind !== "text" || !plan.rows.some((r) => !r.cells[columns.indexOf(c)]),
+    ...c.kind === "text" ? {} : { number_format: "en-US-grouped" },
+    ...c.kind === "percent" ? { min: 0, max: 100 } : {}
+  })) };
+  return { columns, schema };
+}
+function mappingFor(job) {
+  if (![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) return null;
+  const plan = detectColumns(job.packet.source.text, job.parser_version, job.retrieval?.content_kind === "table");
+  if (!plan) fail("No supported delimited table remains in this source.");
+  const mapping = mappedSchema(plan, job.mapping);
+  if (canonical(mapping.schema) !== canonical(job.packet.schema)) fail("Saved columns differ from the recorded mapping.");
+  return { plan, ...mapping };
+}
+function extractMappedTable(job) {
+  const { plan, columns } = mappingFor(job), packet = job.packet;
+  const locate = (line) => {
+    const quote = line.quote.trim(), start = line.start + line.quote.length - line.quote.trimStart().length;
+    const passage = packet.passages.find((p) => start >= p.start && start + quote.length <= p.end);
+    if (!passage) fail("A mapped row crosses a source boundary.");
+    let occurrence = 0, found = passage.text.indexOf(quote);
+    while (found >= 0 && found + passage.start < start) {
+      occurrence++;
+      found = passage.text.indexOf(quote, found + 1);
+    }
+    return { passage_id: passage.id, quote, occurrence };
+  };
+  const header = locate(plan.header);
+  const records = plan.rows.map((row, index) => {
+    const span = locate(row), issues = [];
+    const fields = Object.fromEntries(columns.map((column, i) => {
+      const raw = row.cells[i], n = numeric(raw, job.parser_version);
+      let value = column.kind === "text" ? job.parser_version !== LEGACY_MAPPING_VERSION && !raw ? null : raw : n?.value ?? null;
+      if (column.kind !== "text" && n && (n.percent && column.kind !== "percent" || n.dollar && column.kind !== "dollars")) {
+        value = null;
+        issues.push("A unit marker conflicts with the selected column mapping. Correct the mapping before approval.");
+      }
+      return [column.name, { value, evidence: value === null ? [] : [span, header] }];
+    }));
+    return { id: "row-" + (index + 1), fields, ...issues.length ? { issues } : {} };
+  });
+  return { version: "candidates-v1", records, outcomes: packet.passages.map((p) => {
+    const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
+    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Cells mapped using an explicit delimited header; source row and header retained. This does not prove completeness." : "Retained text outside mapped rows." };
+  }) };
+}
+
+// src/public-network.js
+var InputError = class extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+};
+function publicURL(input) {
+  if (!input || input.length > 2048) throw new InputError("Enter a public HTTPS URL (up to 2048 characters).");
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new InputError("Enter a valid public HTTPS URL.");
+  }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || host.length > 253 || host.endsWith(".") || !host.includes(".") || !/^[a-z0-9.-]+$/.test(host) || host.split(".").some((label) => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) || /^[0-9.]+$/.test(host) || /(?:^|\.)(localhost|local|internal|test|invalid|example|onion|home|lan)$/.test(host)) {
+    throw new InputError("Use a public HTTPS hostname without credentials, IP addresses, or custom ports.");
+  }
+  url.hash = "";
+  return url;
+}
+function publicAddress(ip) {
+  if (ip.includes(":")) {
+    return /^[23][0-9a-f]{3}:/i.test(ip) && !/^200[12]:|^3fff:/i.test(ip);
+  }
+  const octets = ip.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b, c] = octets;
+  return !(a === 0 || a === 10 || a === 127 || a >= 224 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 168 || b === 0 || b === 88 && c === 99) || a === 198 && (b === 18 || b === 19 || b === 51 && c === 100) || a === 203 && b === 0 && c === 113);
 }
 
 // src/interpretation/text-rules.js
@@ -1655,42 +1803,64 @@ async function articleBlocks(page) {
 function tableDatasets(tables, issues) {
   const datasets = [];
   for (const [index, t] of tables.entries()) {
-    if (t.unsupported && !/nested/i.test(t.unsupported) && /^(?:Major occupational group Percent of total employment Mean hourly wage|Occupation(?:\(1\))? Employment Mean wages)/i.test(t.headers.join(" "))) {
-      const flat = t.headers.join(" ") + " " + (t.rows[0] || []).join(" ") + "\n\n" + t.rows.slice(1).map((row) => row.join(" ")).join("\n\n");
-      const plan = planPage({ text: flat });
-      if (plan.datasets.some((d) => d.kind !== "prose")) {
-        for (const d of plan.datasets) datasets.push({ kind: d.kind === "prose" ? "prose" : "table", label: (t.title || "Table") + " \xB7 " + d.label, text: d.text, row_count: d.row_count, column_count: d.kind === "prose" ? null : d.schema.fields.length });
+    const title = t.title || t.caption || "Table " + (index + 1), table_key = "source-table-" + (index + 1);
+    try {
+      for (const note of t.capture_notes || []) issues.push(title + ": " + note);
+      if (t.unsupported && !/nested/i.test(t.unsupported) && /^(?:Major occupational group Percent of total employment Mean hourly wage|Occupation(?:\(1\))? Employment Mean wages)/i.test(t.headers.join(" "))) {
+        const flat = t.headers.join(" ") + " " + (t.rows[0] || []).join(" ") + "\n\n" + t.rows.slice(1).map((row) => row.join(" ")).join("\n\n");
+        const plan = planPage({ text: flat });
+        if (plan.datasets.some((d) => d.kind !== "prose")) {
+          let start = 1;
+          const total = plan.datasets.reduce((n, d) => n + (d.row_count || 0), 0);
+          for (const d of plan.datasets) {
+            datasets.push({ kind: d.kind === "prose" ? "prose" : "table", label: title + " \xB7 " + d.label, text: d.text, row_count: d.row_count, column_count: d.kind === "prose" ? null : d.schema.fields.length, table_key, row_start: start, total_columns: d.schema.fields.length });
+            start += d.row_count || 0;
+          }
+          continue;
+        }
+      }
+      if (t.unsupported || t.supported === false) {
+        issues.push(title + ": " + (t.unsupported || t.issues?.join(" ") || "Unsupported table structure."));
         continue;
       }
+      if (!t.rows.length) continue;
+      if (t.headers.length < 2 || t.headers.length > 100) {
+        issues.push(title + ": Import requires 2\u2013100 source columns.");
+        continue;
+      }
+      const groups = t.headers.length <= 8 ? [t.headers.map((_, i) => i)] : Array.from({ length: Math.ceil((t.headers.length - 1) / 7) }, (_, part) => [0, ...Array.from({ length: Math.min(7, t.headers.length - 1 - part * 7) }, (_2, i) => 1 + part * 7 + i)]);
+      const line = (cells) => cells.map((c) => String(c).replace(/\s+/g, " ").trim()).join("	");
+      const local = [];
+      for (const columns of groups) {
+        const header = line(columns.map((i) => t.headers[i]));
+        if (header.length > 2048) error("source_limit", "A table header exceeds the evidence limit.");
+        let batch = [], length = header.length, start = 1;
+        const range = columns.slice(1);
+        const columnLabel = groups.length === 1 ? "" : " \xB7 " + (columns.at(-1) < 8 ? "columns 1\u2013" + columns.length : "shared column 1 + columns " + (range[0] + 1) + (range.length > 1 ? "\u2013" + (range.at(-1) + 1) : "")) + " of " + t.headers.length;
+        const flush = () => {
+          if (!batch.length) return;
+          const text = header + "\n" + batch.join("\n");
+          const mapping = detectColumns(text, MAPPING_VERSION, true);
+          if (!mapping) error("table_mapping", "Source column headings cannot be mapped; no zero-record table was reported as imported.");
+          local.push({ kind: "table", label: title + " \xB7 rows " + start + "\u2013" + (start + batch.length - 1) + " of " + t.rows.length + columnLabel, text, row_count: batch.length, column_count: columns.length, table_key, row_start: start, total_columns: t.headers.length, column_indices: columns });
+          start += batch.length;
+          batch = [];
+          length = header.length;
+        };
+        for (const row of t.rows) {
+          const value = line(columns.map((i) => row[i] ?? ""));
+          if (value.length > 2048) error("source_limit", "A table row exceeds the 2,048-character evidence limit.");
+          if (batch.length === 24 || length + value.length + 1 > 12e3) flush();
+          batch.push(value);
+          length += value.length + 1;
+        }
+        flush();
+      }
+      if (groups.length > 1) issues.push(title + ": " + t.headers.length + " source columns are split into " + groups.length + " column groups of up to eight. The shared first column supplies context, not a proven unique join key.");
+      datasets.push(...local);
+    } catch (e) {
+      issues.push(title + ": Not imported \u2014 " + e.message);
     }
-    if (t.unsupported || t.supported === false) {
-      issues.push((t.title || t.caption || "Table") + ": unsupported table structure.");
-      continue;
-    }
-    if (!t.rows.length) continue;
-    if (t.headers.length < 2 || t.headers.length > 8) {
-      issues.push((t.title || t.caption || "Table") + ": Interpretation Lab supports 2\u20138 columns.");
-      continue;
-    }
-    const line = (cells) => cells.map((c) => String(c).replace(/\s+/g, " ").trim()).join("	");
-    const header = line(t.headers);
-    if (header.length > 2048) error("source_limit", "A table header exceeds the evidence limit.");
-    let batch = [], length = header.length, start = 1;
-    const flush = () => {
-      if (!batch.length) return;
-      datasets.push({ kind: "table", label: (t.title || t.caption || "Table " + (index + 1)) + " \xB7 rows " + start + "\u2013" + (start + batch.length - 1) + " of " + t.rows.length, text: header + "\n" + batch.join("\n"), row_count: batch.length, column_count: t.headers.length });
-      start += batch.length;
-      batch = [];
-      length = header.length;
-    };
-    for (const row of t.rows) {
-      const value = line(row);
-      if (value.length > 2048) error("source_limit", "A table row exceeds the 2,048-character evidence limit.");
-      if (batch.length === 24 || length + value.length + 1 > 12e3) flush();
-      batch.push(value);
-      length += value.length + 1;
-    }
-    flush();
   }
   return datasets;
 }
@@ -1745,10 +1915,16 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
     const { source: fetchedSource, page } = await fetchPage(body.url, url.hostname);
     let source = fetchedSource;
     checks.push({ method: "static-html", status: "passed", message: "Public HTTPS page fetched within network and size checks." });
-    const analysis = await analyze(page, source, []);
+    const analysis = await analyze(page, source, [], { sourceImport: true });
+    for (const item of analysis.discovery?.inventory || []) if (item.status === "omitted") issues.push(item.title + ": Not imported \u2014 " + item.reason);
     if (analysis.code === "possible_access_barrier") error("access_barrier", analysis.message);
     let datasets = tableDatasets(analysis.tables, issues), method = "static-html";
-    const prose = proseDatasets(await articleBlocks(page));
+    let prose = [];
+    try {
+      prose = proseDatasets(await articleBlocks(page));
+    } catch (e) {
+      issues.push("Article text not imported: " + e.message);
+    }
     let supportedProse = false;
     if (!datasets.length) for (const part of prose) {
       const packet = await createPacket({ source: { text: part.text, url: source }, schema: PROSE_SCHEMA });
@@ -1780,151 +1956,31 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
         return reply({ error: "Ordinary fetching found no supported records. Local JavaScript rendering failed: " + e.message, code: "render_failed", source, checks: [...checks, { method: "local-chromium", status: "failed", message: e.message }], issues }, 422);
       }
     } else datasets.push(...prose);
-    if (!datasets.length) return reply({ error: analysis.message || "No supported tables or article text found.", code: analysis.code, source, checks, issues }, 422);
-    if (datasets.length > 32 || datasets.reduce((n, d) => n + d.text.length, 0) > 128e3) error("source_limit", "Retrieved content exceeds 32 selections or 128,000 snapshot characters. Use a smaller source; nothing was silently truncated.");
+    if (!datasets.length) return reply({ error: issues.length ? "No importable selections: " + issues.join(" ") : analysis.message || "No supported tables or article text found.", code: "no_importable_content", source, checks, issues, discovery: analysis.discovery }, 422);
+    let size = 0, omitted = 0, selectedCount = 0;
+    datasets = datasets.filter((d) => {
+      if (selectedCount >= 32 || size + d.text.length > 128e3) {
+        omitted++;
+        return false;
+      }
+      size += d.text.length;
+      selectedCount++;
+      return true;
+    });
+    if (omitted) issues.push(omitted + " selections were not imported because the 32-selection / 128,000-character budget was reached. Use a narrower source or paste a selected section.");
     const retrieved_at = (/* @__PURE__ */ new Date()).toISOString();
     for (const [i, d] of datasets.entries()) {
       d.id = "retrieved-" + (i + 1);
       d.snapshot_hash = await digest(d.text);
     }
-    return reply({ source, method, retrieved_at, datasets, checks, issues, notice: "Normalized text snapshots, not raw HTML or authenticated source proofs. Choose content to start a new unapproved review; saved reviews retain their source snapshot. Rendering is a timed snapshot and may omit later updates." });
+    return reply({ source, method, retrieved_at, datasets, checks, issues, discovery: analysis.discovery, notice: "Normalized text snapshots, not raw HTML or authenticated source proofs. Choose content to start a new unapproved review; saved reviews retain their source snapshot. Rendering is a timed snapshot and may omit later updates." });
   } catch (e) {
     return reply({ error: e.message, code: e.code || "fetch_stopped", checks: [...checks, { method: "static-html", status: "failed", message: e.message }], issues }, e.status || 422);
   }
 }
 
-// src/interpretation/column-mapping.js
-var MAPPING_VERSION = "mapped-table-v1";
-var fail = (message) => {
-  throw new ContractError("column_mapping", message);
-};
-var literal = /^([+-]?)\$?([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(%)?$/;
-function numeric(raw) {
-  const value = raw.trim(), m = value.match(literal);
-  if (!m || m[1] && /^[+-]/.test(m[2])) return null;
-  const number2 = Number((m[1] || "") + m[2].replaceAll(",", ""));
-  return Number.isFinite(number2) ? { value: number2, dollar: value.includes("$"), percent: !!m[3] } : null;
-}
-var kinds = /* @__PURE__ */ new Set(["text", "number", "percent", "dollars"]);
-var reserved = /* @__PURE__ */ new Set(["constructor", "prototype", "__proto__", "record_id", "review_status", "validation_issues"]);
-function nameFor(label, index, used) {
-  let name = label.toLowerCase().replace(/%/g, " percent ").replace(/\$/g, " dollars ").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
-  if (!/^[a-z]/.test(name) || reserved.has(name)) name = "column_" + (index + 1);
-  const base = name;
-  let suffix = 2;
-  while (used.has(name)) name = base + "_" + suffix++;
-  used.add(name);
-  return name;
-}
-function detectColumns(text) {
-  if (typeof text !== "string" || text.length > LIMITS.text) return null;
-  const lines = [];
-  let start = 0;
-  for (const raw of text.split("\n")) {
-    if (raw.trim()) lines.push({ quote: raw.trim(), start: start + raw.length - raw.trimStart().length });
-    start += raw.length + 1;
-  }
-  if (lines.length < 2) return null;
-  const headerAt = lines.findIndex((l) => /\t|\||,/.test(l.quote));
-  if (headerAt < 0 || headerAt > 3) return null;
-  const header = lines[headerAt];
-  const delimiter = header.quote.includes("	") ? "	" : header.quote.includes("|") ? "|" : ",";
-  const split = (quote) => {
-    if (delimiter === "," && quote.includes('"')) return null;
-    let value = quote;
-    if (delimiter === "|") value = value.replace(/^\|/, "").replace(/\|$/, "");
-    return value.split(delimiter).map((v) => v.trim());
-  };
-  const labels = split(header.quote);
-  if (!labels || labels.length < 2 || labels.length > LIMITS.fields || labels.some((l) => !/[\p{L}]/u.test(l) || l.length > 100 || /[\n<>]/.test(l) || delimiter === "," && /\d/.test(l))) return null;
-  const rows = [], skipped = [];
-  for (const line of lines.slice(headerAt + 1)) {
-    if (delimiter === "|" && /^\|?[\s:|-]+\|?$/.test(line.quote)) continue;
-    const cells = split(line.quote);
-    if (!cells || cells.length !== labels.length || line.quote.length > LIMITS.quote) {
-      skipped.push({ quote: line.quote.slice(0, 120), reason: "Row has a different cell count, unsupported CSV quoting or exceeds the evidence limit." });
-      continue;
-    }
-    rows.push({ ...line, cells });
-  }
-  if (!rows.length) return null;
-  if (rows.length > LIMITS.records) fail("More than 50 mapped rows. Paste a smaller table; no rows were truncated.");
-  if (header.quote.length > LIMITS.quote) fail("The header exceeds the evidence limit.");
-  const used = /* @__PURE__ */ new Set();
-  const columns = labels.map((label, index) => {
-    const values = rows.map((r) => r.cells[index]).filter(Boolean), numbers = values.map(numeric);
-    let kind = "text", reason = "Retained as text; no numeric conversion was assumed.";
-    const identifier = /\b(id|identifier|code|zip|postal|date|year)\b/i.test(label) || values.some((v) => /^[-+]?0\d/.test(v));
-    if (!identifier && /%|\bpercent(?:age)?\b/i.test(label)) {
-      kind = "percent";
-      reason = "Percentage heading; values remain on the 0\u2013100 scale.";
-    } else if (!identifier && /\$|\bdollars?\b/i.test(label)) {
-      kind = "dollars";
-      reason = "Explicit dollar heading; no currency conversion or ISO currency inference.";
-    } else if (!identifier && values.length && numbers.every(Boolean)) {
-      if (numbers.every((n) => n.percent && !n.dollar)) kind = "percent";
-      else if (numbers.every((n) => n.dollar && !n.percent)) kind = "dollars";
-      else if (numbers.every((n) => !n.dollar && !n.percent)) kind = "number";
-      reason = kind === "text" ? "Mixed unit markers retained as text." : "Consistent literal cell format; verify the heading before approval.";
-    }
-    return { label, name: nameFor(label, index, used), kind, reason };
-  });
-  return { delimiter: delimiter === "	" ? "tab" : delimiter, header, rows, columns, skipped, prefix_lines: headerAt };
-}
-function mappedSchema(plan, overrides) {
-  const columns = overrides === void 0 ? plan.columns.map(({ name, kind }) => ({ name, kind })) : overrides;
-  if (!Array.isArray(columns) || columns.length !== plan.columns.length || columns.some((c) => !c || Object.keys(c).some((k) => !["name", "kind"].includes(k)) || typeof c.name !== "string" || !kinds.has(c.kind))) fail("Choose one valid mapping for every source column.");
-  const schema = { fields: columns.map((c) => ({
-    name: c.name,
-    type: c.kind === "text" ? "string" : "number",
-    required: true,
-    ...c.kind === "text" ? {} : { number_format: "en-US-grouped" },
-    ...c.kind === "percent" ? { min: 0, max: 100 } : {}
-  })) };
-  return { columns, schema };
-}
-function mappingFor(job) {
-  if (job.parser_version !== MAPPING_VERSION) return null;
-  const plan = detectColumns(job.packet.source.text);
-  if (!plan) fail("No supported delimited table remains in this source.");
-  const mapping = mappedSchema(plan, job.mapping);
-  if (canonical(mapping.schema) !== canonical(job.packet.schema)) fail("Saved columns differ from the recorded mapping.");
-  return { plan, ...mapping };
-}
-function extractMappedTable(job) {
-  const { plan, columns } = mappingFor(job), packet = job.packet;
-  const locate = (line) => {
-    const passage = packet.passages.find((p) => line.start >= p.start && line.start + line.quote.length <= p.end);
-    if (!passage) fail("A mapped row crosses a source boundary.");
-    let occurrence = 0, found = passage.text.indexOf(line.quote);
-    while (found >= 0 && found + passage.start < line.start) {
-      occurrence++;
-      found = passage.text.indexOf(line.quote, found + 1);
-    }
-    return { passage_id: passage.id, quote: line.quote, occurrence };
-  };
-  const header = locate(plan.header);
-  const records = plan.rows.map((row, index) => {
-    const span = locate(row), issues = [];
-    const fields = Object.fromEntries(columns.map((column, i) => {
-      const raw = row.cells[i], n = numeric(raw);
-      let value = column.kind === "text" ? raw : n?.value ?? null;
-      if (column.kind !== "text" && n && (n.percent && column.kind !== "percent" || n.dollar && column.kind !== "dollars")) {
-        value = null;
-        issues.push("A unit marker conflicts with the selected column mapping. Correct the mapping before approval.");
-      }
-      return [column.name, { value, evidence: value === null ? [] : [span, header] }];
-    }));
-    return { id: "row-" + (index + 1), fields, ...issues.length ? { issues } : {} };
-  });
-  return { version: "candidates-v1", records, outcomes: packet.passages.map((p) => {
-    const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
-    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Cells mapped using an explicit delimited header; source row and header retained. This does not prove completeness." : "Retained text outside mapped rows." };
-  }) };
-}
-
 // src/interpretation/review-queue.js
-var tableMethods = /* @__PURE__ */ new Set(["mapped-table-v1", "pasted-wage-table-v1", "pasted-wage-table-v2", "pasted-page-table-v1"]);
+var tableMethods = /* @__PURE__ */ new Set(["mapped-table-v1", "mapped-table-v2", "pasted-wage-table-v1", "pasted-wage-table-v2", "pasted-page-table-v1"]);
 var reviewOnly = /* @__PURE__ */ new Set(["association_unverified", "cross_passage_association"]);
 function reviewQueue(job, validation) {
   const structured = tableMethods.has(job.parser_version);
@@ -2090,7 +2146,7 @@ var lab_client_default = `"use strict";
     employment_percent_national: "National %", employment_percent_local: "Local %", hourly_wage_national_dollars: "National $/hour", hourly_wage_local_dollars: "Local $/hour",
     hourly_wage_dollars: "Hourly wage ($)", annual_wage_dollars: "Annual wage ($)",
   };
-  const columnLabel = name => columnLabels[name] || name.replaceAll("_", " ");
+  const columnLabel = name => (state.view?.job.parser_version==="mapped-table-v2"?state.view.column_mapping?.columns.find(c=>c.name===name)?.source_label:null)||columnLabels[name]||name.replaceAll("_"," ");
   const passageLabel = id => "Passage " + Number(id.slice(1));
   const queue = () => state.view?.review_queue || { structured: false, eligible_ids: [], exception_ids: [], individual_ids: [], remaining_review_events: 0 };
   function visibleRows() {
@@ -2109,7 +2165,7 @@ var lab_client_default = `"use strict";
     $("mapping-issues").textContent = mapping.skipped_rows.length ? mapping.skipped_rows.length + " rows were not mapped: " + mapping.skipped_rows.map(r => r.quote + " \u2014 " + r.reason).join("; ") : "No rows were skipped by the column mapper. Review source evidence before approving; complete fact coverage is not guaranteed.";
     $("mapping-columns").replaceChildren(...mapping.columns.map((c,index) => {
       const tr = document.createElement("tr");
-      const source = text("td",c.source_label); source.title = c.reason || "Source column";
+      const source = text("td",c.source_label); source.title = c.reason || "Source column";if(c.required===false)source.append(text("small"," \xB7 blanks allowed","hint"));
       const name = document.createElement("input"); name.value=c.name; name.dataset.index=index; name.dataset.mapping="name"; name.required=true; name.maxLength=40; name.pattern="[a-z][a-z0-9_]*"; name.setAttribute("aria-label","Export column for " + c.source_label);
       const kind = document.createElement("select"); kind.dataset.index=index; kind.dataset.mapping="kind"; kind.setAttribute("aria-label","Format for " + c.source_label);
       for (const [value,label] of [["text","Text"],["number","Number"],["percent","Percent"],["dollars","Dollars ($)"]]) { const o=text("option",label);o.value=value;kind.append(o); }
@@ -2143,7 +2199,7 @@ var lab_client_default = `"use strict";
     $("open-retrieved").textContent=alreadyOpen?"Already open in review":"Open selected content";
     if(state.retrieved){
       $("retrieved-current").textContent=current?"Open in review: "+current.label+". Counts and exports below cover this selection only.":"No retrieved selection is open in the current review.";
-      $("retrieved-preview").textContent=chosen?(chosen.kind==="table"?"Table snapshot \xB7 "+chosen.row_count+" captured rows \xB7 "+chosen.column_count+" columns":"Article snapshot \xB7 "+chosen.text.split(/\\n\\s*\\n/).length+" text blocks")+(alreadyOpen?" \xB7 currently open.":" \xB7 selected but not open yet."):"";
+      $("retrieved-preview").textContent=chosen?(chosen.kind==="table"?"Table snapshot \xB7 "+chosen.row_count+" captured rows \xB7 "+chosen.column_count+(chosen.total_columns>chosen.column_count?" of "+chosen.total_columns+" source columns (shared first column)":" columns"):"Article snapshot \xB7 "+chosen.text.split(/\\n\\s*\\n/).length+" text blocks")+(alreadyOpen?" \xB7 currently open.":" \xB7 selected but not open yet."):"";
     }
     $("retrieved-dataset").disabled=state.busy||!state.retrieved;
     for (const input of document.querySelectorAll('#mapping-columns input, #mapping-columns select')) input.disabled = state.busy;
@@ -2584,7 +2640,7 @@ var lab_client_default = `"use strict";
   async function openRetrieved() {
     const dataset=state.retrieved.datasets.find(d=>d.id===$("retrieved-dataset").value);
     if(!dataset)throw Error("Select retrieved content first.");
-    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.label};
+    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.label,content_kind:dataset.kind};
     const response=await request("/api/interpretation/start",{example_id:"custom-text",mode:"auto",source:{text:dataset.text,url:state.retrieved.source},retrieval});
     state.view=await response.json();state.rowId=null;state.field=null;
     $("source-text").value=dataset.text;$("source-url").value=state.retrieved.source;$("text-mode").value="auto";
@@ -2597,12 +2653,14 @@ var lab_client_default = `"use strict";
     const response=await fetch("/api/interpretation/fetch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:$("source-url").value.trim()})});
     const value=await response.json();
     $("retrieval-checks").textContent=(value.checks||[]).map(c=>(c.method==="static-html"?"Ordinary HTML":"Local JavaScript renderer")+" \u2014 "+c.status.replaceAll("_"," ")+": "+c.message).join("\\n\\n")+((value.issues||[]).length?"\\n\\nCapture notes:\\n"+value.issues.map(i=>"\u2022 "+i).join("\\n"):"");
+    if(value.discovery)$("retrieval-checks").textContent+="\\n\\nTable discovery: "+value.discovery.scanned_tables+" table elements scanned; "+value.discovery.ignored_tables+" navigation/layout candidates excluded.\\n"+value.discovery.inventory.map(t=>t.title+" \u2014 "+t.status+" \xB7 "+t.rows+" rows \xB7 "+t.columns+" columns"+(t.reason?" \xB7 "+t.reason:"")).join("\\n");
     $("retrieved-panel").hidden=false;
     if(!response.ok){state.retrieved=null;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";$("retrieved-source").textContent="";$("retrieved-source").removeAttribute("href");$("retrieved-summary").textContent="No new content was imported.";$("retrieved-preview").textContent="";$("retrieved-current").textContent=state.view?"The existing review below is unchanged.":"";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
     state.retrieved=value;
     $("retrieved-source").href=value.source;$("retrieved-source").textContent=value.source;
     const tables=value.datasets.filter(d=>d.kind==="table"),articles=value.datasets.filter(d=>d.kind==="prose");
-    $("retrieved-summary").textContent=tables.length+" table selection"+(tables.length===1?"":"s")+" \xB7 "+tables.reduce((n,d)=>n+d.row_count,0)+" captured table rows \xB7 "+articles.length+" article section"+(articles.length===1?"":"s")+" \xB7 retrieved "+new Date(value.retrieved_at).toLocaleString()+"."+((value.issues||[]).length?" "+value.issues.length+" capture notes below.":"");
+    const sourceRows=new Set();for(const d of tables)for(let row=0;row<d.row_count;row++)sourceRows.add((d.table_key||d.id)+":"+((d.row_start||1)+row));
+    $("retrieved-summary").textContent=tables.length+" table selection"+(tables.length===1?"":"s")+" \xB7 "+sourceRows.size+" captured table rows \xB7 "+articles.length+" article section"+(articles.length===1?"":"s")+" \xB7 retrieved "+new Date(value.retrieved_at).toLocaleString()+"."+((value.issues||[]).length?" "+value.issues.length+" capture notes below.":"");
     $("retrieved-method").textContent=value.method==="local-chromium"?"Retrieved with local JavaScript rendering":"Retrieved with ordinary HTML";
     $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text("option",d.label);o.value=d.id;return o;}));
     await openRetrieved();
@@ -2928,7 +2986,7 @@ function applyCorrection(packet, response, change) {
 }
 function originalResponse(job) {
   if (job.example_id !== "custom-text") return examples[job.example_id].scripted_response;
-  if (job.parser_version === MAPPING_VERSION) return extractMappedTable(job);
+  if ([MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) return extractMappedTable(job);
   if (job.parser_version === "name-number-v1") return extractTextRules(job.packet);
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if ([WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)) return extractWageTable(job.packet, job.parser_version);
@@ -2978,10 +3036,10 @@ function publicDocument(info, job) {
 async function checkJob(job) {
   if (!only(job, ["example_id", "packet", "cache_entry", "events", "revisions", "parser_version", "document", "mapping", "retrieval"]) || !Array.isArray(job.events) || job.events.length > 64 || job.revisions !== void 0 && (!Array.isArray(job.revisions) || job.revisions.length > 8))
     fail2("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
-  if (job.mapping !== void 0 && job.parser_version !== MAPPING_VERSION) fail2("column_mapping", "Recorded column mappings require a mapped table session.");
+  if (job.mapping !== void 0 && ![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail2("column_mapping", "Recorded column mappings require a mapped table session.");
   if (job.retrieval !== void 0) {
     const r = job.retrieval;
-    if (!only(r, ["method", "source", "retrieved_at", "snapshot_hash", "label"]) || !["static-html", "local-chromium"].includes(r.method) || r.source !== job.packet.source.url || r.snapshot_hash !== job.packet.source.text_hash || typeof r.label !== "string" || r.label.length > 1e3 || typeof r.retrieved_at !== "string" || !Number.isFinite(Date.parse(r.retrieved_at))) fail2("retrieval_metadata", "Retrieval description does not match the retained text snapshot.");
+    if (!only(r, ["method", "source", "retrieved_at", "snapshot_hash", "label", "content_kind"]) || !["static-html", "local-chromium"].includes(r.method) || r.content_kind !== void 0 && !["table", "prose"].includes(r.content_kind) || r.source !== job.packet.source.url || r.snapshot_hash !== job.packet.source.text_hash || typeof r.label !== "string" || r.label.length > 1e3 || typeof r.retrieved_at !== "string" || !Number.isFinite(Date.parse(r.retrieved_at))) fail2("retrieval_metadata", "Retrieval description does not match the retained text snapshot.");
   }
   await revalidate(job.packet, job.cache_entry);
   await documentInfo(job);
@@ -3017,7 +3075,7 @@ async function view(job, result) {
     column_mapping: mapped ? {
       editable: true,
       delimiter: mapped.plan.delimiter,
-      columns: mapped.columns.map((c, i) => ({ ...c, source_label: mapped.plan.columns[i].label, reason: mapped.plan.columns[i].reason, samples: mapped.plan.rows.slice(0, 3).map((r) => r.cells[i]) })),
+      columns: mapped.columns.map((c, i) => ({ ...c, source_label: mapped.plan.columns[i].label, required: mapped.schema.fields[i].required, reason: mapped.plan.columns[i].reason, samples: mapped.plan.rows.slice(0, 3).map((r) => r.cells[i]) })),
       skipped_rows: mapped.plan.skipped,
       prefix_lines: mapped.plan.prefix_lines,
       notice: "Suggested from explicit source columns. No code changes needed. Remapping starts a new unapproved review; save the current session first."
@@ -3097,7 +3155,7 @@ async function labFetch(request) {
         if (body.mapping !== void 0 && (body.mode !== "auto" || body.dataset_id !== void 0)) fail2("column_mapping", "Column mapping requires automatic mode on one pasted table.");
         if (body.mode === "auto" && body.schema !== void 0)
           fail2("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
-        const columns = body.mode === "auto" ? detectColumns(body.source?.text?.replace(/\r\n?/g, "\n")) : null;
+        const columns = body.mode === "auto" ? detectColumns(body.source?.text?.replace(/\r\n?/g, "\n"), MAPPING_VERSION, body.retrieval?.content_kind === "table") : null;
         if (body.mapping !== void 0 && !columns) fail2("column_mapping", "No supported delimited header found.");
         if (columns && body.dataset_id === void 0) {
           const mapped = mappedSchema(columns, body.mapping);
@@ -3120,7 +3178,7 @@ async function labFetch(request) {
             parserVersion = WAGE_VERSION;
           }
         }
-        response = originalResponse({ example_id: "custom-text", parser_version: parserVersion, packet, ...mapping ? { mapping } : {} });
+        response = originalResponse({ example_id: "custom-text", parser_version: parserVersion, packet, ...mapping ? { mapping } : {}, ...body.retrieval ? { retrieval: body.retrieval } : {} });
       } else {
         if (!only(body, ["example_id"]) || !Object.hasOwn(examples, body.example_id))
           fail2("unknown_example", "Choose an example or paste your own text.");
@@ -3421,7 +3479,7 @@ async function fetchPublicPage(input, ownHost) {
     return { source: url.href, page: await readBounded(r) };
   }
 }
-async function discoverTables(page, accessible = false) {
+async function discoverTables(page, accessible = false, { sourceImport = false, inventory = [], budget = { scanned: 0, accepted: 0, rows: 0, cells: 0 } } = {}) {
   const rootSelector = accessible ? '[role="table"], [role="grid"]' : "table";
   const rowSelector = accessible ? '[role="row"]' : "tr";
   const cellSelector = accessible ? '[role="cell"], [role="gridcell"], [role="columnheader"], [role="rowheader"]' : "td, th";
@@ -3433,10 +3491,11 @@ async function discoverTables(page, accessible = false) {
       if (current()) current().unsupported = "Nested tables are not supported yet.";
       return;
     }
-    if (tables.length >= LIMITS2.tables) throw new InputError("Page exceeds the limit of 20 tables.", 422);
+    if (sourceImport ? ++budget.scanned > 100 : tables.length >= LIMITS2.tables) throw new InputError(sourceImport ? "Table discovery exceeds the scan limit of 100 table elements." : "Page exceeds the limit of 20 tables.", 422);
     const parent = current();
-    if (parent) parent.unsupported = "Nested tables are not supported yet.";
-    const table = { rows: [], caption: accessible ? el.getAttribute("aria-label") || "" : "", unsupported: parent ? "Nested tables are not supported yet." : null };
+    if (parent && !sourceImport) parent.unsupported = "Nested tables are not supported yet.";
+    const table = { rows: [], caption: accessible ? el.getAttribute("aria-label") || "" : "", unsupported: parent && !sourceImport ? "Nested tables are not supported yet." : null, parent, children: [], sourceIndex: tables.length + 1, role: el.getAttribute("role") || "", classes: el.getAttribute("class") || "" };
+    if (parent) parent.children.push(table);
     tables.push(table);
     stack.push(table);
     el.onEndTag(() => {
@@ -3445,7 +3504,7 @@ async function discoverTables(page, accessible = false) {
   } }).on(rowSelector, { element(el) {
     const table = current();
     if (!table) return;
-    if (++totalRows > LIMITS2.rows) throw new InputError("Page exceeds the limit of 5000 total rows.", 422);
+    if ((sourceImport ? ++budget.rows : ++totalRows) > LIMITS2.rows) throw new InputError("Page exceeds the limit of 5000 total rows.", 422);
     const row = [];
     table.rows.push(row);
     table.row = row;
@@ -3459,7 +3518,7 @@ async function discoverTables(page, accessible = false) {
   } }).on(cellSelector, { element(el) {
     const table = current();
     if (!table?.row) return;
-    if (table.row.length >= LIMITS2.columns || ++totalCells > LIMITS2.cells) throw new InputError("Page exceeds the cell or column limit.", 422);
+    if (table.row.length >= LIMITS2.columns || (sourceImport ? ++budget.cells : ++totalCells) > LIMITS2.cells) throw new InputError("Page exceeds the cell or column limit.", 422);
     if (["rowspan", "colspan", "aria-rowspan", "aria-colspan"].some((k) => el.hasAttribute(k) && el.getAttribute(k) !== "1")) table.unsupported = "Merged cells are not supported yet.";
     const cell = { text: "", header: accessible ? el.getAttribute("role") === "columnheader" : el.tagName === "th" };
     table.row.push(cell);
@@ -3467,6 +3526,8 @@ async function discoverTables(page, accessible = false) {
     el.onEndTag(() => {
       if (table.cell === cell) table.cell = void 0;
     });
+  } }).on("img", { element() {
+    if (current()?.cell) current().cell.images = (current().cell.images || 0) + 1;
   } }).on("caption", { element(el) {
     const table = current();
     if (!table) return;
@@ -3494,21 +3555,73 @@ async function discoverTables(page, accessible = false) {
     }
   } });
   await rewrite.transform(new Response(page)).arrayBuffer();
-  return tables.filter((t) => t.rows.some((r) => r.length)).map((t, id) => {
-    const rows = t.rows.filter((r) => r.length), width = Math.max(...rows.map((r) => r.length));
+  const normalize = (text) => decodeHTML(text).replace(/\s+/g, " ").trim();
+  for (const t of tables) {
+    t.rows = t.rows.filter((r) => r.length);
+    t.wrapper = t.children.length > 0 && t.rows.length === 1 && t.rows[0].length === 1 && !t.rows[0][0].header;
+    t.navigation = t.role === "navigation" || /(?:^|\s)(?:navbox(?:-[\w-]+)?|sidebar)(?:\s|$)/.test(t.classes) || !!t.parent?.navigation;
+  }
+  return tables.filter((t) => t.rows.length).map((t, id) => {
+    const width = Math.max(...t.rows.map((r) => r.length));
+    let rows = t.rows;
     const heading = rows[0]?.every((c) => c.header);
-    if (rows.slice(heading ? 1 : 0).some((r) => r.some((c) => c.header) && r.every((c) => c.header))) t.unsupported ||= "Multiple header rows are not supported yet.";
+    let repeated = 0;
+    if (sourceImport && heading) {
+      const first = rows[0].map((c) => normalize(c.text));
+      rows = [rows[0], ...rows.slice(1).filter((r) => {
+        const duplicate = r.every((c) => c.header) && r.length === first.length && r.every((c, i) => normalize(c.text) === first[i]);
+        if (duplicate) repeated++;
+        return !duplicate;
+      })];
+    }
+    const numericCell = (c) => /^[+-]?\$?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*%?$/.test(normalize(c.text));
+    if (rows.slice(heading ? 1 : 0).some((r) => r.some((c) => c.header) && r.every((c) => c.header) && (!sourceImport || !r.some(numericCell)))) t.unsupported ||= "Multiple distinct header rows are not supported yet.";
     if (rows.some((r) => r.length !== width)) t.unsupported ||= "Rows have inconsistent column counts.";
-    const normalize = (text) => decodeHTML(text).replace(/\s+/g, " ").trim();
-    return {
+    if (sourceImport) {
+      if (t.children.length && !t.wrapper && t.role !== "presentation") t.unsupported ||= "Nested data tables require explicit mapping.";
+      if (t.parent && !t.parent.wrapper && t.parent.role !== "presentation" && !t.navigation) t.unsupported ||= "Nested data tables require explicit mapping.";
+    }
+    const result = {
       id,
-      title: normalize(t.caption) || `${accessible ? "Accessible table" : "Table"} ${id + 1}`,
+      title: normalize(t.caption) || `${accessible ? "Accessible table" : "Table"} ${sourceImport ? t.sourceIndex : id + 1}`,
       headers: heading ? rows[0].map((c) => normalize(c.text)) : Array.from({ length: width }, (_, i) => `Column ${i + 1}`),
       rows: rows.slice(heading ? 1 : 0).map((r) => r.map((c) => normalize(c.text))),
       unsupported: t.unsupported,
       extraction_method: accessible ? "aria-grid" : "html-table"
     };
-  });
+    if (!sourceImport) return result;
+    let reason = "", status = "candidate";
+    if (t.navigation) {
+      status = "ignored";
+      reason = "Navigation table.";
+    } else if (t.role === "presentation") {
+      status = "ignored";
+      reason = "Presentation/layout table; independent child data tables are inspected separately.";
+    } else if (t.wrapper) {
+      status = "ignored";
+      reason = "Single-cell layout wrapper; child data table inspected independently.";
+    } else if (!heading && rows.length === 1 && t.rows[0].some((c) => c.images)) {
+      status = "ignored";
+      reason = "Single-row image/chart layout; image and chart contents are not interpreted.";
+    } else if (width < 2) {
+      status = "ignored";
+      reason = "Single-column layout/list; no two-column dataset was inferred.";
+    } else if (budget.accepted >= 20) {
+      status = "omitted";
+      reason = "20 candidate tables already selected; use a narrower source.";
+    } else {
+      budget.accepted++;
+      if (result.unsupported) {
+        status = "unsupported";
+        reason = result.unsupported;
+      }
+    }
+    const imageOnly = t.rows.reduce((n, r) => n + r.filter((c) => c.images && !normalize(c.text)).length, 0);
+    inventory.push({ table_index: t.sourceIndex, title: result.title.slice(0, 200), rows: result.rows.length, columns: width, status, reason, repeated_headers_omitted: repeated, image_only_cells: imageOnly });
+    if (["ignored", "omitted"].includes(status)) return null;
+    result.capture_notes = [...repeated ? [repeated + " repeated header rows omitted."] : [], ...imageOnly ? [imageOnly + " image-only cells have no extracted text; OCR is disabled."] : []];
+    return result;
+  }).filter(Boolean);
 }
 async function discoverDCIScores(page) {
   const sections = [];
@@ -3629,12 +3742,13 @@ function noDataReason(signals) {
   if (signals.images || signals.canvases) return { code: "visual_content_present", message: `Found ${signals.images} images and ${signals.canvases} canvas elements, but no supported dataset. Their presence does not prove the requested data is in a picture. Image contents were not read.`, next_action: "If the data is shown only as an image, OCR plus row/column verification is needed. OCR is not enabled. Prefer an official text or CSV export when available." };
   return { code: "no_supported_structure", message: "The page downloaded successfully, but no supported row-and-column structure was found. There is not enough evidence to say JavaScript or login is the cause.", next_action: "Check that this is the actual data page. Try a direct public table, an official export, or provide the page for a new adapter." };
 }
-async function analyzePage(page, source, checks) {
+async function analyzePage(page, source, checks, { sourceImport = false } = {}) {
   const signals = await inspectPage(page);
-  let tables = await discoverTables(page);
+  const inventory = [], budget = { scanned: 0, accepted: 0, rows: 0, cells: 0 };
+  let tables = await discoverTables(page, false, { sourceImport, inventory, budget });
   const summarize = (label, items) => ({ step: label, status: items.length ? "found" : "not_found", message: items.length ? `${items.length} structures found; ${items.filter((t) => !t.unsupported).length} usable for preview and export.` : "No matching structures found in the returned HTML." });
   checks.push(summarize("HTML tables", tables));
-  const accessible = await discoverTables(page, true);
+  const accessible = await discoverTables(page, true, { sourceImport, inventory, budget });
   checks.push(summarize("Accessible tables and grids", accessible));
   tables.push(...accessible);
   const u = new URL(source);
@@ -3644,13 +3758,14 @@ async function analyzePage(page, source, checks) {
     tables.push(...scores);
   } else checks.push({ step: "Supported site adapters", status: "not_applicable", message: "No site-specific adapter matches this URL." });
   const cells = tables.reduce((n, t) => n + t.rows.length * t.headers.length, 0);
-  if (tables.length > LIMITS2.tables || tables.reduce((n, t) => n + t.rows.length, 0) > LIMITS2.rows || cells > LIMITS2.cells) throw new InputError("Combined extraction exceeds the table, row or cell limit.", 422);
+  if (!sourceImport && tables.length > LIMITS2.tables || tables.reduce((n, t) => n + t.rows.length, 0) > LIMITS2.rows || cells > LIMITS2.cells) throw new InputError("Combined extraction exceeds the table, row or cell limit.", 422);
   checks.push({ step: "Embedded data", status: signals.json_blocks ? "found" : "not_found", message: `${signals.json_blocks} JSON blocks found. They may contain metadata rather than table rows; no dataset was inferred from them.` });
   checks.push({ step: "JavaScript indicators", status: signals.app_roots && signals.linked_scripts ? "indicated" : "checked", message: `${signals.linked_scripts} linked scripts and ${signals.app_roots} application containers found. Scripts were not executed; these clues do not confirm where data loads.` });
   checks.push({ step: "Images and canvas", status: signals.images || signals.canvases ? "found" : "not_found", message: `${signals.images} images and ${signals.canvases} canvas elements found. Their contents were not read; OCR is not enabled.` });
-  if (!tables.length) return { tables, signals, ...noDataReason(signals) };
+  const discovery = sourceImport ? { scanned_tables: signals.html_tables + signals.accessible_grids, inventory, ignored_tables: inventory.filter((t) => t.status === "ignored").length } : void 0;
+  if (!tables.length) return { tables, signals, discovery, ...noDataReason(signals) };
   const usable = tables.filter((t) => !t.unsupported).length;
-  return { tables: tables.map((t, id) => ({ ...t, id })), signals, code: usable ? "extracted" : "unsupported_table_structure", message: usable ? `${usable} usable datasets found.` : "Tables were found, but their structures are not supported yet.", next_action: usable ? "Choose a dataset to preview and export." : "Choose a table to see its specific issue, such as merged cells, nested tables or inconsistent columns." };
+  return { tables: tables.map((t, id) => ({ ...t, id })), signals, discovery, code: usable ? "extracted" : "unsupported_table_structure", message: usable ? `${usable} usable datasets found.` : "Tables were found, but their structures are not supported yet.", next_action: usable ? "Choose a dataset to preview and export." : "Choose a table to see its specific issue, such as merged cells, nested tables or inconsistent columns." };
 }
 async function tablesAPI(request, url) {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { ...SECURITY, Allow: "POST" } });

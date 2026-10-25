@@ -1,4 +1,4 @@
-import { MAPPING_VERSION, detectColumns, mappedSchema, mappingFor, extractMappedTable } from './column-mapping.js';
+import { MAPPING_VERSION, LEGACY_MAPPING_VERSION, detectColumns, mappedSchema, mappingFor, extractMappedTable } from './column-mapping.js';
 import { reviewQueue } from './review-queue.js';
 import { planPage, needsPageIntake, extractPageTable, PAGE_TABLE_VERSION, documentEvidence } from './page-intake.js';
 import { wageHeader, extractWageTable, WAGE_SCHEMA, WAGE_VERSION, LEGACY_WAGE_VERSION } from './wage-table.js';
@@ -163,7 +163,7 @@ function applyCorrection(packet, response, change) {
 }
 function originalResponse(job) {
   if (job.example_id !== 'custom-text') return examples[job.example_id].scripted_response;
-  if (job.parser_version === MAPPING_VERSION) return extractMappedTable(job);
+  if ([MAPPING_VERSION,LEGACY_MAPPING_VERSION].includes(job.parser_version)) return extractMappedTable(job);
   if (job.parser_version === 'name-number-v1') return extractTextRules(job.packet);
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if ([WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)) return extractWageTable(job.packet, job.parser_version);
@@ -204,10 +204,10 @@ async function checkJob(job) {
       !Array.isArray(job.events) || job.events.length > 64 ||
       (job.revisions !== undefined && (!Array.isArray(job.revisions) || job.revisions.length > 8)))
     fail('invalid_lab_job', 'Invalid session. Maximum 64 review events and 8 candidate revisions.');
-  if (job.mapping !== undefined && job.parser_version !== MAPPING_VERSION) fail('column_mapping', 'Recorded column mappings require a mapped table session.');
+  if (job.mapping !== undefined && ![MAPPING_VERSION,LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail('column_mapping', 'Recorded column mappings require a mapped table session.');
   if(job.retrieval!==undefined){
     const r=job.retrieval;
-    if(!only(r,['method','source','retrieved_at','snapshot_hash','label']) || !['static-html','local-chromium'].includes(r.method) || r.source!==job.packet.source.url || r.snapshot_hash!==job.packet.source.text_hash || typeof r.label!=='string'||r.label.length>1000||typeof r.retrieved_at!=='string'||!Number.isFinite(Date.parse(r.retrieved_at))) fail('retrieval_metadata','Retrieval description does not match the retained text snapshot.');
+    if(!only(r,['method','source','retrieved_at','snapshot_hash','label','content_kind']) || !['static-html','local-chromium'].includes(r.method) || (r.content_kind!==undefined&&!['table','prose'].includes(r.content_kind)) || r.source!==job.packet.source.url || r.snapshot_hash!==job.packet.source.text_hash || typeof r.label!=='string'||r.label.length>1000||typeof r.retrieved_at!=='string'||!Number.isFinite(Date.parse(r.retrieved_at))) fail('retrieval_metadata','Retrieval description does not match the retained text snapshot.');
   }
   await revalidate(job.packet, job.cache_entry);
   await documentInfo(job);
@@ -245,7 +245,7 @@ async function view(job, result) {
     job,
     column_mapping: mapped ? {
       editable: true, delimiter: mapped.plan.delimiter,
-      columns: mapped.columns.map((c,i) => ({...c, source_label:mapped.plan.columns[i].label, reason: mapped.plan.columns[i].reason, samples:mapped.plan.rows.slice(0,3).map(r => r.cells[i])})),
+      columns: mapped.columns.map((c,i) => ({...c, source_label:mapped.plan.columns[i].label, required:mapped.schema.fields[i].required, reason: mapped.plan.columns[i].reason, samples:mapped.plan.rows.slice(0,3).map(r => r.cells[i])})),
       skipped_rows: mapped.plan.skipped, prefix_lines: mapped.plan.prefix_lines,
       notice: 'Suggested from explicit source columns. No code changes needed. Remapping starts a new unapproved review; save the current session first.',
     } : {
@@ -338,7 +338,7 @@ export async function labFetch(request) {
         if (body.mapping !== undefined && (body.mode !== 'auto' || body.dataset_id !== undefined)) fail('column_mapping', 'Column mapping requires automatic mode on one pasted table.');
         if (body.mode === 'auto' && body.schema !== undefined)
           fail('invalid_input', 'Automatic suggestions choose their own columns. Use manual mode to supply columns.');
-        const columns = body.mode === 'auto' ? detectColumns(body.source?.text?.replace(/\r\n?/g, '\n')) : null;
+        const columns = body.mode === 'auto' ? detectColumns(body.source?.text?.replace(/\r\n?/g, '\n'),MAPPING_VERSION,body.retrieval?.content_kind==='table') : null;
         if (body.mapping !== undefined && !columns) fail('column_mapping', 'No supported delimited header found.');
         if (columns && body.dataset_id === undefined) {
           const mapped = mappedSchema(columns, body.mapping);
@@ -361,7 +361,7 @@ export async function labFetch(request) {
             parserVersion = WAGE_VERSION;
           }
         }
-        response = originalResponse({ example_id: 'custom-text', parser_version: parserVersion, packet, ...(mapping ? {mapping} : {}) });
+        response = originalResponse({ example_id: 'custom-text', parser_version: parserVersion, packet, ...(mapping ? {mapping} : {}), ...(body.retrieval?{retrieval:body.retrieval}:{}) });
       } else {
         if (!only(body, ['example_id']) || !Object.hasOwn(examples, body.example_id))
           fail('unknown_example', 'Choose an example or paste your own text.');

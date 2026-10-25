@@ -7,6 +7,7 @@ import {launchBrowser} from './browser-cdp.mjs';
 import {renderPage} from './render-page.mjs';
 if(process.platform==='linux')process.env.TOOLKIT_BROWSER_NO_SANDBOX='1';
 const html='<main><p>Widgets reached 12.6 percent.</p><table><tr><th>Name</th><th>Score</th></tr><tr><td>Alpha</td><td>98.6</td></tr><tr><td>Beta</td><td>95.1</td></tr></table></main>';
+const wiki=await readFile(new URL('../test/fixtures/wikipedia-shapes.html',import.meta.url),'utf8');
 const shell='<div id="app"></div><script src="/rows.js"></script>';
 let renderCalls=0,sourceCalls=0;
 const dir=await mkdtemp(join(tmpdir(),'source-browser-'));
@@ -14,7 +15,7 @@ const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:await read
  outboundService:request=>{
   const u=new URL(request.url);
   if(u.hostname==='cloudflare-dns.com')return Response.json({Status:0,Answer:u.searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]});
-  sourceCalls++;return new Response(u.hostname==='dynamic.example.org'?shell:html,{status:u.hostname==='blocked.example.org'?403:200,headers:{'content-type':'text/html'}});
+  sourceCalls++;return new Response(u.hostname==='dynamic.example.org'?shell:u.hostname==='wikipedia.example.org'?wiki:html,{status:u.hostname==='blocked.example.org'?403:200,headers:{'content-type':'text/html'}});
  },
  serviceBindings:{LOCAL_RENDERER:async request=>{
   renderCalls++;const {url}=await request.json();
@@ -63,5 +64,27 @@ try{
  await browser.evaluate('document.getElementById("source-url").value="https://blocked.example.org/";document.getElementById("fetch-source").click()');
  await waitFor(()=>browser.evaluate('document.getElementById("status").textContent.includes("HTTP 403")&&!document.getElementById("fetch-source").disabled'));
  assert.equal(renderCalls,1);assert.match(await browser.evaluate('document.getElementById("status").textContent'),/previous review is unchanged/);
+ // Exercise the reported Wikipedia structures through the actual lab UI.
+ await browser.evaluate('document.getElementById("source-url").value="https://wikipedia.example.org/";document.getElementById("fetch-source").click()');
+ await waitFor(()=>browser.evaluate('document.getElementById("retrieved-current").textContent.includes("Summary")&&!document.getElementById("fetch-source").disabled'));
+ assert.match(await browser.evaluate('document.getElementById("retrieved-summary").textContent'),/7 table selections · 11 captured table rows/);
+ assert.match(await browser.evaluate('document.getElementById("retrieval-checks").textContent'),/29 table elements scanned; 22 navigation/);
+ assert.match(await browser.evaluate('document.getElementById("retrieval-checks").textContent'),/Unsupported grid.*Merged/);
+ async function choose(label) {
+  await browser.evaluate('(()=>{const select=document.getElementById("retrieved-dataset");select.value=[...select.options].find(o=>o.textContent.includes('+JSON.stringify(label)+')).value;select.dispatchEvent(new Event("change"));document.getElementById("open-retrieved").click()})()');
+  await waitFor(()=>browser.evaluate('!document.getElementById("open-retrieved").textContent.includes("Open selected")&&!document.getElementById("load").disabled'));
+ }
+ await choose('Ranked articles');
+ assert.match(await browser.evaluate('document.getElementById("candidate-head").textContent'),/#1/);
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=column_1]").textContent'),'Alpha');
+ await choose('Shares');
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=share_percent]").textContent'),'8%');
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=notes]").textContent'),'—');
+ assert.match(await browser.evaluate('document.getElementById("queue-summary").textContent'),/2 ready for batch review · 0 exceptions/);
+ await choose('shared column 1');
+ assert.match(await browser.evaluate('document.getElementById("retrieved-preview").textContent'),/2 of 9 source columns/);
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=column_9_percent]").textContent'),'40%');
+ assert.match(await browser.evaluate('document.getElementById("retrieved-summary").textContent'),/11 captured table rows/);
+ if(process.env.SOURCE_SCREENSHOT){await browser.evaluate('window.scrollTo(0,0)');const shot=await browser.send('Page.captureScreenshot',{captureBeyondViewport:true});await writeFile(process.env.SOURCE_SCREENSHOT,Buffer.from(shot.data,'base64'));}
  console.log('PASS: real lab browser fetches static tables/article, preserves snapshot metadata in approved JSON, automatically renders a JavaScript-only table, leaves manual paste offline, and never retries an access barrier with rendering.');
 }finally{await browser?.close();await mf.dispose();await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});}

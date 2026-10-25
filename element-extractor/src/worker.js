@@ -126,7 +126,7 @@ async function fetchPublicPage(input, ownHost) {
     return {source: url.href, page: await readBounded(r)};
   }
 }
-async function discoverTables(page, accessible = false) {
+async function discoverTables(page, accessible = false, {sourceImport=false, inventory=[], budget={scanned:0,accepted:0,rows:0,cells:0}}={}) {
   const rootSelector = accessible ? '[role="table"], [role="grid"]' : 'table';
   const rowSelector = accessible ? '[role="row"]' : 'tr';
   const cellSelector = accessible ? '[role="cell"], [role="gridcell"], [role="columnheader"], [role="rowheader"]' : 'td, th';
@@ -135,25 +135,27 @@ async function discoverTables(page, accessible = false) {
   const rewrite = new HTMLRewriter()
     .on(rootSelector, {element(el) {
       if (accessible && el.tagName === 'table') {if (current()) current().unsupported = 'Nested tables are not supported yet.'; return;}
-      if (tables.length >= LIMITS.tables) throw new InputError('Page exceeds the limit of 20 tables.', 422);
-      const parent = current(); if (parent) parent.unsupported = 'Nested tables are not supported yet.';
-      const table = {rows: [], caption: accessible ? (el.getAttribute('aria-label') || '') : '', unsupported: parent ? 'Nested tables are not supported yet.' : null};
+      if (sourceImport ? ++budget.scanned>100 : tables.length>=LIMITS.tables) throw new InputError(sourceImport?'Table discovery exceeds the scan limit of 100 table elements.':'Page exceeds the limit of 20 tables.', 422);
+      const parent = current(); if (parent && !sourceImport) parent.unsupported = 'Nested tables are not supported yet.';
+      const table = {rows: [], caption: accessible ? (el.getAttribute('aria-label') || '') : '', unsupported: parent && !sourceImport ? 'Nested tables are not supported yet.' : null, parent, children:[], sourceIndex:tables.length+1, role:el.getAttribute('role')||'', classes:el.getAttribute('class')||''};
+      if(parent)parent.children.push(table);
       tables.push(table); stack.push(table);
       el.onEndTag(() => { if (current() === table) stack.pop(); });
     }})
     .on(rowSelector, {element(el) {
       const table = current(); if (!table) return;
-      if (++totalRows > LIMITS.rows) throw new InputError('Page exceeds the limit of 5000 total rows.', 422);
+      if ((sourceImport?++budget.rows:++totalRows) > LIMITS.rows) throw new InputError('Page exceeds the limit of 5000 total rows.', 422);
       const row = []; table.rows.push(row); table.row = row; table.cell = undefined;
       el.onEndTag(() => { if (table.row === row) {table.row = undefined; table.cell = undefined;} });
     }})
     .on(cellSelector, {element(el) {
       const table = current(); if (!table?.row) return;
-      if (table.row.length >= LIMITS.columns || ++totalCells > LIMITS.cells) throw new InputError('Page exceeds the cell or column limit.', 422);
+      if (table.row.length >= LIMITS.columns || (sourceImport?++budget.cells:++totalCells) > LIMITS.cells) throw new InputError('Page exceeds the cell or column limit.', 422);
       if (['rowspan','colspan','aria-rowspan','aria-colspan'].some(k => el.hasAttribute(k) && el.getAttribute(k) !== '1')) table.unsupported = 'Merged cells are not supported yet.';
       const cell = {text: '', header: accessible ? el.getAttribute('role') === 'columnheader' : el.tagName === 'th'}; table.row.push(cell); table.cell = cell;
       el.onEndTag(() => {if (table.cell === cell) table.cell = undefined;});
     }})
+    .on('img', {element(){if(current()?.cell)current().cell.images=(current().cell.images||0)+1;}})
     .on('caption', {element(el) {const table = current(); if (!table) return; table.inCaption = true; el.onEndTag(() => {table.inCaption = false;});}})
     .on('script, style, template', {element(el) {ignored++; el.onEndTag(() => {ignored--;});}})
     .on('br', {element() {const t = current(); if (t?.cell) t.cell.text += ' ';}})
@@ -163,15 +165,43 @@ async function discoverTables(page, accessible = false) {
       else if (table.cell) {table.cell.text += chunk.text; if (table.cell.text.length > LIMITS.text) throw new InputError('A table cell exceeds the text limit.', 422);}
     }});
   await rewrite.transform(new Response(page)).arrayBuffer();
-  return tables.filter(t => t.rows.some(r => r.length)).map((t, id) => {
-    const rows = t.rows.filter(r => r.length), width = Math.max(...rows.map(r => r.length));
-    const heading = rows[0]?.every(c => c.header);
-    if (rows.slice(heading ? 1 : 0).some(r => r.some(c => c.header) && r.every(c => c.header))) t.unsupported ||= 'Multiple header rows are not supported yet.';
+  const normalize = text => decodeHTML(text).replace(/\s+/g, ' ').trim();
+  for(const t of tables){
+    t.rows=t.rows.filter(r=>r.length);
+    t.wrapper=t.children.length>0&&t.rows.length===1&&t.rows[0].length===1&&!t.rows[0][0].header;
+    t.navigation=t.role==='navigation'||/(?:^|\s)(?:navbox(?:-[\w-]+)?|sidebar)(?:\s|$)/.test(t.classes)||!!t.parent?.navigation;
+  }
+  return tables.filter(t => t.rows.length).map((t, id) => {
+    const width=Math.max(...t.rows.map(r=>r.length));let rows=t.rows;
+    const heading=rows[0]?.every(c=>c.header);let repeated=0;
+    if(sourceImport&&heading){
+      const first=rows[0].map(c=>normalize(c.text));
+      rows=[rows[0],...rows.slice(1).filter(r=>{const duplicate=r.every(c=>c.header)&&r.length===first.length&&r.every((c,i)=>normalize(c.text)===first[i]);if(duplicate)repeated++;return !duplicate;})];
+    }
+    const numericCell=c=>/^[+-]?\$?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*%?$/.test(normalize(c.text));
+    if (rows.slice(heading ? 1 : 0).some(r => r.some(c => c.header) && r.every(c => c.header) && (!sourceImport||!r.some(numericCell)))) t.unsupported ||= 'Multiple distinct header rows are not supported yet.';
     if (rows.some(r => r.length !== width)) t.unsupported ||= 'Rows have inconsistent column counts.';
-    const normalize = text => decodeHTML(text).replace(/\s+/g, ' ').trim();
-    return {id, title: normalize(t.caption) || `${accessible ? 'Accessible table' : 'Table'} ${id + 1}`, headers: heading ? rows[0].map(c => normalize(c.text)) : Array.from({length: width}, (_,i) => `Column ${i + 1}`),
+    if(sourceImport){
+      if(t.children.length&&!t.wrapper&&t.role!=='presentation')t.unsupported ||= 'Nested data tables require explicit mapping.';
+      if(t.parent&&!t.parent.wrapper&&t.parent.role!=='presentation'&&!t.navigation)t.unsupported ||= 'Nested data tables require explicit mapping.';
+    }
+    const result={id, title: normalize(t.caption) || `${accessible ? 'Accessible table' : 'Table'} ${sourceImport?t.sourceIndex:id+1}`, headers: heading ? rows[0].map(c => normalize(c.text)) : Array.from({length: width}, (_,i) => `Column ${i + 1}`),
       rows: rows.slice(heading ? 1 : 0).map(r => r.map(c => normalize(c.text))), unsupported: t.unsupported, extraction_method: accessible ? 'aria-grid' : 'html-table'};
-  });
+    if(!sourceImport)return result;
+    let reason='',status='candidate';
+    if(t.navigation){status='ignored';reason='Navigation table.';}
+    else if(t.role==='presentation'){status='ignored';reason='Presentation/layout table; independent child data tables are inspected separately.';}
+    else if(t.wrapper){status='ignored';reason='Single-cell layout wrapper; child data table inspected independently.';}
+    else if(!heading&&rows.length===1&&t.rows[0].some(c=>c.images)){status='ignored';reason='Single-row image/chart layout; image and chart contents are not interpreted.';}
+    else if(width<2){status='ignored';reason='Single-column layout/list; no two-column dataset was inferred.';}
+    else if(budget.accepted>=20){status='omitted';reason='20 candidate tables already selected; use a narrower source.';}
+    else{budget.accepted++;if(result.unsupported){status='unsupported';reason=result.unsupported;}}
+    const imageOnly=t.rows.reduce((n,r)=>n+r.filter(c=>c.images&&!normalize(c.text)).length,0);
+    inventory.push({table_index:t.sourceIndex,title:result.title.slice(0,200),rows:result.rows.length,columns:width,status,reason,repeated_headers_omitted:repeated,image_only_cells:imageOnly});
+    if(['ignored','omitted'].includes(status))return null;
+    result.capture_notes=[...(repeated?[repeated+' repeated header rows omitted.']:[]),...(imageOnly?[imageOnly+' image-only cells have no extracted text; OCR is disabled.']:[])];
+    return result;
+  }).filter(Boolean);
 }
 // DCI publishes its score grid as divs, not a semantic HTML table.
 // Scope this adapter to DCI final-score pages and their explicit grid classes.
@@ -257,25 +287,27 @@ function noDataReason(signals) {
   if(signals.images||signals.canvases)return {code:'visual_content_present',message:`Found ${signals.images} images and ${signals.canvases} canvas elements, but no supported dataset. Their presence does not prove the requested data is in a picture. Image contents were not read.`,next_action:'If the data is shown only as an image, OCR plus row/column verification is needed. OCR is not enabled. Prefer an official text or CSV export when available.'};
   return {code:'no_supported_structure',message:'The page downloaded successfully, but no supported row-and-column structure was found. There is not enough evidence to say JavaScript or login is the cause.',next_action:'Check that this is the actual data page. Try a direct public table, an official export, or provide the page for a new adapter.'};
 }
-async function analyzePage(page, source, checks) {
+async function analyzePage(page, source, checks, {sourceImport=false}={}) {
   const signals=await inspectPage(page);
-  let tables=await discoverTables(page);
+  const inventory=[],budget={scanned:0,accepted:0,rows:0,cells:0};
+  let tables=await discoverTables(page,false,{sourceImport,inventory,budget});
   const summarize=(label,items)=>({step:label,status:items.length?'found':'not_found',message:items.length?`${items.length} structures found; ${items.filter(t=>!t.unsupported).length} usable for preview and export.`:'No matching structures found in the returned HTML.'});
   checks.push(summarize('HTML tables',tables));
-  const accessible=await discoverTables(page,true);
+  const accessible=await discoverTables(page,true,{sourceImport,inventory,budget});
   checks.push(summarize('Accessible tables and grids',accessible));tables.push(...accessible);
   const u=new URL(source);
   if(['www.dci.org','dci.org'].includes(u.hostname)&&u.pathname.startsWith('/scores/final-scores/')) {
     const scores=await discoverDCIScores(page);checks.push(summarize('DCI final-score adapter',scores));tables.push(...scores);
   } else checks.push({step:'Supported site adapters',status:'not_applicable',message:'No site-specific adapter matches this URL.'});
   const cells=tables.reduce((n,t)=>n+t.rows.length*t.headers.length,0);
-  if(tables.length>LIMITS.tables||tables.reduce((n,t)=>n+t.rows.length,0)>LIMITS.rows||cells>LIMITS.cells)throw new InputError('Combined extraction exceeds the table, row or cell limit.',422);
+  if((!sourceImport&&tables.length>LIMITS.tables)||tables.reduce((n,t)=>n+t.rows.length,0)>LIMITS.rows||cells>LIMITS.cells)throw new InputError('Combined extraction exceeds the table, row or cell limit.',422);
   checks.push({step:'Embedded data',status:signals.json_blocks?'found':'not_found',message:`${signals.json_blocks} JSON blocks found. They may contain metadata rather than table rows; no dataset was inferred from them.`});
   checks.push({step:'JavaScript indicators',status:signals.app_roots&&signals.linked_scripts?'indicated':'checked',message:`${signals.linked_scripts} linked scripts and ${signals.app_roots} application containers found. Scripts were not executed; these clues do not confirm where data loads.`});
   checks.push({step:'Images and canvas',status:signals.images||signals.canvases?'found':'not_found',message:`${signals.images} images and ${signals.canvases} canvas elements found. Their contents were not read; OCR is not enabled.`});
-  if(!tables.length)return {tables,signals,...noDataReason(signals)};
+  const discovery=sourceImport?{scanned_tables:signals.html_tables+signals.accessible_grids,inventory,ignored_tables:inventory.filter(t=>t.status==='ignored').length}:undefined;
+  if(!tables.length)return {tables,signals,discovery,...noDataReason(signals)};
   const usable=tables.filter(t=>!t.unsupported).length;
-  return {tables:tables.map((t,id)=>({...t,id})),signals,code:usable?'extracted':'unsupported_table_structure',message:usable?`${usable} usable datasets found.`:'Tables were found, but their structures are not supported yet.',next_action:usable?'Choose a dataset to preview and export.': 'Choose a table to see its specific issue, such as merged cells, nested tables or inconsistent columns.'};
+  return {tables:tables.map((t,id)=>({...t,id})),signals,discovery,code:usable?'extracted':'unsupported_table_structure',message:usable?`${usable} usable datasets found.`:'Tables were found, but their structures are not supported yet.',next_action:usable?'Choose a dataset to preview and export.': 'Choose a table to see its specific issue, such as merged cells, nested tables or inconsistent columns.'};
 }
 
 async function tablesAPI(request, url) {
