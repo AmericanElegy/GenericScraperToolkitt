@@ -184,9 +184,18 @@ async function documentInfo(job) {
   return { plan, selected, hash: await digest(plan.text), original_hash: await digest(job.document.source.text) };
 }
 function publicDocument(info, job) {
+  const selected = info.selected;
+  const batches = selected.kind === 'prose' ? [] : info.plan.datasets.filter(d => d.kind === selected.kind && d.source_map[0].document_start === selected.source_map[0].document_start);
+  const index = batches.findIndex(d => d.id === selected.id);
+  const start = batches.slice(0,index).reduce((n,d) => n+d.row_count,0)+1;
+  const selected_scope = batches.length ? {
+    kind:'table_batch', row_start:start, row_end:start+selected.row_count-1,
+    table_rows:batches.reduce((n,d)=>n+d.row_count,0), batch_number:index+1, batch_count:batches.length,
+    previous_id:batches[index-1]?.id ?? null, next_id:batches[index+1]?.id ?? null,
+  } : {kind:'prose',previous_id:null,next_id:null};
   return { text: info.plan.text, text_hash: info.hash, original_text_hash: info.original_hash,
     url: job.packet.source.url, selected_id: info.selected.id,
-    source_map: info.selected.source_map,
+    source_map: info.selected.source_map, selected_scope,
     datasets: info.plan.datasets.map(d => ({ id: d.id, label: d.label, row_count: d.row_count, kind: d.kind })),
     notice: 'Only the selected section is parsed/reviewed/exported as current records. The full page is retained; other sections are not implicitly approved. Switching sections starts a new review session.' };
 }

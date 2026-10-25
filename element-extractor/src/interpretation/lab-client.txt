@@ -15,6 +15,10 @@
   };
   const selected = () =>
     state.view?.validation.records.find((row) => row.id === state.rowId);
+  function recordNumber(row) {
+    const scope=state.view?.document?.selected_scope;
+    return scope?.kind === "table_batch" && /^row-\d+$/.test(row.id) ? String(scope.row_start+Number(row.id.slice(4))-1) : row.id.replace(/^row-/, "");
+  }
   const columnLabels = {
     measure: "Measure", value: "Value", unit: "Unit", qualifier: "Qualifier", entity_name: "Name", corps_name: "Corps", score: "Score",
     occupational_group: "Occupational group", occupation: "Occupation", employment_count: "Jobs", location_quotient: "Location quotient",
@@ -69,6 +73,8 @@
     for (const input of document.querySelectorAll('#mapping-columns input, #mapping-columns select')) input.disabled = state.busy;
     $("apply-mapping").disabled = state.busy || !state.view?.column_mapping?.editable;
     for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode", "session-file", "restore-session"]) $(id).disabled = state.busy;
+    $("previous-batch").disabled = state.busy || !state.view?.document?.selected_scope?.previous_id;
+    $("next-batch").disabled = state.busy || !state.view?.document?.selected_scope?.next_id;
     $("dataset").disabled = state.busy || !state.view?.document;
     $("open-section").disabled = state.busy || !state.view?.document;
     $("record-filter").disabled = state.busy || !state.view;
@@ -122,8 +128,8 @@
         : blocking(row)
           ? "Cannot approve this record: " + blockers(row).map((issue) => issue.message).join(" ") + " You can reject it or leave it pending."
           : missing.length
-            ? "To approve " + row.id + ": " + missing.join("; ") + "."
-            : "Ready to approve " + row.id + ". Approval confirms that you checked the values against their source.";
+            ? "To approve record " + recordNumber(row) + ": " + missing.join("; ") + "."
+            : "Ready to approve record " + recordNumber(row) + ". Approval confirms that you checked the values against their source.";
   }
   async function request(path, body) {
     const response = await fetch(path, {
@@ -241,12 +247,12 @@
         if (queue().structured) {
           const cell = document.createElement("td"), check = document.createElement("input");
           check.type = "checkbox"; check.dataset.record = row.id;
-          check.setAttribute("aria-label", "Select " + row.id + " for batch review");
+          check.setAttribute("aria-label", "Select record " + recordNumber(row) + " for batch review");
           check.checked = state.checked.has(row.id); check.disabled = !queue().eligible_ids.includes(row.id);
           check.onchange = () => { if (check.checked) state.checked.add(row.id); else state.checked.delete(row.id); $("batch-confirm").checked = false; controls(); };
           cell.append(check); tr.append(cell);
         }
-        tr.append(text("td", row.id.replace(/^row-/, "")));
+        const recordCell=text("td",recordNumber(row));recordCell.title="Section record ID: "+row.id;tr.append(recordCell);
         for (const f of columns) {
           const td = document.createElement("td"),
             button = text("button", displayValue(row, f), "value");
@@ -256,7 +262,7 @@
           button.dataset.field = f.name;
           button.setAttribute(
             "aria-label",
-            "Inspect " + f.name + " for " + row.id,
+            "Inspect " + f.name + " for record " + recordNumber(row),
           );
           button.setAttribute(
             "aria-pressed",
@@ -298,7 +304,7 @@
       return;
     }
     $("field-title").textContent =
-      columnLabel(state.field) + " · record " + row.id.replace(/^row-/, "");
+      columnLabel(state.field) + " · record " + recordNumber(row);
     const evidence = [];
     for (const e of field.evidence) {
       const reference = document.createElement("details");
@@ -334,8 +340,8 @@
       list,
     );
     $("review-title").textContent =
-      "Review " +
-      row.id +
+      "Review record " +
+      recordNumber(row) +
       " · " +
       (labels[row.review_status] || row.review_status);
 
@@ -359,12 +365,20 @@
         const option = text("option", d.label); option.value = d.id; return option;
       }));
       $("dataset").value = doc.selected_id;
+      const scope=doc.selected_scope;
+      $("batch-summary").textContent=scope.kind === "table_batch" ? scope.table_rows+" recognized table rows · viewing "+scope.row_start+"–"+scope.row_end+" · batch "+scope.batch_number+" of "+scope.batch_count : "Other page text · current section only";
+      $("previous-batch").hidden=$("next-batch").hidden=scope.kind !== "table_batch" || scope.batch_count<2;
       $("page-scope").textContent = doc.datasets.length + " sections available. " + doc.notice;
       $("full-page").textContent = doc.text;
     }
     renderMapping();
     $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
+    const batch=state.view.document?.selected_scope?.kind === "table_batch";
+    const scopeLabel=batch?"current batch":state.view.document?"current section":"current review";
+    $("approved-csv").textContent="Export approved CSV"+(batch?" · this batch":"");
+    $("approved-json").textContent="Export approved JSON"+(batch?" · this batch":"");
+    $("export-scope").textContent="Exports contain "+c.approved+" approved records from the "+scopeLabel+" only. "+(!c.approved?"CSV currently contains column headers only. ":"")+(state.view.document?"Other batches and sections are not combined. JSON also retains the full source text.":"JSON also retains source text.");
     $("counts").textContent =
       c.candidates +
       (c.candidates === 1 ? " candidate · " : " candidates · ") +
@@ -373,7 +387,7 @@
       c.rejected +
       " rejected · " +
       c.pending +
-      " pending";
+      " pending" + (state.view.document ? " · current " + (batch ? "batch" : "section") + " only" : "");
     const q = queue();
     $("queue-summary").textContent = !c.candidates ? "No records suggested. Inspect the source or add a record manually." : !c.pending ? "Review complete. Approved records are ready to export." : q.eligible_ids.length + " ready for batch review · " + q.exception_ids.length + " exceptions · " + q.individual_ids.length + " need individual review";
     renderTable();
@@ -465,15 +479,18 @@
   $("edit-selected").onclick = () => editCandidate();
   $("add-record").onclick = () => editCandidate(true);
   $("text-mode").onchange = controls;
-  $("open-section").onclick = () => perform(async () => {
+  function openSection(id) { return perform(async () => {
     const response = await request("/api/interpretation/start", {
       example_id: "custom-text", mode: "auto", source: state.view.job.document.source,
-      dataset_id: $("dataset").value,
+      dataset_id: id,
     });
     state.view = await response.json(); state.rowId = null; state.field = null;
     clearDecision(); render(); editCandidate();
     say("Opened selected section. This is a new review session; other sections are not included in its approved records.");
-  });
+  }); }
+  $("open-section").onclick = () => openSection($("dataset").value);
+  $("previous-batch").onclick = () => { const id=state.view?.document?.selected_scope?.previous_id;if(id)openSection(id); };
+  $("next-batch").onclick = () => { const id=state.view?.document?.selected_scope?.next_id;if(id)openSection(id); };
   $("mapping-form").onsubmit = event => {
     event.preventDefault();
     if (!state.view?.column_mapping?.editable) return;

@@ -443,6 +443,11 @@ try {
   assert.equal(await evaluate('document.getElementById("full-page").textContent.length'), fullPage.replace(/\r\n?/g, '\n').length);
   await evaluate('document.getElementById("dataset").value="section-2";document.getElementById("open-section").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("24 candidates") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("batch-summary").textContent'), /48 recognized table rows · viewing 1–24 · batch 1 of 2/);
+  assert.equal(await evaluate('document.getElementById("previous-batch").disabled'),true);
+  assert.equal(await evaluate('document.getElementById("next-batch").disabled'),false);
+  assert.match(await evaluate('document.getElementById("export-scope").textContent'),/0 approved records.*current batch only.*column headers only/);
+  assert.match(await evaluate('document.getElementById("approved-csv").textContent'),/this batch/);
   assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=employment_count]").textContent'), '96,850');
   assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=annual_wage_dollars]").textContent'), '$49,690.00');
   await evaluate('document.querySelector("button[data-record=row-1][data-field=annual_wage_dollars]").click()');
@@ -454,9 +459,27 @@ try {
   await waitFor(() => evaluate('!document.getElementById("load").disabled'));
   const portable = await readFile(join(dir, "toolkit-review-session.json"), "utf8");
   assert.equal(JSON.parse(portable).format, "toolkit-review-session-v1");
-  await evaluate('document.getElementById("dataset").value="section-3";document.getElementById("open-section").click()');
+  await evaluate('document.getElementById("next-batch").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("24 candidates") && document.getElementById("counts").textContent.includes("0 approved") && !document.getElementById("load").disabled'));
   assert.match(await evaluate('document.getElementById("interpretation-summary").textContent'), /25–48/);
+  assert.match(await evaluate('document.getElementById("batch-summary").textContent'),/48 recognized table rows · viewing 25–48 · batch 2 of 2/);
+  assert.equal(await evaluate('document.querySelector("#candidate-rows tr td:nth-child(2)").textContent'),'25');
+  assert.match(await evaluate('document.getElementById("field-title").textContent'), /record 25/);
+  assert.match(await evaluate('document.getElementById("review-title").textContent'), /record 25/);
+  assert.equal(await evaluate('document.getElementById("next-batch").disabled'),true);
+  assert.equal(await evaluate('document.getElementById("previous-batch").disabled'),false);
+  await evaluate('document.getElementById("previous-batch").click()');
+  await waitFor(() => evaluate('document.getElementById("batch-summary").textContent.includes("viewing 1–24") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("counts").textContent'),/0 approved/);
+  await evaluate('document.getElementById("next-batch").click()');
+  await waitFor(() => evaluate('document.getElementById("batch-summary").textContent.includes("viewing 25–48") && !document.getElementById("load").disabled'));
+  if (process.env.LAB_SCREENSHOT_DIR) {
+    await evaluate('document.getElementById("correction-panel").open=false;window.scrollTo(0,0)');
+    await send("Emulation.setDeviceMetricsOverride",{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+    const batchShot=await send("Page.captureScreenshot",{captureBeyondViewport:true});
+    await writeFile(join(process.env.LAB_SCREENSHOT_DIR,"batch-navigation.png"),Buffer.from(batchShot.data,"base64"));
+  }
+
   assert.equal(await evaluate('document.querySelectorAll("#history li").length'), 0);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
   assert.equal(await evaluate('document.getElementById("source-text").hasAttribute("maxlength")'), false);

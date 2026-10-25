@@ -1418,9 +1418,9 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 <header class="top"><div><a class="eyebrow" href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><p class="hint">Paste a page. Review what matters. Export your data.</p></div><span class="badge">Local review workspace</span></header>
 <details class="card" id="input-panel" open><summary>1. Add source text</summary><form id="custom-input"><label for="source-text">Paste a passage or full page</label><textarea id="source-text" required placeholder="Paste your page here. Columns are suggested automatically."></textarea><p class="hint">Up to 64,000 characters in automatic mode. New text starts a new review.</p><details><summary>Source and extraction options</summary><label for="source-url">Source URL (optional reference, never fetched)</label><input id="source-url" type="url" placeholder="https://example.org/article"><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Automatically detect tables and facts</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"><p class="hint">Use lowercase names and underscores. This mode accepts simple name/number pairs.</p></fieldset></details><button id="extract" type="submit">Preview suggested records</button></form><details><summary>Try an example</summary><div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load" type="button" class="secondary">Load example</button></div></details></details>
 <details class="card session-tools"><summary>Save or open a review</summary><div class="bar"><button id="save-session" type="button">Save review session</button><form id="restore-form" class="bar"><label for="session-file">Saved session JSON</label><input id="session-file" type="file" accept=".json,application/json" required><button id="restore-session" type="submit" class="secondary">Open saved session</button></form></div><p class="hint">Continue on another computer with a saved session. Files include full source and review history. Imported reviewers are self-declared. Reloading without saving clears your review.</p></details>
-<section id="page-sections" class="card" hidden><div class="bar"><label for="dataset">Page section</label><select id="dataset"></select><button id="open-section" type="button" class="secondary">Open selected section</button></div><p class="hint">Save this section's review before switching.</p><details><summary>Section scope and retained page</summary><p id="page-scope" class="hint"></p><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
+<section id="page-sections" class="card" hidden><h2 id="batch-summary"></h2><div class="bar"><button id="previous-batch" type="button" class="secondary">Previous batch</button><button id="next-batch" type="button" class="secondary">Next batch</button></div><div class="bar"><label for="dataset">Page section</label><select id="dataset"></select><button id="open-section" type="button" class="secondary">Open selected section</button></div><p class="hint">Switching starts a new review. Save this section's review before switching; approvals do not carry between batches.</p><details><summary>Section scope and retained page</summary><p id="page-scope" class="hint"></p><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
 <p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
-<section id="workspace" hidden><details id="mapping-panel" class="card"><summary>Column mapping \xB7 suggested automatically</summary><p id="mapping-notice" class="hint"></p><form id="mapping-form"><div class="scroll"><table><thead><tr><th>Source heading</th><th>Export column</th><th>Format</th><th>Sample values</th></tr></thead><tbody id="mapping-columns"></tbody></table></div><p id="mapping-issues" class="hint"></p><button id="apply-mapping" type="submit" class="secondary" hidden>Apply column changes \xB7 starts a new review</button></form></details><div class="bar between toolbar"><div><strong id="counts"></strong><p id="queue-summary"></p></div><div class="bar"><button id="approved-csv">Export CSV</button><button id="approved-json" class="secondary">Export JSON</button></div></div>
+<section id="workspace" hidden><details id="mapping-panel" class="card"><summary>Column mapping \xB7 suggested automatically</summary><p id="mapping-notice" class="hint"></p><form id="mapping-form"><div class="scroll"><table><thead><tr><th>Source heading</th><th>Export column</th><th>Format</th><th>Sample values</th></tr></thead><tbody id="mapping-columns"></tbody></table></div><p id="mapping-issues" class="hint"></p><button id="apply-mapping" type="submit" class="secondary" hidden>Apply column changes \xB7 starts a new review</button></form></details><div class="bar between toolbar"><div><strong id="counts"></strong><p id="queue-summary"></p><p id="export-scope" class="hint"></p></div><div class="bar"><button id="approved-csv">Export CSV</button><button id="approved-json" class="secondary">Export JSON</button></div></div>
 <div class="review-layout"><section class="card preview" aria-labelledby="candidates-title"><div class="bar between"><h2 id="candidates-title">2. Review records</h2><label for="record-filter">Show <select id="record-filter"><option value="all">All records</option><option value="attention">Needs individual attention</option><option value="pending">Pending reviews</option></select></label></div><p class="hint">Click a value to inspect its source. Checked table rows can be approved together.</p><div class="scroll"><table><caption>Records in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
 <section id="batch-panel" class="batch" hidden><div class="bar between"><strong id="batch-count">No rows selected</strong><div class="bar"><button id="select-eligible" class="secondary" type="button">Select eligible rows</button><button id="clear-selection" class="secondary" type="button">Clear selection</button></div></div><p id="batch-help" class="hint"></p><form id="batch-form"><div class="batch-fields"><div><label for="batch-reviewer">Reviewer name</label><input id="batch-reviewer" required maxlength="80" autocomplete="off"></div><div><label for="batch-note">Batch review note</label><input id="batch-note" required maxlength="900" placeholder="What did you check about this table?"></div></div><label class="check"><input id="batch-confirm" type="checkbox"><span>I checked the source header mapping and confirm that the selected rows use it correctly.</span></label><button id="approve-batch" type="submit">Approve selected rows</button></form><p class="hint">This records a human batch decision. Prose, corrections and flagged rows require individual review.</p></section>
 <details><summary>How this was extracted</summary><p id="interpretation-summary" class="hint"></p><button id="revalidate" class="secondary">Revalidate evidence</button><p class="hint">Rules suggest records; matching text alone does not prove the relationship between values. No automatic acceptance is enabled.</p></details></section>
@@ -1449,6 +1449,10 @@ var lab_client_default = `"use strict";
   };
   const selected = () =>
     state.view?.validation.records.find((row) => row.id === state.rowId);
+  function recordNumber(row) {
+    const scope=state.view?.document?.selected_scope;
+    return scope?.kind === "table_batch" && /^row-\\d+$/.test(row.id) ? String(scope.row_start+Number(row.id.slice(4))-1) : row.id.replace(/^row-/, "");
+  }
   const columnLabels = {
     measure: "Measure", value: "Value", unit: "Unit", qualifier: "Qualifier", entity_name: "Name", corps_name: "Corps", score: "Score",
     occupational_group: "Occupational group", occupation: "Occupation", employment_count: "Jobs", location_quotient: "Location quotient",
@@ -1503,6 +1507,8 @@ var lab_client_default = `"use strict";
     for (const input of document.querySelectorAll('#mapping-columns input, #mapping-columns select')) input.disabled = state.busy;
     $("apply-mapping").disabled = state.busy || !state.view?.column_mapping?.editable;
     for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode", "session-file", "restore-session"]) $(id).disabled = state.busy;
+    $("previous-batch").disabled = state.busy || !state.view?.document?.selected_scope?.previous_id;
+    $("next-batch").disabled = state.busy || !state.view?.document?.selected_scope?.next_id;
     $("dataset").disabled = state.busy || !state.view?.document;
     $("open-section").disabled = state.busy || !state.view?.document;
     $("record-filter").disabled = state.busy || !state.view;
@@ -1556,8 +1562,8 @@ var lab_client_default = `"use strict";
         : blocking(row)
           ? "Cannot approve this record: " + blockers(row).map((issue) => issue.message).join(" ") + " You can reject it or leave it pending."
           : missing.length
-            ? "To approve " + row.id + ": " + missing.join("; ") + "."
-            : "Ready to approve " + row.id + ". Approval confirms that you checked the values against their source.";
+            ? "To approve record " + recordNumber(row) + ": " + missing.join("; ") + "."
+            : "Ready to approve record " + recordNumber(row) + ". Approval confirms that you checked the values against their source.";
   }
   async function request(path, body) {
     const response = await fetch(path, {
@@ -1675,12 +1681,12 @@ var lab_client_default = `"use strict";
         if (queue().structured) {
           const cell = document.createElement("td"), check = document.createElement("input");
           check.type = "checkbox"; check.dataset.record = row.id;
-          check.setAttribute("aria-label", "Select " + row.id + " for batch review");
+          check.setAttribute("aria-label", "Select record " + recordNumber(row) + " for batch review");
           check.checked = state.checked.has(row.id); check.disabled = !queue().eligible_ids.includes(row.id);
           check.onchange = () => { if (check.checked) state.checked.add(row.id); else state.checked.delete(row.id); $("batch-confirm").checked = false; controls(); };
           cell.append(check); tr.append(cell);
         }
-        tr.append(text("td", row.id.replace(/^row-/, "")));
+        const recordCell=text("td",recordNumber(row));recordCell.title="Section record ID: "+row.id;tr.append(recordCell);
         for (const f of columns) {
           const td = document.createElement("td"),
             button = text("button", displayValue(row, f), "value");
@@ -1690,7 +1696,7 @@ var lab_client_default = `"use strict";
           button.dataset.field = f.name;
           button.setAttribute(
             "aria-label",
-            "Inspect " + f.name + " for " + row.id,
+            "Inspect " + f.name + " for record " + recordNumber(row),
           );
           button.setAttribute(
             "aria-pressed",
@@ -1732,7 +1738,7 @@ var lab_client_default = `"use strict";
       return;
     }
     $("field-title").textContent =
-      columnLabel(state.field) + " \xB7 record " + row.id.replace(/^row-/, "");
+      columnLabel(state.field) + " \xB7 record " + recordNumber(row);
     const evidence = [];
     for (const e of field.evidence) {
       const reference = document.createElement("details");
@@ -1768,8 +1774,8 @@ var lab_client_default = `"use strict";
       list,
     );
     $("review-title").textContent =
-      "Review " +
-      row.id +
+      "Review record " +
+      recordNumber(row) +
       " \xB7 " +
       (labels[row.review_status] || row.review_status);
 
@@ -1793,12 +1799,20 @@ var lab_client_default = `"use strict";
         const option = text("option", d.label); option.value = d.id; return option;
       }));
       $("dataset").value = doc.selected_id;
+      const scope=doc.selected_scope;
+      $("batch-summary").textContent=scope.kind === "table_batch" ? scope.table_rows+" recognized table rows \xB7 viewing "+scope.row_start+"\u2013"+scope.row_end+" \xB7 batch "+scope.batch_number+" of "+scope.batch_count : "Other page text \xB7 current section only";
+      $("previous-batch").hidden=$("next-batch").hidden=scope.kind !== "table_batch" || scope.batch_count<2;
       $("page-scope").textContent = doc.datasets.length + " sections available. " + doc.notice;
       $("full-page").textContent = doc.text;
     }
     renderMapping();
     $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
+    const batch=state.view.document?.selected_scope?.kind === "table_batch";
+    const scopeLabel=batch?"current batch":state.view.document?"current section":"current review";
+    $("approved-csv").textContent="Export approved CSV"+(batch?" \xB7 this batch":"");
+    $("approved-json").textContent="Export approved JSON"+(batch?" \xB7 this batch":"");
+    $("export-scope").textContent="Exports contain "+c.approved+" approved records from the "+scopeLabel+" only. "+(!c.approved?"CSV currently contains column headers only. ":"")+(state.view.document?"Other batches and sections are not combined. JSON also retains the full source text.":"JSON also retains source text.");
     $("counts").textContent =
       c.candidates +
       (c.candidates === 1 ? " candidate \xB7 " : " candidates \xB7 ") +
@@ -1807,7 +1821,7 @@ var lab_client_default = `"use strict";
       c.rejected +
       " rejected \xB7 " +
       c.pending +
-      " pending";
+      " pending" + (state.view.document ? " \xB7 current " + (batch ? "batch" : "section") + " only" : "");
     const q = queue();
     $("queue-summary").textContent = !c.candidates ? "No records suggested. Inspect the source or add a record manually." : !c.pending ? "Review complete. Approved records are ready to export." : q.eligible_ids.length + " ready for batch review \xB7 " + q.exception_ids.length + " exceptions \xB7 " + q.individual_ids.length + " need individual review";
     renderTable();
@@ -1899,15 +1913,18 @@ var lab_client_default = `"use strict";
   $("edit-selected").onclick = () => editCandidate();
   $("add-record").onclick = () => editCandidate(true);
   $("text-mode").onchange = controls;
-  $("open-section").onclick = () => perform(async () => {
+  function openSection(id) { return perform(async () => {
     const response = await request("/api/interpretation/start", {
       example_id: "custom-text", mode: "auto", source: state.view.job.document.source,
-      dataset_id: $("dataset").value,
+      dataset_id: id,
     });
     state.view = await response.json(); state.rowId = null; state.field = null;
     clearDecision(); render(); editCandidate();
     say("Opened selected section. This is a new review session; other sections are not included in its approved records.");
-  });
+  }); }
+  $("open-section").onclick = () => openSection($("dataset").value);
+  $("previous-batch").onclick = () => { const id=state.view?.document?.selected_scope?.previous_id;if(id)openSection(id); };
+  $("next-batch").onclick = () => { const id=state.view?.document?.selected_scope?.next_id;if(id)openSection(id); };
   $("mapping-form").onsubmit = event => {
     event.preventDefault();
     if (!state.view?.column_mapping?.editable) return;
@@ -2263,6 +2280,20 @@ async function documentInfo(job) {
   return { plan, selected, hash: await digest(plan.text), original_hash: await digest(job.document.source.text) };
 }
 function publicDocument(info, job) {
+  const selected = info.selected;
+  const batches = selected.kind === "prose" ? [] : info.plan.datasets.filter((d) => d.kind === selected.kind && d.source_map[0].document_start === selected.source_map[0].document_start);
+  const index = batches.findIndex((d) => d.id === selected.id);
+  const start = batches.slice(0, index).reduce((n, d) => n + d.row_count, 0) + 1;
+  const selected_scope = batches.length ? {
+    kind: "table_batch",
+    row_start: start,
+    row_end: start + selected.row_count - 1,
+    table_rows: batches.reduce((n, d) => n + d.row_count, 0),
+    batch_number: index + 1,
+    batch_count: batches.length,
+    previous_id: batches[index - 1]?.id ?? null,
+    next_id: batches[index + 1]?.id ?? null
+  } : { kind: "prose", previous_id: null, next_id: null };
   return {
     text: info.plan.text,
     text_hash: info.hash,
@@ -2270,6 +2301,7 @@ function publicDocument(info, job) {
     url: job.packet.source.url,
     selected_id: info.selected.id,
     source_map: info.selected.source_map,
+    selected_scope,
     datasets: info.plan.datasets.map((d) => ({ id: d.id, label: d.label, row_count: d.row_count, kind: d.kind })),
     notice: "Only the selected section is parsed/reviewed/exported as current records. The full page is retained; other sections are not implicitly approved. Switching sections starts a new review session."
   };

@@ -508,6 +508,11 @@ test('full copied page is split into bounded independent table batches and prose
       }
     }
     const [shares, jobs1, jobs2, prose] = selectedViews;
+    assert.deepEqual(jobs1.document.selected_scope,{kind:'table_batch',row_start:1,row_end:24,table_rows:48,batch_number:1,batch_count:2,previous_id:null,next_id:'section-3'});
+    assert.deepEqual(jobs2.document.selected_scope,{kind:'table_batch',row_start:25,row_end:48,table_rows:48,batch_number:2,batch_count:2,previous_id:'section-2',next_id:null});
+    assert.equal(shares.document.selected_scope.table_rows,23);
+    assert.equal(shares.document.selected_scope.next_id,null);
+    assert.equal(prose.document.selected_scope.kind,'prose');
     assert.equal(jobs1.counts.candidates, 24);
     assert.equal(jobs2.counts.candidates, 24);
     assert.equal(shares.counts.candidates + jobs1.counts.candidates + jobs2.counts.candidates, 71);
@@ -528,6 +533,7 @@ test('full copied page is split into bounded independent table batches and prose
     assert.equal(exported.document.selected_id, jobs1.document.selected_id);
     assert.equal(exported.document.text, first.document.text);
     assert.equal(exported.validation.records.length, 1);
+    assert.deepEqual(exported.document.selected_scope,jobs1.document.selected_scope);
     assert.equal((await action(mf, reviewed.job, 'revalidate')).status, 200);
     const tampered = structuredClone(reviewed.job);
     tampered.document.dataset_id = first.document.datasets[2].id;
