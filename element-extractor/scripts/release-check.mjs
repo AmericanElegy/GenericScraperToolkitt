@@ -18,6 +18,7 @@ try {
     ['Workers regression suite', ['--test']],
     ['Table browser workflow', ['scripts/check-browser.mjs']],
     ['Interpretation browser workflow', ['scripts/check-lab-browser.mjs']],
+    ['JavaScript renderer browser workflow', ['scripts/check-renderer-browser.mjs']],
     ['Cloudflare bundle dry run', ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--dry-run']],
   ]) {
     process.stdout.write('\nChecking: ' + name + '\n');
