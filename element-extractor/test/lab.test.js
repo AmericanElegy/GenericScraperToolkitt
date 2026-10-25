@@ -687,3 +687,59 @@ test('new prose grammar preserves the measured subject instead of confusing it w
     assert.equal((await action(mf, page.job, 'revalidate')).status, 200);
   } finally { await mf.dispose(); }
 });
+
+
+test('automatic column mapping preserves units, identifiers, exact evidence and reviewed exports without configuration', async () => {
+ const {mf,calls}=await setup();
+ try {
+  const text='Name\tShare (%)\tPay ($)\tZIP Code\nAlpha\t12.6%\t$1,234.50\t00123\nBeta\t9.9%\t$31.59\t04567';
+  let value=await (await autoText(mf,text)).json();
+  assert.equal(value.job.parser_version,'mapped-table-v1');
+  assert.equal(value.counts.candidates,2);
+  assert.deepEqual(value.column_mapping.columns.map(c=>c.kind),['text','percent','dollars','text']);
+  const row=value.validation.records[0];
+  assert.equal(row.fields.share_percent.value,12.6);
+  assert.equal(row.fields.pay_dollars.value,1234.5);
+  assert.equal(row.fields.zip_code.value,'00123');
+  assert.deepEqual(value.review_queue.eligible_ids,['row-1','row-2']);
+  for(const r of value.validation.records) for(const f of Object.values(r.fields)) {
+   assert.equal(f.issues.length,0);
+   for(const e of f.evidence) assert.equal(text.slice(e.source_start,e.source_end),e.quote);
+  }
+  value=await (await action(mf,value.job,'review_batch',{record_ids:['row-1','row-2'],reviewer:'Test',note:'Checked headers and row units.',confirmed_mapping:true})).json();
+  assert.equal(value.counts.approved,2);
+  const csv=await (await action(mf,value.job,'export',{format:'csv'})).text();
+  assert.match(csv,/"00123"/);assert.match(csv,/"1234.5"/);
+  const saved=await (await action(mf,value.job,'save')).json();
+  const restored=await post(mf,'/api/interpretation/action',{action:'restore',session:saved});
+  assert.equal(restored.status,200);assert.equal((await restored.json()).counts.approved,2);
+  assert.equal(calls(),0);
+ } finally {await mf.dispose();}
+});
+
+test('mapping dialects, malformed rows and type changes do not silently accept invalid data or retain approvals', async () => {
+ const {mf}=await setup();
+ try {
+  for(const text of ['Name,Score\nAlpha,98.6\nBeta,95.1','| Name | Score |\n| --- | --- |\n| Alpha | 98.6 |\n| Beta | 95.1 |']) {
+   const v=await (await autoText(mf,text)).json();assert.equal(v.counts.candidates,2);assert.equal(v.validation.records[0].fields.score.value,98.6);
+  }
+  const text='Name\tShare (%)\nAlpha\t120%\nBeta\tunknown\nBroken\t1\textra';
+  let value=await (await autoText(mf,text)).json();
+  assert.equal(value.counts.candidates,2);assert.equal(value.column_mapping.skipped_rows.length,1);
+  assert.match(value.extraction.message,/1 malformed rows/);
+  assert.equal(value.review_queue.eligible_ids.length,0);
+  assert.equal((await action(mf,value.job,'review_batch',{record_ids:['row-1'],reviewer:'Test',note:'test',confirmed_mapping:true})).status,400);
+  const start=mapping=>post(mf,'/api/interpretation/start',{example_id:'custom-text',mode:'auto',source:{text},mapping});
+  const response=await start([{name:'label',kind:'text'},{name:'raw_share',kind:'text'}]);
+  assert.equal(response.status,200);value=await response.json();
+  assert.equal(value.validation.records[0].fields.raw_share.value,'120%');assert.equal(value.events?.length??value.job.events.length,0);
+  assert.equal((await start([{name:'same',kind:'text'},{name:'same',kind:'text'}])).status,400);
+  assert.equal((await start([{name:'label',kind:'text'},{name:'raw_share',kind:'number'}])).status,200);
+  const conflicted=await (await start([{name:'label',kind:'text'},{name:'raw_share',kind:'number'}])).json();
+  assert.equal(conflicted.review_queue.eligible_ids.length,0);
+  const tampered=structuredClone(value.job);tampered.mapping[1].kind='number';
+  assert.equal((await action(mf,tampered,'revalidate')).status,400);
+  const quoted=await (await autoText(mf,'Name,Score\n"Alpha, Inc",98.6')).json();
+  assert.notEqual(quoted.job.parser_version,'mapped-table-v1');
+ } finally {await mf.dispose();}
+});

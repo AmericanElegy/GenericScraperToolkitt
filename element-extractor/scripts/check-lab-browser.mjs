@@ -366,6 +366,27 @@ try {
   await evaluate('document.getElementById("note").value="Confirmed establishments rate in the BLS passage.";document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"));document.getElementById("approve").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled'));
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
+  // The new generic path requires no column entry or manual cleanup.
+  const mappedText = 'Name\tShare (%)\tPay ($)\tZIP Code\nAlpha\t12.6%\t$1,234.50\t00123\nBeta\t9.9%\t$31.59\t04567';
+  await evaluate('document.getElementById("source-text").value='+JSON.stringify(mappedText)+';document.getElementById("extract").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("2 candidates") && !document.getElementById("load").disabled'));
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=share_percent]").textContent'), '12.6%');
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=pay_dollars]").textContent'), '$1,234.50');
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=zip_code]").textContent'), '00123');
+  await evaluate('document.getElementById("mapping-panel").open=true;document.getElementById("select-eligible").click();document.getElementById("batch-reviewer").value="Browser Mapping Test";document.getElementById("batch-note").value="Checked source headings and units.";document.getElementById("batch-confirm").checked=true;document.getElementById("batch-confirm").dispatchEvent(new Event("change"));document.getElementById("approve-batch").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("2 approved") && !document.getElementById("load").disabled'));
+  await evaluate(`document.querySelector('#mapping-columns input[data-index="0"]').value="company";document.getElementById("apply-mapping").click()`);
+  await waitFor(() => evaluate('document.getElementById("status").textContent.includes("Column mapping applied") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("counts").textContent'), /0 approved/);
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=company]").textContent'),'Alpha');
+  assert.equal(await evaluate('document.querySelectorAll("#history li").length'),0);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true);
+  if (process.env.LAB_SCREENSHOT_DIR) {
+    await evaluate('document.getElementById("correction-panel").open=false;window.scrollTo(0,0)');
+    await send("Emulation.setDeviceMetricsOverride",{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+    const mappedShot=await send("Page.captureScreenshot",{captureBeyondViewport:true});
+    await writeFile(join(process.env.LAB_SCREENSHOT_DIR,"column-mapping.png"),Buffer.from(mappedShot.data,"base64"));
+  }
   // Reproduce the recording's exact joined caption/header via real browser paste.
   const flattened = await readFile(new URL('../test/fixtures/pasted-wage-caption.txt', import.meta.url), 'utf8');
   await evaluate('document.getElementById("source-text").value='+JSON.stringify(flattened)+';document.getElementById("extract").click()');

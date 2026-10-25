@@ -33,6 +33,23 @@
     }
     return rows;
   }
+  function renderMapping() {
+    const mapping = state.view.column_mapping;
+    $("mapping-notice").textContent = mapping.notice;
+    $("apply-mapping").hidden = !mapping.editable;
+    $("mapping-issues").textContent = mapping.skipped_rows.length ? mapping.skipped_rows.length + " rows were not mapped: " + mapping.skipped_rows.map(r => r.quote + " — " + r.reason).join("; ") : "No rows were skipped by the column mapper. Review source evidence before approving; complete fact coverage is not guaranteed.";
+    $("mapping-columns").replaceChildren(...mapping.columns.map((c,index) => {
+      const tr = document.createElement("tr");
+      const source = text("td",c.source_label); source.title = c.reason || "Source column";
+      const name = document.createElement("input"); name.value=c.name; name.dataset.index=index; name.dataset.mapping="name"; name.required=true; name.maxLength=40; name.pattern="[a-z][a-z0-9_]*"; name.setAttribute("aria-label","Export column for " + c.source_label);
+      const kind = document.createElement("select"); kind.dataset.index=index; kind.dataset.mapping="kind"; kind.setAttribute("aria-label","Format for " + c.source_label);
+      for (const [value,label] of [["text","Text"],["number","Number"],["percent","Percent"],["dollars","Dollars ($)"]]) { const o=text("option",label);o.value=value;kind.append(o); }
+      kind.value=c.kind;
+      const named=document.createElement("td"),typed=document.createElement("td");
+      if (mapping.editable) {named.append(name);typed.append(kind);} else {named.textContent=c.name;typed.textContent=c.kind;}
+      tr.append(source,named,typed,text("td",c.samples.map(v => v ?? "—").join(" · ")));return tr;
+    }));
+  }
   function say(message) {
     $("status").textContent = message;
   }
@@ -49,6 +66,8 @@
     return blockers(row).length > 0;
   }
   function controls() {
+    for (const input of document.querySelectorAll('#mapping-columns input, #mapping-columns select')) input.disabled = state.busy;
+    $("apply-mapping").disabled = state.busy || !state.view?.column_mapping?.editable;
     for (const id of ["load", "example", "extract", "source-text", "source-url", "name-column", "number-column", "text-mode", "session-file", "restore-session"]) $(id).disabled = state.busy;
     $("dataset").disabled = state.busy || !state.view?.document;
     $("open-section").disabled = state.busy || !state.view?.document;
@@ -193,9 +212,10 @@
   function displayValue(row, field) {
     const value = row.fields[field.name].value;
     if (value === null || value === undefined) return "—";
-    if (typeof value === "number" && /^(?:hourly|annual)_wage(?:_.*)?_dollars$/.test(field.name))
+    const mappedKind = state.view.column_mapping?.editable ? state.view.column_mapping.columns.find(c => c.name === field.name)?.kind : null;
+    if (typeof value === "number" && (mappedKind === "dollars" || /^(?:hourly|annual)_wage(?:_.*)?_dollars$/.test(field.name)))
       return "$" + new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 20 }).format(value);
-    if (typeof value === "number" && /^employment_percent_/.test(field.name)) return value + "%";
+    if (typeof value === "number" && (mappedKind === "percent" || /^employment_percent_/.test(field.name))) return value + "%";
     if (typeof value === "number" && field.number_format === "en-US-grouped") return new Intl.NumberFormat("en-US", { maximumFractionDigits: 20 }).format(value);
     return value;
   }
@@ -342,6 +362,7 @@
       $("page-scope").textContent = doc.datasets.length + " sections available. " + doc.notice;
       $("full-page").textContent = doc.text;
     }
+    renderMapping();
     $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
     $("counts").textContent =
@@ -453,6 +474,21 @@
     clearDecision(); render(); editCandidate();
     say("Opened selected section. This is a new review session; other sections are not included in its approved records.");
   });
+  $("mapping-form").onsubmit = event => {
+    event.preventDefault();
+    if (!state.view?.column_mapping?.editable) return;
+    perform(async () => {
+      const source={text:state.view.job.packet.source.text,url:state.view.job.packet.source.url};
+      const mapping=state.view.column_mapping.columns.map((c,i) => ({
+        name:document.querySelector('#mapping-columns input[data-index="'+i+'"]').value.trim(),
+        kind:document.querySelector('#mapping-columns select[data-index="'+i+'"]').value,
+      }));
+      const response=await request("/api/interpretation/start",{example_id:"custom-text",source,mode:"auto",mapping});
+      state.view=await response.json();state.rowId=null;state.field=null;state.checked.clear();
+      clearDecision();render();editCandidate();
+      say("Column mapping applied to a new review. No previous approval was carried over. " + state.view.extraction.message);
+    });
+  };
   $("custom-input").onsubmit = (event) => {
     event.preventDefault();
     perform(async () => {
