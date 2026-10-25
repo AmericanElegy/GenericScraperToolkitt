@@ -1,7 +1,8 @@
 // A bounded pasted-table layout, recognized by its explicit grouped headers.
 // No source URL, city-specific data or external requests are used.
 import { ContractError, canonical, LIMITS } from './pipeline.js';
-export const WAGE_VERSION = 'pasted-wage-table-v1';
+export const WAGE_VERSION = 'pasted-wage-table-v2';
+export const LEGACY_WAGE_VERSION = 'pasted-wage-table-v1';
 export const WAGE_SCHEMA = { fields: [
   { name: 'occupational_group', type: 'string', required: true },
   { name: 'employment_percent_national', type: 'number', required: true, min: 0, max: 100 },
@@ -9,17 +10,20 @@ export const WAGE_SCHEMA = { fields: [
   { name: 'hourly_wage_national_dollars', type: 'number', required: true, min: 0 },
   { name: 'hourly_wage_local_dollars', type: 'number', required: true, min: 0 },
 ] };
-export function wageHeader(packet) {
+export function wageHeader(packet, version = WAGE_VERSION) {
   const matches = packet.passages.map(p => {
     const normalized = p.text.replace(/\s+/g, ' ').trim();
-    const m = normalized.match(/^Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
+    // Browser copying can join the caption/year directly to the first heading.
+    // Only a recognizable Table caption may precede the exact grouped headings.
+    const legacy = normalized.match(/^Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
+    const m = version === LEGACY_WAGE_VERSION ? legacy : normalized.match(/^(?:Table\s+[A-Z0-9]+[.:]\s+.{1,700}?)?Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
     return m ? { passage: p, national: 'United States', local: m[2] } : null;
   }).filter(Boolean);
   if (matches.length > 1) throw new ContractError('ambiguous_table_header', 'More than one wage-table header was found. Paste one table at a time.');
   return matches[0] || null;
 }
-export function extractWageTable(packet) {
-  const header = wageHeader(packet);
+export function extractWageTable(packet, version = WAGE_VERSION) {
+  const header = wageHeader(packet, version);
   if (!header || canonical(packet.schema) !== canonical(WAGE_SCHEMA))
     throw new ContractError('wage_table_schema', 'The pasted wage table needs its explicit grouped percentage and hourly-dollar headers.');
   const records = [], outcomes = [];
@@ -28,11 +32,14 @@ export function extractWageTable(packet) {
     const ids = [];
     if (p.id !== header.passage.id) {
       let cursor = 0;
-      for (const line of p.text.split('\n')) {
+      // A browser may put the label and its four cells on separate lines.
+      // Try one complete paragraph first; numeric-free labels prevent merging rows.
+      const wrapped = version !== LEGACY_WAGE_VERSION && p.text.trim().match(/^([^\d]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+\$?(\d+(?:\.\d+)?)\s+\$?(\d+(?:\.\d+)?)$/);
+      for (const line of wrapped ? [p.text] : p.text.split('\n')) {
         const quote = line.trim();
         const pos = p.text.indexOf(quote, cursor); cursor = pos + quote.length;
         // Exactly four values, in the order established by the grouped header.
-        const m = quote.match(/^(.+?)[ \t]+(\d+(?:\.\d+)?)[ \t]+(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)$/);
+        const m = wrapped || quote.match(/^(.+?)[ \t]+(\d+(?:\.\d+)?)[ \t]+(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)$/);
         if (!m || !/[\p{L}]/u.test(m[1]) || /\d$/.test(m[1]) || /https?:\/\//i.test(quote)) continue;
         if (records.length >= LIMITS.records) throw new ContractError('record_limit', 'More than 50 table rows. Paste a smaller table.');
         if (quote.length > LIMITS.quote || header.passage.text.length > LIMITS.quote) throw new ContractError('quote_limit', 'Table row or header exceeds the evidence limit.');
@@ -40,7 +47,7 @@ export function extractWageTable(packet) {
         while (found >= 0 && found < pos) { occurrence++; found = p.text.indexOf(quote, found + 1); }
         const span = { passage_id: p.id, quote, occurrence };
         const fields = Object.fromEntries(names.map((name, i) => [name, {
-          value: i === 0 ? m[1] : Number(m[i + 1]),
+          value: i === 0 ? (version === LEGACY_WAGE_VERSION ? m[1] : m[1].replace(/\s+/g, ' ').trim()) : Number(m[i + 1]),
           evidence: i === 0 ? [span] : [span, { passage_id: header.passage.id, quote: header.passage.text, occurrence: 0 }],
         }]));
         const id = 'row-' + (records.length + 1); records.push({ id, fields }); ids.push(id);

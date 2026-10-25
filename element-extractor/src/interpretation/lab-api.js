@@ -1,6 +1,6 @@
 import { reviewQueue } from './review-queue.js';
 import { planPage, needsPageIntake, extractPageTable, PAGE_TABLE_VERSION, documentEvidence } from './page-intake.js';
-import { wageHeader, extractWageTable, WAGE_SCHEMA, WAGE_VERSION } from './wage-table.js';
+import { wageHeader, extractWageTable, WAGE_SCHEMA, WAGE_VERSION, LEGACY_WAGE_VERSION } from './wage-table.js';
 import { extractProseRules, PROSE_SCHEMA, PROSE_VERSION, LEGACY_PROSE_VERSION } from './prose-rules.js';
 import { extractTextRules } from './text-rules.js';
 import sample from "../../examples/interpretation-scripted.json";
@@ -164,7 +164,7 @@ function originalResponse(job) {
   if (job.example_id !== 'custom-text') return examples[job.example_id].scripted_response;
   if (job.parser_version === 'name-number-v1') return extractTextRules(job.packet);
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
-  if (job.parser_version === WAGE_VERSION) return extractWageTable(job.packet);
+  if ([WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)) return extractWageTable(job.packet, job.parser_version);
   if ([PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version)) return extractProseRules(job.packet, job.parser_version);
   fail('parser_version', 'Unsupported text parser version.');
 }
@@ -221,8 +221,18 @@ async function view(job, result) {
   const info = await documentInfo(job);
   if (info) result.json.validation = documentEvidence(result.json.validation, info.selected, info.plan.text, info.hash);
   const records = result.json.validation.records;
+  const unmatched = result.json.validation.outcomes.filter(o => o.status === 'no_result');
+  const tableLike = /(?:percent of total employment|mean hourly wage|major occupational group)/i.test(job.packet.source.text)
+    || job.packet.passages.some(p => /^.+?\s+\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?$/.test(p.text.trim()));
   return {
     job,
+    extraction: {
+      unmatched_passages: unmatched.length,
+      mapping_unresolved: records.length === 0 && tableLike,
+      message: records.length === 0
+        ? tableLike ? 'Table-like content detected, but column mapping is unresolved. No records extracted. Keep the complete grouped headings with the rows; manual two-column mode cannot represent this table.' : 'No supported relationships found. No records extracted; source text is retained.'
+        : records.length + ' candidate records extracted. ' + (unmatched.length ? unmatched.length + (unmatched.length === 1 ? ' passage produced' : ' passages produced') + ' no records; inspect unmatched source text for omissions.' : 'Inspect the column mapping and evidence before approval. Extraction may still be incomplete.'),
+    },
     ...(info ? { document: publicDocument(info, job) } : {}),
     validation: result.json.validation,
     review_queue: reviewQueue(job, result.json.validation),
@@ -237,7 +247,7 @@ async function view(job, result) {
       columns: job.packet.schema.fields.map(f => f.name),
       explanation: info
         ? 'Full page retained. Current section: ' + info.selected.label + '. Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets.'
-        : job.parser_version === WAGE_VERSION
+        : [WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)
         ? 'Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = ' + wageHeader(job.packet).local + '. Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval.'
         : [PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version)
         ? 'Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding.'

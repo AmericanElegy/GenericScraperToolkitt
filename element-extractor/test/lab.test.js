@@ -398,7 +398,7 @@ test('pasted grouped wage table distinguishes employment percentages from hourly
     let value = await response.json();
     assert.equal(value.counts.candidates, 23);
     assert.match(value.interpretation.explanation, /local = Jacksonville/);
-    assert.equal(value.job.parser_version, 'pasted-wage-table-v1');
+    assert.equal(value.job.parser_version, 'pasted-wage-table-v2');
     const first = value.validation.records[0].fields;
     assert.equal(first.occupational_group.value, 'Total, all occupations');
     assert.equal(first.employment_percent_national.value, 100);
@@ -421,6 +421,49 @@ test('pasted grouped wage table distinguishes employment percentages from hourly
     assert.equal(calls(), 0);
   } finally { await mf.dispose(); }
 });
+test('browser-flattened caption and wrapped headings retain wage mapping, evidence and explicit no-result diagnostics', async () => {
+  const { mf, calls } = await setup();
+  try {
+    const text = await readFile(new URL('./fixtures/pasted-wage-caption.txt', import.meta.url), 'utf8');
+    for (const source of [text, text.replace('group Percent', 'group\nPercent').replace('employment Mean', 'employment\nMean').replace('wage ($) United', 'wage ($)\nUnited')]) {
+      const response = await autoText(mf, source);
+      assert.equal(response.status, 200);
+      let value = await response.json();
+      assert.equal(value.counts.candidates, 23);
+      assert.equal(value.validation.records[0].fields.hourly_wage_local_dollars.value, 31.59);
+      assert.equal(value.validation.records[1].fields.employment_percent_local.value, 7.4);
+      for (const row of value.validation.records) for (const field of Object.values(row.fields)) for (const e of field.evidence)
+        assert.equal(source.slice(e.source_start, e.source_end), e.quote);
+      assert.equal((await action(mf, value.job, 'revalidate')).status, 200);
+      value = await (await action(mf, value.job, 'review', { decision })).json();
+      const csv = await (await action(mf, value.job, 'export', {format:'csv'})).text();
+      assert.match(csv, /"100","100","33.54","31.59"/);
+    }
+    // Saved legacy sessions keep their old candidate response and journal identity.
+    const { extractWageTable, LEGACY_WAGE_VERSION } = await import('../src/interpretation/wage-table.js');
+    const { runInterpretation, scriptedInterpreter } = await import('../src/interpretation/pipeline.js');
+    const old = await (await autoText(mf, text.slice(text.indexOf('Major occupational group')))).json();
+    old.job.parser_version = LEGACY_WAGE_VERSION;
+    old.job.cache_entry = (await runInterpretation(old.job.packet, await scriptedInterpreter(extractWageTable(old.job.packet, LEGACY_WAGE_VERSION)))).cache_entry;
+    const replay = await action(mf, old.job, 'revalidate');
+    assert.equal(replay.status, 200);
+    assert.equal((await replay.json()).counts.candidates, 0);
+    const unknown = await (await autoText(mf, 'Management 7.2 7.4 69.84 65.97')).json();
+    assert.equal(unknown.counts.candidates, 0);
+    assert.equal(unknown.extraction.mapping_unresolved, true);
+    assert.match(unknown.extraction.message, /column mapping is unresolved/);
+    const missingHeader = text.replace('United States Jacksonville United States Jacksonville', 'United States Jacksonville');
+    const ambiguous = await (await autoText(mf, missingHeader)).json();
+    assert.equal(ambiguous.counts.candidates, 0);
+    assert.equal(ambiguous.extraction.mapping_unresolved, true);
+    const partial = await (await autoText(mf, text+'\n\nIncomplete 1 2 3')).json();
+    assert.equal(partial.counts.candidates, 23);
+    assert.equal(partial.extraction.unmatched_passages, 1);
+    assert.match(partial.extraction.message, /1 passage produced no records/);
+    assert.equal(calls(), 0);
+  } finally { await mf.dispose(); }
+});
+
 test('pasted wage mapping needs unambiguous repeated header and complete four-value rows', async () => {
   const { mf } = await setup();
   try {

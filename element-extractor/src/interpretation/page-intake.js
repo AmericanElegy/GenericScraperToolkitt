@@ -35,7 +35,7 @@ function paragraphs(text, start = 0, end = text.length) {
 export function pageHeaders(text) {
   const found = [];
   const specs = [
-    ['shares', /Major occupational group[ \t]+Percent of total employment[ \t]+Mean hourly wage \(\$\)[ \t\n]+(United States[ \t]+([^\n]+?))[ \t]+\1(?=\n|$)/gi],
+    ['shares', /Major occupational group\s+Percent of total employment\s+Mean hourly wage \(\$\)\s+(United States[ \t]+([^\n]+?))\s+\1(?=\n|$)/gi],
     ['employment', /Occupation(?:\(1\))?[ \t]+Employment[ \t]+Mean wages \(\$\)[ \t\n]+Level(?:\(2\))?[ \t]+Location quotient(?:\(3\))?[ \t]+Hourly[ \t]+Annual(?:\(4\))?(?=\n|$)/gi],
   ];
   for (const [kind, re] of specs) for (const m of text.matchAll(re)) {

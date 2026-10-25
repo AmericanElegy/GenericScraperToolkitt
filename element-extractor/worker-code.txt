@@ -3,7 +3,7 @@ var __defProp = Object.defineProperty;
 var __template = (cooked, raw) => __freeze(__defProp(cooked, "raw", { value: __freeze(raw || cooked.slice()) }));
 
 // src/interpretation/review-queue.js
-var tableMethods = /* @__PURE__ */ new Set(["pasted-wage-table-v1", "pasted-page-table-v1"]);
+var tableMethods = /* @__PURE__ */ new Set(["pasted-wage-table-v1", "pasted-wage-table-v2", "pasted-page-table-v1"]);
 var reviewOnly = /* @__PURE__ */ new Set(["association_unverified", "cross_passage_association"]);
 function reviewQueue(job, validation) {
   const structured = tableMethods.has(job.parser_version);
@@ -915,7 +915,8 @@ function extractProseRules(packet, version = PROSE_VERSION) {
 }
 
 // src/interpretation/wage-table.js
-var WAGE_VERSION = "pasted-wage-table-v1";
+var WAGE_VERSION = "pasted-wage-table-v2";
+var LEGACY_WAGE_VERSION = "pasted-wage-table-v1";
 var WAGE_SCHEMA = { fields: [
   { name: "occupational_group", type: "string", required: true },
   { name: "employment_percent_national", type: "number", required: true, min: 0, max: 100 },
@@ -923,17 +924,18 @@ var WAGE_SCHEMA = { fields: [
   { name: "hourly_wage_national_dollars", type: "number", required: true, min: 0 },
   { name: "hourly_wage_local_dollars", type: "number", required: true, min: 0 }
 ] };
-function wageHeader(packet) {
+function wageHeader(packet, version = WAGE_VERSION) {
   const matches = packet.passages.map((p) => {
     const normalized = p.text.replace(/\s+/g, " ").trim();
-    const m = normalized.match(/^Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
+    const legacy = normalized.match(/^Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
+    const m = version === LEGACY_WAGE_VERSION ? legacy : normalized.match(/^(?:Table\s+[A-Z0-9]+[.:]\s+.{1,700}?)?Major occupational group Percent of total employment Mean hourly wage \(\$\) (United States (.+?)) \1$/i);
     return m ? { passage: p, national: "United States", local: m[2] } : null;
   }).filter(Boolean);
   if (matches.length > 1) throw new ContractError("ambiguous_table_header", "More than one wage-table header was found. Paste one table at a time.");
   return matches[0] || null;
 }
-function extractWageTable(packet) {
-  const header = wageHeader(packet);
+function extractWageTable(packet, version = WAGE_VERSION) {
+  const header = wageHeader(packet, version);
   if (!header || canonical(packet.schema) !== canonical(WAGE_SCHEMA))
     throw new ContractError("wage_table_schema", "The pasted wage table needs its explicit grouped percentage and hourly-dollar headers.");
   const records = [], outcomes = [];
@@ -942,11 +944,12 @@ function extractWageTable(packet) {
     const ids = [];
     if (p.id !== header.passage.id) {
       let cursor = 0;
-      for (const line of p.text.split("\n")) {
+      const wrapped = version !== LEGACY_WAGE_VERSION && p.text.trim().match(/^([^\d]+?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+\$?(\d+(?:\.\d+)?)\s+\$?(\d+(?:\.\d+)?)$/);
+      for (const line of wrapped ? [p.text] : p.text.split("\n")) {
         const quote = line.trim();
         const pos = p.text.indexOf(quote, cursor);
         cursor = pos + quote.length;
-        const m = quote.match(/^(.+?)[ \t]+(\d+(?:\.\d+)?)[ \t]+(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)$/);
+        const m = wrapped || quote.match(/^(.+?)[ \t]+(\d+(?:\.\d+)?)[ \t]+(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)[ \t]+\$?(\d+(?:\.\d+)?)$/);
         if (!m || !/[\p{L}]/u.test(m[1]) || /\d$/.test(m[1]) || /https?:\/\//i.test(quote)) continue;
         if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 table rows. Paste a smaller table.");
         if (quote.length > LIMITS.quote || header.passage.text.length > LIMITS.quote) throw new ContractError("quote_limit", "Table row or header exceeds the evidence limit.");
@@ -957,7 +960,7 @@ function extractWageTable(packet) {
         }
         const span = { passage_id: p.id, quote, occurrence };
         const fields = Object.fromEntries(names.map((name, i) => [name, {
-          value: i === 0 ? m[1] : Number(m[i + 1]),
+          value: i === 0 ? version === LEGACY_WAGE_VERSION ? m[1] : m[1].replace(/\s+/g, " ").trim() : Number(m[i + 1]),
           evidence: i === 0 ? [span] : [span, { passage_id: header.passage.id, quote: header.passage.text, occurrence: 0 }]
         }]));
         const id = "row-" + (records.length + 1);
@@ -1021,7 +1024,7 @@ function paragraphs(text, start = 0, end = text.length) {
 function pageHeaders(text) {
   const found = [];
   const specs = [
-    ["shares", /Major occupational group[ \t]+Percent of total employment[ \t]+Mean hourly wage \(\$\)[ \t\n]+(United States[ \t]+([^\n]+?))[ \t]+\1(?=\n|$)/gi],
+    ["shares", /Major occupational group\s+Percent of total employment\s+Mean hourly wage \(\$\)\s+(United States[ \t]+([^\n]+?))\s+\1(?=\n|$)/gi],
     ["employment", /Occupation(?:\(1\))?[ \t]+Employment[ \t]+Mean wages \(\$\)[ \t\n]+Level(?:\(2\))?[ \t]+Location quotient(?:\(3\))?[ \t]+Hourly[ \t]+Annual(?:\(4\))?(?=\n|$)/gi]
   ];
   for (const [kind, re] of specs) for (const m of text.matchAll(re)) {
@@ -1738,7 +1741,7 @@ var lab_client_default = `"use strict";
       });
       state.view = await response.json(); state.rowId = null; state.field = null;
       clearDecision(); render(); editCandidate();
-      say(state.view.document ? "Full page accepted and divided into sections. Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. Preview the suggested columns and records below. No AI calls. Unmatched text remains visible.");
+      say(state.view.document ? "Full page accepted and divided into sections. " + state.view.extraction.message + " Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. " + state.view.extraction.message + " No AI calls.");
     });
   };
   $("correction-form").onsubmit = (event) => {
@@ -2043,7 +2046,7 @@ function originalResponse(job) {
   if (job.example_id !== "custom-text") return examples[job.example_id].scripted_response;
   if (job.parser_version === "name-number-v1") return extractTextRules(job.packet);
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
-  if (job.parser_version === WAGE_VERSION) return extractWageTable(job.packet);
+  if ([WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)) return extractWageTable(job.packet, job.parser_version);
   if ([PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version)) return extractProseRules(job.packet, job.parser_version);
   fail("parser_version", "Unsupported text parser version.");
 }
@@ -2101,8 +2104,15 @@ async function view(job, result) {
   const info = await documentInfo(job);
   if (info) result.json.validation = documentEvidence(result.json.validation, info.selected, info.plan.text, info.hash);
   const records = result.json.validation.records;
+  const unmatched = result.json.validation.outcomes.filter((o) => o.status === "no_result");
+  const tableLike = /(?:percent of total employment|mean hourly wage|major occupational group)/i.test(job.packet.source.text) || job.packet.passages.some((p) => /^.+?\s+\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?$/.test(p.text.trim()));
   return {
     job,
+    extraction: {
+      unmatched_passages: unmatched.length,
+      mapping_unresolved: records.length === 0 && tableLike,
+      message: records.length === 0 ? tableLike ? "Table-like content detected, but column mapping is unresolved. No records extracted. Keep the complete grouped headings with the rows; manual two-column mode cannot represent this table." : "No supported relationships found. No records extracted; source text is retained." : records.length + " candidate records extracted. " + (unmatched.length ? unmatched.length + (unmatched.length === 1 ? " passage produced" : " passages produced") + " no records; inspect unmatched source text for omissions." : "Inspect the column mapping and evidence before approval. Extraction may still be incomplete.")
+    },
     ...info ? { document: publicDocument(info, job) } : {},
     validation: result.json.validation,
     review_queue: reviewQueue(job, result.json.validation),
@@ -2115,7 +2125,7 @@ async function view(job, result) {
     interpretation: {
       method: job.parser_version || "fictional-scripted-example",
       columns: job.packet.schema.fields.map((f) => f.name),
-      explanation: info ? "Full page retained. Current section: " + info.selected.label + ". Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets." : job.parser_version === WAGE_VERSION ? "Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = " + wageHeader(job.packet).local + ". Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval." : [PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version) ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
+      explanation: info ? "Full page retained. Current section: " + info.selected.label + ". Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets." : [WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version) ? "Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = " + wageHeader(job.packet).local + ". Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval." : [PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version) ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
     },
     notice: "Rule-based or scripted candidates, with optional human corrections. No AI inference. Session-only, self-declared review; not an authenticated audit service."
   };

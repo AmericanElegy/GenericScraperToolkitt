@@ -366,6 +366,16 @@ try {
   await evaluate('document.getElementById("note").value="Confirmed establishments rate in the BLS passage.";document.getElementById("confirm").checked=true;document.getElementById("confirm").dispatchEvent(new Event("change"));document.getElementById("approve").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("1 approved") && !document.getElementById("load").disabled'));
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'), true);
+  // Reproduce the recording's exact joined caption/header via real browser paste.
+  const flattened = await readFile(new URL('../test/fixtures/pasted-wage-caption.txt', import.meta.url), 'utf8');
+  await evaluate('document.getElementById("source-text").value='+JSON.stringify(flattened)+';document.getElementById("extract").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("23 candidates") && !document.getElementById("load").disabled'));
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-1][data-field=hourly_wage_local_dollars]").textContent'), '$31.59');
+  assert.equal(await evaluate('document.querySelector("button[data-record=row-2][data-field=employment_percent_local]").textContent'), '7.4%');
+  assert.match(await evaluate('document.getElementById("status").textContent'), /23 candidate records extracted/);
+  await evaluate('document.getElementById("source-text").value="Management 7.2 7.4 69.84 65.97";document.getElementById("extract").click()');
+  await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("0 candidates") && !document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("status").textContent'), /column mapping is unresolved.*No records extracted/);
   const wageText = await readFile(new URL("../test/fixtures/pasted-wage-table.txt", import.meta.url), "utf8");
   await evaluate('document.getElementById("source-text").value=' + JSON.stringify(wageText) + ';document.getElementById("extract").click()');
   await waitFor(() => evaluate('document.getElementById("counts").textContent.includes("23 candidates") && !document.getElementById("load").disabled'));

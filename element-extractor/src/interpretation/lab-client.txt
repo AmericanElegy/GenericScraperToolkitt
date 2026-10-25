@@ -469,7 +469,7 @@
       });
       state.view = await response.json(); state.rowId = null; state.field = null;
       clearDecision(); render(); editCandidate();
-      say(state.view.document ? "Full page accepted and divided into sections. Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. Preview the suggested columns and records below. No AI calls. Unmatched text remains visible.");
+      say(state.view.document ? "Full page accepted and divided into sections. " + state.view.extraction.message + " Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. " + state.view.extraction.message + " No AI calls.");
     });
   };
   $("correction-form").onsubmit = (event) => {
