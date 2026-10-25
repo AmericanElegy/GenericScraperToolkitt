@@ -1,5 +1,7 @@
 # Web Table Toolkit — local first release
 
+**[Start here: links, downloads and PowerShell launch commands](START-HERE.md).**
+
 A standalone Cloudflare Worker for discovering HTML tables and turning pasted page text into reviewable data with CSV/JSON exports. It has no FantasyBrief dependencies or paid service bindings.
 
 For pages that build their tables with JavaScript, the optional [local browser renderer](docs/javascript-rendering.md) provides a separate read-only capture and export workflow using an installed browser.
