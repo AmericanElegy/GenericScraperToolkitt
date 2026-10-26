@@ -16,6 +16,8 @@ For pages that build their tables with JavaScript, the optional [local browser r
 
 See [the release guide](docs/local-release.md) for the exact boundary and verification. This release uses limited deterministic rules, not general AI interpretation.
 
+Explicit ranked tables now become period–rank–item records, and supported noun-answer sentences can produce subject–relationship–answer facts. The lab shows caption context and preserves numeric facts alongside named answers. These bounded profiles do not interpret arbitrary prose. See [supported meaning profiles](docs/interpretation-lab.md#explicit-rankings-and-noun-answers).
+
 For pages with many navigation/layout tables, the lab URL importer uses bounded candidate discovery and lists unsupported tables separately. Wide URL tables are split into labeled column groups; some merged tables still require a narrower source or manual mapping.
 
 ## PowerShell quick start

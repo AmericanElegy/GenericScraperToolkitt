@@ -1,3 +1,5 @@
+import {RANKING_VERSION,rankingPlan,extractRanking,rankingMeaning} from './ranking-rules.js';
+import {TEXT_FACTS_VERSION,TEXT_FACTS_SCHEMA,hasTextRelations,extractTextFacts,assertTextFactConsistency,textFactMeaning} from './text-facts.js';
 import { MAPPING_VERSION, LEGACY_MAPPING_VERSION, detectColumns, mappedSchema, mappingFor, extractMappedTable } from './column-mapping.js';
 import { reviewQueue } from './review-queue.js';
 import { planPage, needsPageIntake, extractPageTable, PAGE_TABLE_VERSION, documentEvidence } from './page-intake.js';
@@ -164,6 +166,8 @@ function applyCorrection(packet, response, change) {
 function originalResponse(job) {
   if (job.example_id !== 'custom-text') return examples[job.example_id].scripted_response;
   if ([MAPPING_VERSION,LEGACY_MAPPING_VERSION].includes(job.parser_version)) return extractMappedTable(job);
+  if(job.parser_version===RANKING_VERSION)return extractRanking(job.packet);
+  if(job.parser_version===TEXT_FACTS_VERSION)return extractTextFacts(job.packet);
   if (job.parser_version === 'name-number-v1') return extractTextRules(job.packet);
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if ([WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)) return extractWageTable(job.packet, job.parser_version);
@@ -174,7 +178,7 @@ async function documentInfo(job) {
   if (!job.document) return null;
   if (job.example_id !== 'custom-text' || !only(job.document, ['source', 'dataset_id']))
     fail('invalid_document', 'Invalid full-page source or selection.');
-  const plan = planPage(job.document.source, job.parser_version === LEGACY_PROSE_VERSION ? LEGACY_PROSE_VERSION : PROSE_VERSION);
+  const plan = planPage(job.document.source, job.parser_version === LEGACY_PROSE_VERSION ? LEGACY_PROSE_VERSION : PROSE_VERSION,{semantic:job.parser_version===TEXT_FACTS_VERSION});
   const selected = plan.datasets.find(d => d.id === job.document.dataset_id);
   if (!selected || job.parser_version !== selected.parser_version)
     fail('invalid_document', 'The selected section or parser does not match the retained page.');
@@ -229,6 +233,7 @@ async function checkJob(job) {
     response = applyCorrection(job.packet, response, change);
     await revalidate(job.packet, await entryFor(job.packet, response));
   }
+  if(job.parser_version===TEXT_FACTS_VERSION)assertTextFactConsistency(response);
   if (canonical(job.cache_entry.raw_response) !== canonical(response))
     fail('example_mismatch', 'Candidate data differs from its rule output and recorded corrections.');
   return exportInterpretation(job.packet, job.cache_entry, job.events, { approvedOnly: false });
@@ -238,11 +243,13 @@ async function view(job, result) {
   if (info) result.json.validation = documentEvidence(result.json.validation, info.selected, info.plan.text, info.hash);
   const records = result.json.validation.records;
   const mapped = mappingFor(job);
+  const meaning=job.parser_version===RANKING_VERSION?rankingMeaning(job.packet):job.parser_version===TEXT_FACTS_VERSION?textFactMeaning():null;
   const unmatched = result.json.validation.outcomes.filter(o => o.status === 'no_result');
   const tableLike = /(?:percent of total employment|mean hourly wage|major occupational group)/i.test(job.packet.source.text)
     || job.packet.passages.some(p => /^.+?\s+\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?$/.test(p.text.trim()));
   return {
     job,
+    meaning,
     column_mapping: mapped ? {
       editable: true, delimiter: mapped.plan.delimiter,
       columns: mapped.columns.map((c,i) => ({...c, source_label:mapped.plan.columns[i].label, required:mapped.schema.fields[i].required, reason: mapped.plan.columns[i].reason, samples:mapped.plan.rows.slice(0,3).map(r => r.cells[i])})),
@@ -271,7 +278,7 @@ async function view(job, result) {
     interpretation: {
       method: job.parser_version || 'fictional-scripted-example',
       columns: job.packet.schema.fields.map(f => f.name),
-      explanation: mapped ? 'Delimited table: suggested columns from the header and literal cell formats. Identifiers stay text; units are not converted. Malformed rows are listed in the mapping preview. Review the row/header association before approval.' : info
+      explanation: meaning?meaning.explanation:mapped ? 'Delimited table: suggested columns from the header and literal cell formats. Identifiers stay text; units are not converted. Malformed rows are listed in the mapping preview. Review the row/header association before approval.' : info
         ? 'Full page retained. Current section: ' + info.selected.label + '. Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets.'
         : [WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)
         ? 'Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = ' + wageHeader(job.packet).local + '. Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval.'
@@ -340,13 +347,16 @@ export async function labFetch(request) {
           fail('invalid_input', 'Automatic suggestions choose their own columns. Use manual mode to supply columns.');
         const columns = body.mode === 'auto' ? detectColumns(body.source?.text?.replace(/\r\n?/g, '\n'),MAPPING_VERSION,body.retrieval?.content_kind==='table') : null;
         if (body.mapping !== undefined && !columns) fail('column_mapping', 'No supported delimited header found.');
-        if (columns && body.dataset_id === undefined) {
+        const ranking=body.mode==='auto'?rankingPlan(body.source?.text?.replace(/\r\n?/g,'\n')):null;
+        if(ranking&&body.mapping===undefined&&body.dataset_id===undefined){
+          packet=await createPacket({source:body.source,schema:ranking.schema});parserVersion=RANKING_VERSION;
+        } else if (columns && body.dataset_id === undefined) {
           const mapped = mappedSchema(columns, body.mapping);
           mapping = mapped.columns;
           packet = await createPacket({source:body.source,schema:mapped.schema});
           parserVersion = MAPPING_VERSION;
         } else if (body.mode === 'auto' && (needsPageIntake(body.source) || body.dataset_id !== undefined)) {
-          const plan = planPage(body.source);
+          const plan = planPage(body.source,PROSE_VERSION,{semantic:true});
           const selected = body.dataset_id === undefined ? plan.datasets[0] : plan.datasets.find(d => d.id === body.dataset_id);
           if (!selected) fail('invalid_selection', 'Choose a listed full-page section.');
           document = { source: body.source, dataset_id: selected.id };
@@ -354,8 +364,9 @@ export async function labFetch(request) {
           parserVersion = selected.parser_version;
         } else {
           if (body.dataset_id !== undefined) fail('invalid_selection', 'Section selection requires automatic mode.');
-          packet = await createPacket({ source: body.source, schema: body.mode === 'auto' ? PROSE_SCHEMA : body.schema });
-          parserVersion = body.mode === 'auto' ? PROSE_VERSION : 'name-number-v1';
+          const textFacts=body.mode==='auto'&&hasTextRelations(body.source?.text);
+          packet = await createPacket({ source: body.source, schema: body.mode === 'auto' ? textFacts?TEXT_FACTS_SCHEMA:PROSE_SCHEMA : body.schema });
+          parserVersion = body.mode === 'auto' ? textFacts?TEXT_FACTS_VERSION:PROSE_VERSION : 'name-number-v1';
           if (body.mode === 'auto' && wageHeader(packet)) {
             packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
             parserVersion = WAGE_VERSION;
@@ -478,6 +489,8 @@ export async function labFetch(request) {
     exported.json.candidate_revision_history = body.job.revisions || [];
     exported.json.original_candidates = originalResponse(body.job);
     if(body.job.retrieval)exported.json.source_retrieval={...body.job.retrieval,notice:'Descriptive session metadata, not authenticated source provenance. Snapshot hash is revalidated.'};
+    if(body.job.parser_version===RANKING_VERSION)exported.json.interpretation_context=rankingMeaning(body.job.packet);
+    if(body.job.parser_version===TEXT_FACTS_VERSION)exported.json.interpretation_context=textFactMeaning();
     exported.json.method = body.job.parser_version || 'fictional-scripted-example';
     exported.json.notice = 'Limited rules or scripted examples, with optional human corrections. No AI inference. Original automated findings are retained separately from human review.';
     const prefix = body.diagnostic

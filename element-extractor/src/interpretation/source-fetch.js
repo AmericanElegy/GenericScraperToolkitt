@@ -1,3 +1,5 @@
+import {rankShape,rankingPlan} from './ranking-rules.js';
+import {hasTextRelations} from './text-facts.js';
 import { detectColumns, MAPPING_VERSION } from './column-mapping.js';
 import { publicURL } from '../public-network.js';
 import { planPage } from './page-intake.js';
@@ -35,19 +37,24 @@ function tableDatasets(tables,issues) {
    if(t.unsupported||t.supported===false){issues.push(title+': '+(t.unsupported||t.issues?.join(' ')||'Unsupported table structure.'));continue;}
    if(!t.rows.length)continue;
    if(t.headers.length<2||t.headers.length>100){issues.push(title+': Import requires 2–100 source columns.');continue;}
+
    const groups=t.headers.length<=8?[t.headers.map((_,i)=>i)]:Array.from({length:Math.ceil((t.headers.length-1)/7)},(_,part)=>[0,...Array.from({length:Math.min(7,t.headers.length-1-part*7)},(_,i)=>1+part*7+i)]);
    const line=cells=>cells.map(c=>String(c).replace(/\s+/g,' ').trim()).join('\t');
    const local=[];
    for(const columns of groups){
-    const header=line(columns.map(i=>t.headers[i]));
+    const selectedHeaders=columns.map(i=>t.headers[i]),ranked=rankShape(selectedHeaders);
+    const context=ranked&&title.length<=500?'Table context: '+title+'\n\n':'';
+    const header=line(selectedHeaders);
     if(header.length>2048)error('source_limit','A table header exceeds the evidence limit.');
-    let batch=[],length=header.length,start=1;
+    const rowLimit=ranked?Math.min(24,Math.floor(50/(ranked.wide?ranked.ranks.length:1))):24;
+    let batch=[],length=context.length+header.length,start=1;
     const range=columns.slice(1);const columnLabel=groups.length===1?'': ' · '+(columns.at(-1)<8?'columns 1–'+columns.length:'shared column 1 + columns '+(range[0]+1)+(range.length>1?'–'+(range.at(-1)+1):''))+' of '+t.headers.length;
-    const flush=()=>{if(!batch.length)return;const text=header+'\n'+batch.join('\n');
-     const mapping=detectColumns(text,MAPPING_VERSION,true);
+    const flush=()=>{if(!batch.length)return;const text=context+header+'\n'+batch.join('\n');
+     const meaning=rankingPlan(text);
+     const mapping=meaning||detectColumns(text,MAPPING_VERSION,true);
      if(!mapping)error('table_mapping','Source column headings cannot be mapped; no zero-record table was reported as imported.');
-     local.push({kind:'table',label:title+' · rows '+start+'–'+(start+batch.length-1)+' of '+t.rows.length+columnLabel,text,row_count:batch.length,column_count:columns.length,table_key,row_start:start,total_columns:t.headers.length,column_indices:columns});start+=batch.length;batch=[];length=header.length;};
-    for(const row of t.rows){const value=line(columns.map(i=>row[i]??''));if(value.length>2048)error('source_limit','A table row exceeds the 2,048-character evidence limit.');if(batch.length===24||length+value.length+1>12000)flush();batch.push(value);length+=value.length+1;}
+     local.push({kind:'table',label:title+' · rows '+start+'–'+(start+batch.length-1)+' of '+t.rows.length+columnLabel,text,row_count:batch.length,column_count:columns.length,record_count:meaning?.factCount??batch.length,table_key,row_start:start,total_columns:t.headers.length,column_indices:columns});start+=batch.length;batch=[];length=context.length+header.length;};
+    for(const row of t.rows){const value=line(columns.map(i=>row[i]??''));if(value.length>2048)error('source_limit','A table row exceeds the 2,048-character evidence limit.');if(batch.length===rowLimit||length+value.length+1>12000)flush();batch.push(value);length+=value.length+1;}
     flush();
    }
    if(groups.length>1)issues.push(title+': '+t.headers.length+' source columns are split into '+groups.length+' column groups of up to eight. The shared first column supplies context, not a proven unique join key.');
@@ -80,7 +87,7 @@ export async function sourceFetch(request,url,env,{fetchPage,analyze}) {
   let datasets=tableDatasets(analysis.tables,issues),method='static-html';
   let prose=[];try{prose=proseDatasets(await articleBlocks(page));}catch(e){issues.push('Article text not imported: '+e.message);}
   let supportedProse=false;
-  if(!datasets.length)for(const part of prose){const packet=await createPacket({source:{text:part.text,url:source},schema:PROSE_SCHEMA});if(extractProseRules(packet).records.length){supportedProse=true;break;}}
+  if(!datasets.length)for(const part of prose){if(hasTextRelations(part.text)){supportedProse=true;break;}const packet=await createPacket({source:{text:part.text,url:source},schema:PROSE_SCHEMA});if(extractProseRules(packet).records.length){supportedProse=true;break;}}
   const jsNeeded=!datasets.length&&!supportedProse&&analysis.tables.every(t=>!t.rows.length&&!t.unsupported)&&analysis.signals.app_roots>0&&analysis.signals.linked_scripts>0;
   if(jsNeeded){
    checks.push({method:'static-html',status:'no_supported_records',message:'No usable table or recognized prose facts; application container and linked scripts indicate possible client rendering.'});

@@ -75,8 +75,15 @@ try{
   await waitFor(()=>browser.evaluate('!document.getElementById("open-retrieved").textContent.includes("Open selected")&&!document.getElementById("load").disabled'));
  }
  await choose('Ranked articles');
- assert.match(await browser.evaluate('document.getElementById("candidate-head").textContent'),/#1/);
- assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=column_1]").textContent'),'Alpha');
+ assert.match(await browser.evaluate('document.getElementById("candidate-head").textContent'),/Rank/);
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=item]").textContent'),'Alpha');
+ assert.match(await browser.evaluate('document.getElementById("meaning-count").textContent'),/2 source rows → 4 ranked items/);
+ await browser.evaluate('document.getElementById("select-eligible").click();document.getElementById("batch-reviewer").value="Ranking test";document.getElementById("batch-note").value="Checked explicit year, rank and named article.";document.getElementById("batch-confirm").checked=true;document.getElementById("batch-confirm").dispatchEvent(new Event("change"));document.getElementById("approve-batch").click()');
+ await waitFor(()=>browser.evaluate('document.getElementById("counts").textContent.includes("4 approved")&&!document.getElementById("load").disabled'));
+ await browser.evaluate('document.getElementById("approved-csv").click()');
+ await waitFor(async()=> (await readdir(dir)).includes('interpretation-approved.csv'));
+ const rankedCsv=await readFile(join(dir,'interpretation-approved.csv'),'utf8');assert.match(rankedCsv,/"year","rank","item"/);assert.match(rankedCsv,/"Alpha"/);
+ await waitFor(()=>browser.evaluate('!document.getElementById("load").disabled'));
  await choose('Shares');
  assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=share_percent]").textContent'),'8%');
  assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=notes]").textContent'),'—');
@@ -85,6 +92,12 @@ try{
  assert.match(await browser.evaluate('document.getElementById("retrieved-preview").textContent'),/2 of 9 source columns/);
  assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=column_9_percent]").textContent'),'40%');
  assert.match(await browser.evaluate('document.getElementById("retrieved-summary").textContent'),/11 captured table rows/);
+ await browser.evaluate('document.getElementById("source-text").value="The most popular article in 2025 was Solar eclipse. Widgets reached 12.6 percent.";document.getElementById("extract").click()');
+ await waitFor(()=>browser.evaluate('document.getElementById("counts").textContent.includes("2 candidates")&&!document.getElementById("load").disabled'));
+ assert.match(await browser.evaluate('document.getElementById("candidate-head").textContent'),/Subject.*Relationship.*Answer.*Numeric value/);
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=answer]").textContent'),'Solar eclipse');
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-2][data-field=numeric_value]").textContent'),'12.6');
+ assert.match(await browser.evaluate('document.getElementById("meaning-explanation").textContent'),/Answers may be names or nouns/);
  if(process.env.SOURCE_SCREENSHOT){await browser.evaluate('window.scrollTo(0,0)');const shot=await browser.send('Page.captureScreenshot',{captureBeyondViewport:true});await writeFile(process.env.SOURCE_SCREENSHOT,Buffer.from(shot.data,'base64'));}
  console.log('PASS: real lab browser fetches static tables/article, preserves snapshot metadata in approved JSON, automatically renders a JavaScript-only table, leaves manual paste offline, and never retries an access barrier with rendering.');
 }finally{await browser?.close();await mf.dispose();await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});}

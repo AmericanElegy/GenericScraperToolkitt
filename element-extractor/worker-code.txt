@@ -721,184 +721,125 @@ async function exportInterpretation(packet, entry, events = [], { approvedOnly =
   return { json: json2, csv };
 }
 
-// src/interpretation/column-mapping.js
-var MAPPING_VERSION = "mapped-table-v2";
-var LEGACY_MAPPING_VERSION = "mapped-table-v1";
+// src/interpretation/ranking-rules.js
+var RANKING_VERSION = "semantic-ranking-v1";
 var fail = (message) => {
-  throw new ContractError("column_mapping", message);
+  throw new ContractError("ranking_limit", message);
 };
-var literal = /^([+-]?)\$?([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(%)?$/;
-function numeric(raw, version = MAPPING_VERSION) {
-  const value = raw.trim(), m = value.match(version === LEGACY_MAPPING_VERSION ? literal : /^([+-]?)\s*\$?\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?:\s*(%|percent))?$/i);
-  if (!m || m[1] && /^[+-]/.test(m[2])) return null;
-  const number2 = Number((m[1] || "") + m[2].replaceAll(",", ""));
-  return Number.isFinite(number2) ? { value: number2, dollar: value.includes("$"), percent: !!m[3] } : null;
+function rankShape(headers3) {
+  const period = headers3.findIndex((h) => /^(?:year|date|period|season)$/i.test(h.trim()));
+  const ranks = headers3.map((h, i) => {
+    const m = h.trim().match(/^(?:#\s*|rank\s+)(\d{1,3})$/i);
+    return m ? { index: i, rank: Number(m[1]), label: h.trim() } : null;
+  }).filter(Boolean);
+  if (period >= 0 && ranks.length === headers3.length - 1 && ranks.every((r) => r.rank > 0) && new Set(ranks.map((r) => r.rank)).size === ranks.length) return { period, ranks, wide: true, periodLabel: headers3[period].trim() };
+  const rank = headers3.findIndex((h) => /^(?:rank|position|place)$/i.test(h.trim()));
+  const item = headers3.findIndex((h) => /^(?:item|title|name|article|topic|entry)$/i.test(h.trim()));
+  if (rank >= 0 && item >= 0 && headers3.length === (period < 0 ? 2 : 3)) return { period, rank, item, wide: false, periodLabel: period >= 0 ? headers3[period].trim() : null };
+  return null;
 }
-var kinds = /* @__PURE__ */ new Set(["text", "number", "percent", "dollars"]);
-var reserved = /* @__PURE__ */ new Set(["constructor", "prototype", "__proto__", "record_id", "review_status", "validation_issues"]);
-function nameFor(label, index, used, suffix = "") {
-  let name = label.toLowerCase().replace(/%/g, " percent ").replace(/\$/g, " dollars ").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
-  if (!/^[a-z]/.test(name) || reserved.has(name)) name = "column_" + (index + 1);
-  if (suffix && !name.endsWith(suffix)) name = name.slice(0, 32 - suffix.length) + suffix;
-  const base = name;
-  let duplicate = 2;
-  while (used.has(name)) name = base + "_" + duplicate++;
-  used.add(name);
-  return name;
-}
-function detectColumns(text, version = MAPPING_VERSION, explicitHeader = false) {
-  const legacy = version === LEGACY_MAPPING_VERSION;
+function rankingPlan(text) {
   if (typeof text !== "string" || text.length > LIMITS.text) return null;
   const lines = [];
   let start = 0;
   for (const raw of text.split("\n")) {
-    const quote = legacy ? raw.trim() : raw.replace(/^ +| +$/g, "");
-    if (quote.trim() || !legacy && quote.includes("	")) lines.push({ quote, start: start + raw.indexOf(quote) });
+    if (raw.trim()) lines.push({ quote: raw.trim(), start: start + raw.length - raw.trimStart().length });
     start += raw.length + 1;
   }
-  if (lines.length < 2) return null;
-  const headerAt = lines.findIndex((l) => /\t|\||,/.test(l.quote));
-  if (headerAt < 0 || headerAt > 3) return null;
-  const header = lines[headerAt];
-  const delimiter = header.quote.includes("	") ? "	" : header.quote.includes("|") ? "|" : ",";
-  const split = (quote) => {
-    if (delimiter === "," && quote.includes('"')) return null;
-    let value = quote;
-    if (delimiter === "|") value = value.replace(/^\|/, "").replace(/\|$/, "");
-    return value.split(delimiter).map((v) => v.trim());
-  };
-  if (!header.quote.trim()) return null;
-  const labels = split(header.quote);
-  if (!labels || labels.length < 2 || labels.length > LIMITS.fields || labels.some((l) => !/[\p{L}]/u.test(l) && !(!legacy && (/^#\s*\d+$/.test(l) || explicitHeader)) || l.length > 100 || (legacy || !explicitHeader) && /[\n<>]/.test(l) || delimiter === "," && /\d/.test(l))) return null;
-  const rows = [], skipped = [];
-  for (const line of lines.slice(headerAt + 1)) {
+  let header, shape, delimiter, headerIndex;
+  for (let i = 0; i < Math.min(5, lines.length); i++) {
+    const value = lines[i].quote;
+    if (value.startsWith("Table context: ")) continue;
+    const split = value.includes("	") ? "	" : value.includes("|") ? "|" : ",";
+    if (split === "," && value.includes('"')) continue;
+    let cells = value.split(split).map((v) => v.trim());
+    if (split === "|") {
+      if (!cells[0]) cells.shift();
+      if (!cells.at(-1)) cells.pop();
+    }
+    const found = rankShape(cells);
+    if (found) {
+      header = { ...lines[i], cells };
+      shape = found;
+      delimiter = split;
+      headerIndex = i;
+      break;
+    }
+  }
+  if (!shape) return null;
+  const rows = [], unrecognized = [];
+  for (const line of lines.slice(headerIndex + 1)) {
     if (delimiter === "|" && /^\|?[\s:|-]+\|?$/.test(line.quote)) continue;
-    const cells = split(line.quote);
-    if (!cells || cells.length !== labels.length || line.quote.length > LIMITS.quote) {
-      skipped.push({ quote: line.quote.slice(0, 120), reason: "Row has a different cell count, unsupported CSV quoting or exceeds the evidence limit." });
+    if (delimiter === "," && line.quote.includes('"')) {
+      unrecognized.push(line);
       continue;
     }
-    if (!legacy && cells.every((v) => !v)) {
-      skipped.push({ quote: line.quote, reason: "Row has no readable text; image-only content was not read." });
+    let cells = line.quote.split(delimiter).map((v) => v.trim());
+    if (delimiter === "|") {
+      if (!cells[0]) cells.shift();
+      if (!cells.at(-1)) cells.pop();
+    }
+    if (cells.every((c, i) => c === header.cells[i])) continue;
+    if (cells.length !== header.cells.length) {
+      unrecognized.push(line);
       continue;
     }
     rows.push({ ...line, cells });
   }
   if (!rows.length) return null;
-  if (rows.length > LIMITS.records) fail("More than 50 mapped rows. Paste a smaller table; no rows were truncated.");
-  if (header.quote.length > LIMITS.quote) fail("The header exceeds the evidence limit.");
-  const used = /* @__PURE__ */ new Set();
-  const columns = labels.map((label, index) => {
-    const values = rows.map((r) => r.cells[index]).filter(Boolean), numbers = values.map((v) => numeric(v, version));
-    let kind = "text", reason = "Retained as text; no numeric conversion was assumed.";
-    const identifier = /\b(id|identifier|code|zip|postal|date|year)\b/i.test(label) || values.some((v) => /^[-+]?0\d/.test(v));
-    if (!identifier && /%|\bpercent(?:age)?\b/i.test(label)) {
-      kind = "percent";
-      reason = "Percentage heading; values remain on the 0\u2013100 scale.";
-    } else if (!identifier && /\$|\bdollars?\b/i.test(label)) {
-      kind = "dollars";
-      reason = "Explicit dollar heading; no currency conversion or ISO currency inference.";
-    } else if (!legacy && !identifier && /^(?:count|number of .+)$/i.test(label)) {
-      kind = "number";
-      reason = "Explicit count heading; annotated or malformed values require review rather than guessed conversion.";
-    } else if (!identifier && values.length && numbers.every(Boolean)) {
-      if (numbers.every((n) => n.percent && !n.dollar)) kind = "percent";
-      else if (numbers.every((n) => n.dollar && !n.percent)) kind = "dollars";
-      else if (numbers.every((n) => !n.dollar && !n.percent)) kind = "number";
-      reason = kind === "text" ? "Mixed unit markers retained as text." : "Consistent literal cell format; verify the heading before approval.";
+  const factCount = rows.length * (shape.wide ? shape.ranks.length : 1);
+  if (factCount > LIMITS.records) fail("This ranking produces more than 50 ranked items. Paste fewer source rows or fetch a bounded ranking selection.");
+  const context = lines.slice(0, headerIndex).find((l) => l.quote.startsWith("Table context: "));
+  const caption = context?.quote.slice("Table context: ".length) || null;
+  const metricMatch = caption?.match(/\b(most\s+(?:viewed|popular|visited|read|watched|downloaded)|best[- ]selling|highest[- ]rated|top[- ]ranked)\b(?:\s+(.+?))?(?=\s+(?:of|on|in|by|for)\b|\[\d|$)/i);
+  const metric = metricMatch?.[1] || null, category = metricMatch?.[2]?.trim() || null;
+  const periodKey = shape.periodLabel ? shape.periodLabel.toLowerCase() : "period";
+  const fields = [...shape.period >= 0 ? [{ name: periodKey, type: "string", required: true }] : [], { name: "rank", type: "number", required: true, min: 1, max: 999 }, { name: "item", type: "string", required: true }, ...metric ? [{ name: "metric", type: "string", required: true }] : [], ...category ? [{ name: "category", type: "string", required: true }] : []];
+  return { header, shape, rows, context, caption, metric, category, periodKey, schema: { fields }, factCount, unrecognized };
+}
+function sourceSpan(packet, line) {
+  const quote = line.quote.trim(), start = line.start + line.quote.length - line.quote.trimStart().length;
+  const p = packet.passages.find((p2) => start >= p2.start && start + quote.length <= p2.end);
+  if (!p || quote.length > LIMITS.quote) fail("Ranking evidence is outside a retained passage or exceeds the evidence limit.");
+  let occurrence = 0, at = p.text.indexOf(quote);
+  while (at >= 0 && p.start + at < start) {
+    occurrence++;
+    at = p.text.indexOf(quote, at + 1);
+  }
+  return { passage_id: p.id, quote, occurrence };
+}
+function extractRanking(packet) {
+  const plan = rankingPlan(packet.source.text);
+  if (!plan || canonical(plan.schema) !== canonical(packet.schema)) fail("Ranking columns do not match the explicit source header.");
+  const header = sourceSpan(packet, plan.header), context = plan.context ? sourceSpan(packet, plan.context) : null, records = [];
+  for (const row of plan.rows) {
+    const rowSpan = sourceSpan(packet, row);
+    const positions = plan.shape.wide ? plan.shape.ranks : [{ index: plan.shape.item, rank: /^[1-9]\d{0,2}$/.test(row.cells[plan.shape.rank]) ? Number(row.cells[plan.shape.rank]) : null }];
+    for (const position of positions) {
+      const field = (value, evidence) => ({ value: value || value === 0 ? value : null, evidence: value || value === 0 ? evidence : [] });
+      const fields = { ...plan.shape.period >= 0 ? { [plan.periodKey]: field(row.cells[plan.shape.period], [rowSpan, header]) } : {}, rank: field(position.rank, [header, rowSpan]), item: field(row.cells[position.index], [rowSpan, header]), ...plan.metric ? { metric: field(plan.metric, [context]) } : {}, ...plan.category ? { category: field(plan.category, [context]) } : {} };
+      records.push({ id: "row-" + (records.length + 1), fields });
     }
-    if (!legacy && kind === "text" && numbers.some(Boolean) && !numbers.every(Boolean)) reason = "Mixed numeric/annotated text retained as text; no annotation was stripped.";
-    const required = legacy || kind !== "text" || !rows.some((r) => !r.cells[index]);
-    if (!required) reason += " Empty text cells remain null; images are not read.";
-    const suffix = !legacy ? kind === "percent" ? "_percent" : kind === "dollars" ? "_dollars" : "" : "";
-    const exportLabel = !legacy && /^#?\s*\d[\d.,]*$/.test(label) ? "column " + label.replace("#", "") : label;
-    return { label, name: nameFor(exportLabel, index, used, suffix), kind, reason, required };
-  });
-  return { delimiter: delimiter === "	" ? "tab" : delimiter, header, rows, columns, skipped, prefix_lines: headerAt, version };
-}
-function mappedSchema(plan, overrides) {
-  const columns = overrides === void 0 ? plan.columns.map(({ name, kind }) => ({ name, kind })) : overrides;
-  if (!Array.isArray(columns) || columns.length !== plan.columns.length || columns.some((c) => !c || Object.keys(c).some((k) => !["name", "kind"].includes(k)) || typeof c.name !== "string" || !kinds.has(c.kind))) fail("Choose one valid mapping for every source column.");
-  const schema = { fields: columns.map((c) => ({
-    name: c.name,
-    type: c.kind === "text" ? "string" : "number",
-    required: plan.version === LEGACY_MAPPING_VERSION || c.kind !== "text" || !plan.rows.some((r) => !r.cells[columns.indexOf(c)]),
-    ...c.kind === "text" ? {} : { number_format: "en-US-grouped" },
-    ...c.kind === "percent" ? { min: 0, max: 100 } : {}
-  })) };
-  return { columns, schema };
-}
-function mappingFor(job) {
-  if (![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) return null;
-  const plan = detectColumns(job.packet.source.text, job.parser_version, job.retrieval?.content_kind === "table");
-  if (!plan) fail("No supported delimited table remains in this source.");
-  const mapping = mappedSchema(plan, job.mapping);
-  if (canonical(mapping.schema) !== canonical(job.packet.schema)) fail("Saved columns differ from the recorded mapping.");
-  return { plan, ...mapping };
-}
-function extractMappedTable(job) {
-  const { plan, columns } = mappingFor(job), packet = job.packet;
-  const locate = (line) => {
-    const quote = line.quote.trim(), start = line.start + line.quote.length - line.quote.trimStart().length;
-    const passage = packet.passages.find((p) => start >= p.start && start + quote.length <= p.end);
-    if (!passage) fail("A mapped row crosses a source boundary.");
-    let occurrence = 0, found = passage.text.indexOf(quote);
-    while (found >= 0 && found + passage.start < start) {
-      occurrence++;
-      found = passage.text.indexOf(quote, found + 1);
-    }
-    return { passage_id: passage.id, quote, occurrence };
-  };
-  const header = locate(plan.header);
-  const records = plan.rows.map((row, index) => {
-    const span = locate(row), issues = [];
-    const fields = Object.fromEntries(columns.map((column, i) => {
-      const raw = row.cells[i], n = numeric(raw, job.parser_version);
-      let value = column.kind === "text" ? job.parser_version !== LEGACY_MAPPING_VERSION && !raw ? null : raw : n?.value ?? null;
-      if (column.kind !== "text" && n && (n.percent && column.kind !== "percent" || n.dollar && column.kind !== "dollars")) {
-        value = null;
-        issues.push("A unit marker conflicts with the selected column mapping. Correct the mapping before approval.");
-      }
-      return [column.name, { value, evidence: value === null ? [] : [span, header] }];
-    }));
-    return { id: "row-" + (index + 1), fields, ...issues.length ? { issues } : {} };
-  });
+  }
   return { version: "candidates-v1", records, outcomes: packet.passages.map((p) => {
     const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
-    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Cells mapped using an explicit delimited header; source row and header retained. This does not prove completeness." : "Retained text outside mapped rows." };
+    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Explicit source rank positions, item names and period/caption context retained. No numeric popularity score was inferred." : "Text outside the supported ranking remains retained and unprocessed." };
   }) };
 }
-
-// src/public-network.js
-var InputError = class extends Error {
-  constructor(message, status = 400) {
-    super(message);
-    this.status = status;
-  }
-};
-function publicURL(input) {
-  if (!input || input.length > 2048) throw new InputError("Enter a public HTTPS URL (up to 2048 characters).");
-  let url;
-  try {
-    url = new URL(input);
-  } catch {
-    throw new InputError("Enter a valid public HTTPS URL.");
-  }
-  const host = url.hostname.toLowerCase();
-  if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || host.length > 253 || host.endsWith(".") || !host.includes(".") || !/^[a-z0-9.-]+$/.test(host) || host.split(".").some((label) => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) || /^[0-9.]+$/.test(host) || /(?:^|\.)(localhost|local|internal|test|invalid|example|onion|home|lan)$/.test(host)) {
-    throw new InputError("Use a public HTTPS hostname without credentials, IP addresses, or custom ports.");
-  }
-  url.hash = "";
-  return url;
-}
-function publicAddress(ip) {
-  if (ip.includes(":")) {
-    return /^[23][0-9a-f]{3}:/i.test(ip) && !/^200[12]:|^3fff:/i.test(ip);
-  }
-  const octets = ip.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
-  const [a, b, c] = octets;
-  return !(a === 0 || a === 10 || a === 127 || a >= 224 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 168 || b === 0 || b === 88 && c === 99) || a === 198 && (b === 18 || b === 19 || b === 51 && c === 100) || a === 203 && b === 0 && c === 113);
+function rankingMeaning(packet) {
+  const p = rankingPlan(packet.source.text);
+  return {
+    kind: "ranking",
+    title: "Ranked items",
+    context: p.caption,
+    metric: p.metric,
+    category: p.category,
+    source_rows: p.rows.length,
+    record_count: p.factCount,
+    explanation: p.metric ? "Ranks come from the explicit headers; the ranking measure and category come from the quoted caption. Item names remain text." : "Ranks come from explicit headers. No ranking measure was supplied in the snapshot; popularity, views or scores were not inferred.",
+    context_evidence: p.context ? sourceSpan(packet, p.context) : null,
+    unsupported_items: p.unrecognized.length
+  };
 }
 
 // src/interpretation/text-rules.js
@@ -963,16 +904,16 @@ function extractProseRules(packet, version = PROSE_VERSION) {
   for (const passage of packet.passages) {
     const ids = [], seen = /* @__PURE__ */ new Set();
     const masked = passage.text.replace(/https?:\/\/[^\s)"<>]+/g, (s) => " ".repeat(s.length));
-    const sentences = [...masked.matchAll(/[^.!?\n]*(?:\.(?!\s|$)[^.!?\n]*)*(?:[.!?](?=\s|$)|$)/g)].filter((m) => m[0].trim());
-    for (const sentence of sentences) {
+    const sentences2 = [...masked.matchAll(/[^.!?\n]*(?:\.(?!\s|$)[^.!?\n]*)*(?:[.!?](?=\s|$)|$)/g)].filter((m) => m[0].trim());
+    for (const sentence of sentences2) {
       const raw = passage.text.slice(sentence.index, sentence.index + sentence[0].length).trim();
       const searchable = sentence[0].trim();
-      const add = (measure, value, unit = null, qualifier = null, uncertain = false, quoteOverride = null) => {
+      const add = (measure2, value, unit = null, qualifier = null, uncertain = false, quoteOverride = null) => {
         const quote = quoteOverride || raw;
-        measure = measure.trim().replace(/[\s,;:.]+$/, "");
-        if (!measure || !/[\p{L}]/u.test(measure)) return;
+        measure2 = measure2.trim().replace(/[\s,;:.]+$/, "");
+        if (!measure2 || !/[\p{L}]/u.test(measure2)) return;
         if (quote.length > LIMITS.quote) throw new ContractError("quote_limit", "A matched sentence exceeds the 2,048-character evidence limit. Paste a smaller section.");
-        const key = canonical([measure, value, unit, qualifier, sentence.index]);
+        const key = canonical([measure2, value, unit, qualifier, sentence.index]);
         if (seen.has(key)) return;
         seen.add(key);
         if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 suggested facts. Paste a smaller section; nothing was silently truncated.");
@@ -985,7 +926,7 @@ function extractProseRules(packet, version = PROSE_VERSION) {
         }
         const evidence = [{ passage_id: passage.id, quote, occurrence }];
         const field = (v) => ({ value: v, evidence: v === null ? [] : evidence });
-        const candidate = { id, fields: { measure: field(measure), value: field(value), unit: field(unit), qualifier: field(qualifier) } };
+        const candidate = { id, fields: { measure: field(measure2), value: field(value), unit: field(unit), qualifier: field(qualifier) } };
         if (flags.test(searchable) || uncertain)
           candidate.issues = [version === LEGACY_PROSE_VERSION ? "This sentence contains uncertainty, correction, negation or a percentage outside 0\u2013100. Inspect the context and explicitly correct the candidate before approval." : "This sentence contains uncertainty, correction, negation, ambiguous context or a percentage outside 0\u2013100. Inspect the context and explicitly correct the candidate before approval."];
         records.push(candidate);
@@ -1068,6 +1009,274 @@ function extractProseRules(packet, version = PROSE_VERSION) {
     });
   }
   return { version: "candidates-v1", records, outcomes };
+}
+
+// src/interpretation/text-facts.js
+var TEXT_FACTS_VERSION = "text-relations-v1";
+var TEXT_FACTS_SCHEMA = { fields: [
+  { name: "subject", type: "string", required: true },
+  { name: "relationship", type: "string", required: false },
+  { name: "answer", type: "string", required: true },
+  { name: "numeric_value", type: "number", required: false },
+  { name: "unit", type: "string", required: false },
+  { name: "qualifier", type: "string", required: false },
+  { name: "time_context", type: "string", required: false }
+] };
+var measure = "most (?:popular|viewed|visited|read|watched|downloaded)|best[- ]selling|highest[- ]rated|top[- ]ranked";
+function relation(raw) {
+  const text = raw.trim().replace(/[.!?]$/, "").trim();
+  let m;
+  if (m = text.match(new RegExp("^(?:The )?(" + measure + ") (.{1,120}?)(?: (?:in|of|for) (\\d{4}))? (?:is|was|are|were) (.{1,300})$", "i"))) return { subject: m[2], relationship: m[1], answer: m[4], time_context: m[3] || null };
+  if (m = text.match(/^(?:The )?(capital|winner|category) of (.{1,120}?) (?:is|was|are|were) (.{1,300})$/i)) return { subject: m[2], relationship: m[1], answer: m[3], time_context: null };
+  if (m = text.match(/^(.{1,120}?) (belongs to) (.{1,300})$/i)) return { subject: m[1], relationship: m[2], answer: m[3], time_context: null };
+  if (m = text.match(/^(.{1,300}?) (?:is|was) the (capital|winner) of (.{1,120})$/i)) return { subject: m[3], relationship: m[2], answer: m[1], time_context: null };
+  return null;
+}
+function sentences(text) {
+  return [...text.matchAll(/[^.!?\n]*(?:\.(?!\s|$)[^.!?\n]*)*(?:[.!?](?=\s|$)|$)/g)].filter((m) => m[0].trim());
+}
+function accepted(raw) {
+  const value = relation(raw);
+  if (!value || /^(?:not|never)\b/i.test(value.answer) || /\b(?:but|while|whereas|instead|however|corrected|revised|forecast|projected|estimated)\b/i.test(raw)) return null;
+  return value;
+}
+function hasTextRelations(text) {
+  return typeof text === "string" && text.length <= 16e3 && sentences(text.replace(/https?:\/\/[^\s)"<>]+/g, (s) => " ".repeat(s.length))).some((m) => accepted(m[0]));
+}
+function assertTextFactConsistency(response) {
+  for (const r of response.records) {
+    const n = r.fields.numeric_value?.value, answer = r.fields.answer?.value;
+    if (n !== null && n !== void 0 && (!/^[+-]?\d+(?:\.\d+)?$/.test(answer) || Number(answer) !== n)) throw new ContractError("fact_value_mismatch", "The literal answer and numeric value disagree. Correct both fields or retain the answer as text.");
+  }
+}
+function extractTextFacts(packet) {
+  if (canonical(packet.schema) !== canonical(TEXT_FACTS_SCHEMA)) throw new ContractError("text_fact_schema", "Text relationship columns do not match their schema.");
+  const records = [];
+  const push = (fields) => {
+    if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 recognized facts. Use a smaller source section; nothing was truncated.");
+    const r = { id: "row-" + (records.length + 1), fields };
+    records.push(r);
+    return r;
+  };
+  for (const p of packet.passages) {
+    const masked = p.text.replace(/https?:\/\/[^\s)"<>]+/g, (s) => " ".repeat(s.length));
+    for (const m of sentences(masked)) {
+      const raw = p.text.slice(m.index, m.index + m[0].length).trim(), value = accepted(raw);
+      if (!value) continue;
+      if (raw.length > LIMITS.quote) throw new ContractError("quote_limit", "A recognized statement exceeds the evidence limit.");
+      const local = p.text.indexOf(raw, m.index);
+      let occurrence = 0, at = p.text.indexOf(raw);
+      while (at >= 0 && at < local) {
+        occurrence++;
+        at = p.text.indexOf(raw, at + 1);
+      }
+      const evidence = [{ passage_id: p.id, quote: raw, occurrence }];
+      const field = (value2) => ({ value: value2, evidence: value2 === null ? [] : evidence });
+      push({ subject: field(value.subject), relationship: field(value.relationship), answer: field(value.answer), numeric_value: field(null), unit: field(null), qualifier: field(null), time_context: field(value.time_context) });
+    }
+  }
+  const numeric2 = extractProseRules({ ...packet, schema: PROSE_SCHEMA });
+  for (const r of numeric2.records) {
+    const f = r.fields, value = f.value.value;
+    let literal2;
+    for (const e of f.value.evidence) {
+      literal2 = [...e.quote.matchAll(/[+-]?\d+(?:\.\d+)?/g)].find((m) => Number(m[0]) === value)?.[0];
+      if (literal2) break;
+    }
+    if (!literal2) throw new ContractError("fact_literal", "Numeric fact has no supported literal representation.");
+    const empty = { value: null, evidence: [] };
+    const next = push({ subject: f.measure, relationship: empty, answer: { value: literal2, evidence: f.value.evidence }, numeric_value: f.value, unit: f.unit, qualifier: f.qualifier, time_context: empty });
+    if (r.issues) next.issues = r.issues;
+  }
+  const response = { version: "candidates-v1", records, outcomes: packet.passages.map((p) => {
+    const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
+    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Recognized explicit text relationships and/or quantitative facts. Noun answers remain text; unrecognized relationships may still be present." : "No supported noun relationship or quantitative fact recognized. Text is retained, not fully interpreted." };
+  }) };
+  assertTextFactConsistency(response);
+  return response;
+}
+function textFactMeaning() {
+  return { kind: "text_relationships", title: "Recognized facts", context: null, explanation: "Explicit subject\u2013relationship\u2013answer statements are recognized. Answers may be names or nouns. Numerical facts are retained separately with their units. Unsupported prose is not interpreted, and every relationship still needs source review." };
+}
+
+// src/interpretation/column-mapping.js
+var MAPPING_VERSION = "mapped-table-v2";
+var LEGACY_MAPPING_VERSION = "mapped-table-v1";
+var fail2 = (message) => {
+  throw new ContractError("column_mapping", message);
+};
+var literal = /^([+-]?)\$?([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(%)?$/;
+function numeric(raw, version = MAPPING_VERSION) {
+  const value = raw.trim(), m = value.match(version === LEGACY_MAPPING_VERSION ? literal : /^([+-]?)\s*\$?\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?:\s*(%|percent))?$/i);
+  if (!m || m[1] && /^[+-]/.test(m[2])) return null;
+  const number2 = Number((m[1] || "") + m[2].replaceAll(",", ""));
+  return Number.isFinite(number2) ? { value: number2, dollar: value.includes("$"), percent: !!m[3] } : null;
+}
+var kinds = /* @__PURE__ */ new Set(["text", "number", "percent", "dollars"]);
+var reserved = /* @__PURE__ */ new Set(["constructor", "prototype", "__proto__", "record_id", "review_status", "validation_issues"]);
+function nameFor(label, index, used, suffix = "") {
+  let name = label.toLowerCase().replace(/%/g, " percent ").replace(/\$/g, " dollars ").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
+  if (!/^[a-z]/.test(name) || reserved.has(name)) name = "column_" + (index + 1);
+  if (suffix && !name.endsWith(suffix)) name = name.slice(0, 32 - suffix.length) + suffix;
+  const base = name;
+  let duplicate = 2;
+  while (used.has(name)) name = base + "_" + duplicate++;
+  used.add(name);
+  return name;
+}
+function detectColumns(text, version = MAPPING_VERSION, explicitHeader = false) {
+  const legacy = version === LEGACY_MAPPING_VERSION;
+  if (typeof text !== "string" || text.length > LIMITS.text) return null;
+  const lines = [];
+  let start = 0;
+  for (const raw of text.split("\n")) {
+    const quote = legacy ? raw.trim() : raw.replace(/^ +| +$/g, "");
+    if (quote.trim() || !legacy && quote.includes("	")) lines.push({ quote, start: start + raw.indexOf(quote) });
+    start += raw.length + 1;
+  }
+  if (lines.length < 2) return null;
+  const headerAt = lines.findIndex((l) => /\t|\||,/.test(l.quote));
+  if (headerAt < 0 || headerAt > 3) return null;
+  const header = lines[headerAt];
+  const delimiter = header.quote.includes("	") ? "	" : header.quote.includes("|") ? "|" : ",";
+  const split = (quote) => {
+    if (delimiter === "," && quote.includes('"')) return null;
+    let value = quote;
+    if (delimiter === "|") value = value.replace(/^\|/, "").replace(/\|$/, "");
+    return value.split(delimiter).map((v) => v.trim());
+  };
+  if (!header.quote.trim()) return null;
+  const labels = split(header.quote);
+  if (!labels || labels.length < 2 || labels.length > LIMITS.fields || labels.some((l) => !/[\p{L}]/u.test(l) && !(!legacy && (/^#\s*\d+$/.test(l) || explicitHeader)) || l.length > 100 || (legacy || !explicitHeader) && /[\n<>]/.test(l) || delimiter === "," && /\d/.test(l))) return null;
+  const rows = [], skipped = [];
+  for (const line of lines.slice(headerAt + 1)) {
+    if (delimiter === "|" && /^\|?[\s:|-]+\|?$/.test(line.quote)) continue;
+    const cells = split(line.quote);
+    if (!cells || cells.length !== labels.length || line.quote.length > LIMITS.quote) {
+      skipped.push({ quote: line.quote.slice(0, 120), reason: "Row has a different cell count, unsupported CSV quoting or exceeds the evidence limit." });
+      continue;
+    }
+    if (!legacy && cells.every((v) => !v)) {
+      skipped.push({ quote: line.quote, reason: "Row has no readable text; image-only content was not read." });
+      continue;
+    }
+    rows.push({ ...line, cells });
+  }
+  if (!rows.length) return null;
+  if (rows.length > LIMITS.records) fail2("More than 50 mapped rows. Paste a smaller table; no rows were truncated.");
+  if (header.quote.length > LIMITS.quote) fail2("The header exceeds the evidence limit.");
+  const used = /* @__PURE__ */ new Set();
+  const columns = labels.map((label, index) => {
+    const values = rows.map((r) => r.cells[index]).filter(Boolean), numbers = values.map((v) => numeric(v, version));
+    let kind = "text", reason = "Retained as text; no numeric conversion was assumed.";
+    const identifier = /\b(id|identifier|code|zip|postal|date|year)\b/i.test(label) || values.some((v) => /^[-+]?0\d/.test(v));
+    if (!identifier && /%|\bpercent(?:age)?\b/i.test(label)) {
+      kind = "percent";
+      reason = "Percentage heading; values remain on the 0\u2013100 scale.";
+    } else if (!identifier && /\$|\bdollars?\b/i.test(label)) {
+      kind = "dollars";
+      reason = "Explicit dollar heading; no currency conversion or ISO currency inference.";
+    } else if (!legacy && !identifier && /^(?:count|number of .+)$/i.test(label)) {
+      kind = "number";
+      reason = "Explicit count heading; annotated or malformed values require review rather than guessed conversion.";
+    } else if (!identifier && values.length && numbers.every(Boolean)) {
+      if (numbers.every((n) => n.percent && !n.dollar)) kind = "percent";
+      else if (numbers.every((n) => n.dollar && !n.percent)) kind = "dollars";
+      else if (numbers.every((n) => !n.dollar && !n.percent)) kind = "number";
+      reason = kind === "text" ? "Mixed unit markers retained as text." : "Consistent literal cell format; verify the heading before approval.";
+    }
+    if (!legacy && kind === "text" && numbers.some(Boolean) && !numbers.every(Boolean)) reason = "Mixed numeric/annotated text retained as text; no annotation was stripped.";
+    const required = legacy || kind !== "text" || !rows.some((r) => !r.cells[index]);
+    if (!required) reason += " Empty text cells remain null; images are not read.";
+    const suffix = !legacy ? kind === "percent" ? "_percent" : kind === "dollars" ? "_dollars" : "" : "";
+    const exportLabel = !legacy && /^#?\s*\d[\d.,]*$/.test(label) ? "column " + label.replace("#", "") : label;
+    return { label, name: nameFor(exportLabel, index, used, suffix), kind, reason, required };
+  });
+  return { delimiter: delimiter === "	" ? "tab" : delimiter, header, rows, columns, skipped, prefix_lines: headerAt, version };
+}
+function mappedSchema(plan, overrides) {
+  const columns = overrides === void 0 ? plan.columns.map(({ name, kind }) => ({ name, kind })) : overrides;
+  if (!Array.isArray(columns) || columns.length !== plan.columns.length || columns.some((c) => !c || Object.keys(c).some((k) => !["name", "kind"].includes(k)) || typeof c.name !== "string" || !kinds.has(c.kind))) fail2("Choose one valid mapping for every source column.");
+  const schema = { fields: columns.map((c) => ({
+    name: c.name,
+    type: c.kind === "text" ? "string" : "number",
+    required: plan.version === LEGACY_MAPPING_VERSION || c.kind !== "text" || !plan.rows.some((r) => !r.cells[columns.indexOf(c)]),
+    ...c.kind === "text" ? {} : { number_format: "en-US-grouped" },
+    ...c.kind === "percent" ? { min: 0, max: 100 } : {}
+  })) };
+  return { columns, schema };
+}
+function mappingFor(job) {
+  if (![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) return null;
+  const plan = detectColumns(job.packet.source.text, job.parser_version, job.retrieval?.content_kind === "table");
+  if (!plan) fail2("No supported delimited table remains in this source.");
+  const mapping = mappedSchema(plan, job.mapping);
+  if (canonical(mapping.schema) !== canonical(job.packet.schema)) fail2("Saved columns differ from the recorded mapping.");
+  return { plan, ...mapping };
+}
+function extractMappedTable(job) {
+  const { plan, columns } = mappingFor(job), packet = job.packet;
+  const locate = (line) => {
+    const quote = line.quote.trim(), start = line.start + line.quote.length - line.quote.trimStart().length;
+    const passage = packet.passages.find((p) => start >= p.start && start + quote.length <= p.end);
+    if (!passage) fail2("A mapped row crosses a source boundary.");
+    let occurrence = 0, found = passage.text.indexOf(quote);
+    while (found >= 0 && found + passage.start < start) {
+      occurrence++;
+      found = passage.text.indexOf(quote, found + 1);
+    }
+    return { passage_id: passage.id, quote, occurrence };
+  };
+  const header = locate(plan.header);
+  const records = plan.rows.map((row, index) => {
+    const span = locate(row), issues = [];
+    const fields = Object.fromEntries(columns.map((column, i) => {
+      const raw = row.cells[i], n = numeric(raw, job.parser_version);
+      let value = column.kind === "text" ? job.parser_version !== LEGACY_MAPPING_VERSION && !raw ? null : raw : n?.value ?? null;
+      if (column.kind !== "text" && n && (n.percent && column.kind !== "percent" || n.dollar && column.kind !== "dollars")) {
+        value = null;
+        issues.push("A unit marker conflicts with the selected column mapping. Correct the mapping before approval.");
+      }
+      return [column.name, { value, evidence: value === null ? [] : [span, header] }];
+    }));
+    return { id: "row-" + (index + 1), fields, ...issues.length ? { issues } : {} };
+  });
+  return { version: "candidates-v1", records, outcomes: packet.passages.map((p) => {
+    const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
+    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Cells mapped using an explicit delimited header; source row and header retained. This does not prove completeness." : "Retained text outside mapped rows." };
+  }) };
+}
+
+// src/public-network.js
+var InputError = class extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+};
+function publicURL(input) {
+  if (!input || input.length > 2048) throw new InputError("Enter a public HTTPS URL (up to 2048 characters).");
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new InputError("Enter a valid public HTTPS URL.");
+  }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || host.length > 253 || host.endsWith(".") || !host.includes(".") || !/^[a-z0-9.-]+$/.test(host) || host.split(".").some((label) => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) || /^[0-9.]+$/.test(host) || /(?:^|\.)(localhost|local|internal|test|invalid|example|onion|home|lan)$/.test(host)) {
+    throw new InputError("Use a public HTTPS hostname without credentials, IP addresses, or custom ports.");
+  }
+  url.hash = "";
+  return url;
+}
+function publicAddress(ip) {
+  if (ip.includes(":")) {
+    return /^[23][0-9a-f]{3}:/i.test(ip) && !/^200[12]:|^3fff:/i.test(ip);
+  }
+  const octets = ip.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b, c] = octets;
+  return !(a === 0 || a === 10 || a === 127 || a >= 224 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 168 || b === 0 || b === 88 && c === 99) || a === 198 && (b === 18 || b === 19 || b === 51 && c === 100) || a === 203 && b === 0 && c === 113);
 }
 
 // src/interpretation/wage-table.js
@@ -1193,7 +1402,7 @@ function needsPageIntake(source) {
   const text = source.text.replace(/\r\n?/g, "\n");
   return text.length > LIMITS.text || paragraphs(text).length > LIMITS.passages || pageHeaders(text).length > 1 || pageHeaders(text).some((h) => h.kind === "employment");
 }
-function planPage(source, proseVersion = PROSE_VERSION) {
+function planPage(source, proseVersion = PROSE_VERSION, { semantic = false } = {}) {
   if (!source || Object.keys(source).some((k) => !["text", "url"].includes(k)) || typeof source.text !== "string" || !source.text.trim() || source.text.length > PAGE_LIMIT)
     throw new ContractError("page_limit", "Paste nonempty page text up to 64,000 characters. Nothing is silently truncated.");
   const text = source.text.replace(/\r\n?/g, "\n");
@@ -1246,7 +1455,8 @@ function planPage(source, proseVersion = PROSE_VERSION) {
   let batch = [], size = 0, part = 0;
   const flush = () => {
     if (batch.length) {
-      add("Other page text \xB7 part " + ++part, batch, PROSE_SCHEMA, proseVersion, "prose");
+      const nounFacts = semantic && hasTextRelations(batch.map((p) => p.text).join("\n\n"));
+      add("Other page text \xB7 part " + ++part, batch, nounFacts ? TEXT_FACTS_SCHEMA : PROSE_SCHEMA, nounFacts ? TEXT_FACTS_VERSION : proseVersion, "prose");
       batch = [];
       size = 0;
     }
@@ -1832,25 +2042,29 @@ function tableDatasets(tables, issues) {
       const line = (cells) => cells.map((c) => String(c).replace(/\s+/g, " ").trim()).join("	");
       const local = [];
       for (const columns of groups) {
-        const header = line(columns.map((i) => t.headers[i]));
+        const selectedHeaders = columns.map((i) => t.headers[i]), ranked = rankShape(selectedHeaders);
+        const context = ranked && title.length <= 500 ? "Table context: " + title + "\n\n" : "";
+        const header = line(selectedHeaders);
         if (header.length > 2048) error("source_limit", "A table header exceeds the evidence limit.");
-        let batch = [], length = header.length, start = 1;
+        const rowLimit = ranked ? Math.min(24, Math.floor(50 / (ranked.wide ? ranked.ranks.length : 1))) : 24;
+        let batch = [], length = context.length + header.length, start = 1;
         const range = columns.slice(1);
         const columnLabel = groups.length === 1 ? "" : " \xB7 " + (columns.at(-1) < 8 ? "columns 1\u2013" + columns.length : "shared column 1 + columns " + (range[0] + 1) + (range.length > 1 ? "\u2013" + (range.at(-1) + 1) : "")) + " of " + t.headers.length;
         const flush = () => {
           if (!batch.length) return;
-          const text = header + "\n" + batch.join("\n");
-          const mapping = detectColumns(text, MAPPING_VERSION, true);
+          const text = context + header + "\n" + batch.join("\n");
+          const meaning = rankingPlan(text);
+          const mapping = meaning || detectColumns(text, MAPPING_VERSION, true);
           if (!mapping) error("table_mapping", "Source column headings cannot be mapped; no zero-record table was reported as imported.");
-          local.push({ kind: "table", label: title + " \xB7 rows " + start + "\u2013" + (start + batch.length - 1) + " of " + t.rows.length + columnLabel, text, row_count: batch.length, column_count: columns.length, table_key, row_start: start, total_columns: t.headers.length, column_indices: columns });
+          local.push({ kind: "table", label: title + " \xB7 rows " + start + "\u2013" + (start + batch.length - 1) + " of " + t.rows.length + columnLabel, text, row_count: batch.length, column_count: columns.length, record_count: meaning?.factCount ?? batch.length, table_key, row_start: start, total_columns: t.headers.length, column_indices: columns });
           start += batch.length;
           batch = [];
-          length = header.length;
+          length = context.length + header.length;
         };
         for (const row of t.rows) {
           const value = line(columns.map((i) => row[i] ?? ""));
           if (value.length > 2048) error("source_limit", "A table row exceeds the 2,048-character evidence limit.");
-          if (batch.length === 24 || length + value.length + 1 > 12e3) flush();
+          if (batch.length === rowLimit || length + value.length + 1 > 12e3) flush();
           batch.push(value);
           length += value.length + 1;
         }
@@ -1927,6 +2141,10 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
     }
     let supportedProse = false;
     if (!datasets.length) for (const part of prose) {
+      if (hasTextRelations(part.text)) {
+        supportedProse = true;
+        break;
+      }
       const packet = await createPacket({ source: { text: part.text, url: source }, schema: PROSE_SCHEMA });
       if (extractProseRules(packet).records.length) {
         supportedProse = true;
@@ -1980,7 +2198,7 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
 }
 
 // src/interpretation/review-queue.js
-var tableMethods = /* @__PURE__ */ new Set(["mapped-table-v1", "mapped-table-v2", "pasted-wage-table-v1", "pasted-wage-table-v2", "pasted-page-table-v1"]);
+var tableMethods = /* @__PURE__ */ new Set(["semantic-ranking-v1", "mapped-table-v1", "mapped-table-v2", "pasted-wage-table-v1", "pasted-wage-table-v2", "pasted-page-table-v1"]);
 var reviewOnly = /* @__PURE__ */ new Set(["association_unverified", "cross_passage_association"]);
 function reviewQueue(job, validation) {
   const structured = tableMethods.has(job.parser_version);
@@ -2107,7 +2325,7 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 <details class="card session-tools"><summary>Save or open a review</summary><div class="bar"><button id="save-session" type="button">Save review session</button><form id="restore-form" class="bar"><label for="session-file">Saved session JSON</label><input id="session-file" type="file" accept=".json,application/json" required><button id="restore-session" type="submit" class="secondary">Open saved session</button></form></div><p class="hint">Continue on another computer with a saved session. Files include full source and review history. Imported reviewers are self-declared. Reloading without saving clears your review.</p></details>
 <section id="page-sections" class="card" hidden><h2 id="batch-summary"></h2><div class="bar"><button id="previous-batch" type="button" class="secondary">Previous batch</button><button id="next-batch" type="button" class="secondary">Next batch</button></div><div class="bar"><label for="dataset">Page section</label><select id="dataset"></select><button id="open-section" type="button" class="secondary">Open selected section</button></div><p class="hint">Switching starts a new review. Save this section's review before switching; approvals do not carry between batches.</p><details><summary>Section scope and retained page</summary><p id="page-scope" class="hint"></p><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
 <section id="retrieved-panel" class="card" hidden><h2 id="retrieved-method"></h2><p><a id="retrieved-source" target="_blank" rel="noopener noreferrer"></a></p><p id="retrieved-summary" class="hint"></p><p id="retrieved-current"></p><div class="bar"><label for="retrieved-dataset">Retrieved content</label><select id="retrieved-dataset"></select><button id="open-retrieved" type="button" class="secondary">Open retrieved content</button></div><p id="retrieved-preview" class="hint"></p><p class="hint">Opening another selection starts a new review. Save your current session first. Retrieved text is a normalized snapshot; coverage may be incomplete.</p><details><summary>Fetch attempts and issues</summary><pre id="retrieval-checks" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section><p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
-<section id="workspace" hidden><details id="mapping-panel" class="card"><summary>Column mapping \xB7 suggested automatically</summary><p id="mapping-notice" class="hint"></p><form id="mapping-form"><div class="scroll"><table><thead><tr><th>Source heading</th><th>Export column</th><th>Format</th><th>Sample values</th></tr></thead><tbody id="mapping-columns"></tbody></table></div><p id="mapping-issues" class="hint"></p><button id="apply-mapping" type="submit" class="secondary" hidden>Apply column changes \xB7 starts a new review</button></form></details><div class="bar between toolbar"><div><strong id="counts"></strong><p id="queue-summary"></p><p id="export-scope" class="hint"></p></div><div class="bar"><button id="approved-csv">Export CSV</button><button id="approved-json" class="secondary">Export JSON</button></div></div>
+<section id="workspace" hidden><section id="meaning-panel" class="card" hidden><h2 id="meaning-title"></h2><p id="meaning-explanation" class="hint"></p><blockquote id="meaning-context" hidden></blockquote><p id="meaning-count" class="hint"></p></section><details id="mapping-panel" class="card"><summary>Column mapping \xB7 suggested automatically</summary><p id="mapping-notice" class="hint"></p><form id="mapping-form"><div class="scroll"><table><thead><tr><th>Source heading</th><th>Export column</th><th>Format</th><th>Sample values</th></tr></thead><tbody id="mapping-columns"></tbody></table></div><p id="mapping-issues" class="hint"></p><button id="apply-mapping" type="submit" class="secondary" hidden>Apply column changes \xB7 starts a new review</button></form></details><div class="bar between toolbar"><div><strong id="counts"></strong><p id="queue-summary"></p><p id="export-scope" class="hint"></p></div><div class="bar"><button id="approved-csv">Export CSV</button><button id="approved-json" class="secondary">Export JSON</button></div></div>
 <div class="review-layout"><section class="card preview" aria-labelledby="candidates-title"><div class="bar between"><h2 id="candidates-title">2. Review records</h2><label for="record-filter">Show <select id="record-filter"><option value="all">All records</option><option value="attention">Needs individual attention</option><option value="pending">Pending reviews</option></select></label></div><p class="hint">Click a value to inspect its source. Checked table rows can be approved together.</p><div class="scroll"><table><caption>Records in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
 <section id="batch-panel" class="batch" hidden><div class="bar between"><strong id="batch-count">No rows selected</strong><div class="bar"><button id="select-eligible" class="secondary" type="button">Select eligible rows</button><button id="clear-selection" class="secondary" type="button">Clear selection</button></div></div><p id="batch-help" class="hint"></p><form id="batch-form"><div class="batch-fields"><div><label for="batch-reviewer">Reviewer name</label><input id="batch-reviewer" required maxlength="80" autocomplete="off"></div><div><label for="batch-note">Batch review note</label><input id="batch-note" required maxlength="900" placeholder="What did you check about this table?"></div></div><label class="check"><input id="batch-confirm" type="checkbox"><span>I checked the source header mapping and confirm that the selected rows use it correctly.</span></label><button id="approve-batch" type="submit">Approve selected rows</button></form><p class="hint">This records a human batch decision. Prose, corrections and flagged rows require individual review.</p></section>
 <details><summary>How this was extracted</summary><p id="interpretation-summary" class="hint"></p><button id="revalidate" class="secondary">Revalidate evidence</button><p class="hint">Rules suggest records; matching text alone does not prove the relationship between values. No automatic acceptance is enabled.</p></details></section>
@@ -2141,6 +2359,7 @@ var lab_client_default = `"use strict";
     return scope?.kind === "table_batch" && /^row-\\d+$/.test(row.id) ? String(scope.row_start+Number(row.id.slice(4))-1) : row.id.replace(/^row-/, "");
   }
   const columnLabels = {
+    year: "Year", rank: "Rank", item: "Item", metric: "Ranking measure", category: "Category", subject: "Subject", relationship: "Relationship", answer: "Answer", numeric_value: "Numeric value", time_context: "Period",
     measure: "Measure", value: "Value", unit: "Unit", qualifier: "Qualifier", entity_name: "Name", corps_name: "Corps", score: "Score",
     occupational_group: "Occupational group", occupation: "Occupation", employment_count: "Jobs", location_quotient: "Location quotient",
     employment_percent_national: "National %", employment_percent_local: "Local %", hourly_wage_national_dollars: "National $/hour", hourly_wage_local_dollars: "Local $/hour",
@@ -2355,7 +2574,7 @@ var lab_client_default = `"use strict";
     return value;
   }
   function renderTable() {
-    const columns = state.view.job.packet.schema.fields;
+    const columns = state.view.job.packet.schema.fields.filter(f => state.view.job.parser_version !== "text-relations-v1" || f.required || state.view.validation.records.some(r => r.fields[f.name].value !== null));
     const head = document.createElement("tr");
     for (const value of [
       ...(queue().structured ? ["Select"] : []),
@@ -2501,6 +2720,16 @@ var lab_client_default = `"use strict";
       $("full-page").textContent = doc.text;
     }
     renderMapping();
+    const meaning=state.view.meaning;
+    $("meaning-panel").hidden=!meaning;
+    $("candidates-title").textContent="2. Review "+(meaning?.kind==="ranking"?"ranked items":meaning?.kind==="text_relationships"?"recognized facts":"records");
+    if(meaning){
+      $("meaning-title").textContent=meaning.title;
+      $("meaning-explanation").textContent=meaning.explanation;
+      $("meaning-context").hidden=!meaning.context;
+      $("meaning-context").textContent=meaning.context||"";
+      $("meaning-count").textContent=meaning.kind==="ranking"?meaning.source_rows+" source rows \u2192 "+meaning.record_count+" ranked items. "+(meaning.unsupported_items?meaning.unsupported_items+" additional lines were retained without interpretation.":""):"Empty optional columns are hidden in this preview; exports preserve the complete schema.";
+    }
     $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
     const batch=state.view.document?.selected_scope?.kind === "table_batch";
@@ -2918,7 +3147,7 @@ var reply2 = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: { ...headers2, "Content-Type": "application/json; charset=utf-8" }
 });
-var fail2 = (code, message, status = 400) => {
+var fail3 = (code, message, status = 400) => {
   const error2 = new ContractError(code, message);
   error2.status = status;
   throw error2;
@@ -2929,7 +3158,7 @@ async function readBody(request) {
   if (!/^application\/json(?:;|$)/i.test(
     request.headers.get("content-type") || ""
   ))
-    fail2("json_required", "Send a JSON request.", 415);
+    fail3("json_required", "Send a JSON request.", 415);
   let oversized = Number(request.headers.get("content-length")) > 1048576;
   const reader = request.body?.getReader(), chunks = [];
   let bytes = 0;
@@ -2945,19 +3174,19 @@ async function readBody(request) {
         }
         if (bytes > 2097152) {
           await reader.cancel();
-          fail2("request_limit", "The lab request exceeds 1 MiB.", 413);
+          fail3("request_limit", "The lab request exceeds 1 MiB.", 413);
         }
         if (!oversized) chunks.push(value);
       }
     } finally {
       reader.releaseLock();
     }
-  if (oversized) fail2("request_limit", "The lab request exceeds 1 MiB. Export the current diagnostic report before starting a smaller session.", 413);
+  if (oversized) fail3("request_limit", "The lab request exceeds 1 MiB. Export the current diagnostic report before starting a smaller session.", 413);
   let body;
   try {
     body = JSON.parse(await new Blob(chunks).text());
   } catch {
-    fail2("invalid_json", "The lab request is not valid JSON.");
+    fail3("invalid_json", "The lab request is not valid JSON.");
   }
   return body;
 }
@@ -2966,10 +3195,10 @@ async function entryFor(packet, response) {
 }
 function applyCorrection(packet, response, change) {
   if (!only(change, ["record_id", "fields", "reviewer", "note", "at", "prior_events"]) || typeof change.reviewer !== "string" || !change.reviewer.trim() || change.reviewer.length > 80 || typeof change.note !== "string" || !change.note.trim() || change.note.length > 1e3 || typeof change.at !== "string" || !Number.isFinite(Date.parse(change.at)) || !Array.isArray(change.prior_events) || change.prior_events.length > 64 || !plain2(change.fields))
-    fail2("invalid_correction", "A correction requires a reviewer, note, timestamp and requested fields.");
+    fail3("invalid_correction", "A correction requires a reviewer, note, timestamp and requested fields.");
   const next = structuredClone(response);
   const index = next.records.findIndex((r) => r.id === change.record_id);
-  if (change.record_id !== null && index < 0) fail2("unknown_record", "Select an existing record to correct.");
+  if (change.record_id !== null && index < 0) fail3("unknown_record", "Select an existing record to correct.");
   const candidate = { id: index < 0 ? "manual-" + (next.records.length + 1) : change.record_id, fields: change.fields };
   if (index < 0) next.records.push(candidate);
   else next.records[index] = candidate;
@@ -2987,23 +3216,25 @@ function applyCorrection(packet, response, change) {
 function originalResponse(job) {
   if (job.example_id !== "custom-text") return examples[job.example_id].scripted_response;
   if ([MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) return extractMappedTable(job);
+  if (job.parser_version === RANKING_VERSION) return extractRanking(job.packet);
+  if (job.parser_version === TEXT_FACTS_VERSION) return extractTextFacts(job.packet);
   if (job.parser_version === "name-number-v1") return extractTextRules(job.packet);
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if ([WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)) return extractWageTable(job.packet, job.parser_version);
   if ([PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version)) return extractProseRules(job.packet, job.parser_version);
-  fail2("parser_version", "Unsupported text parser version.");
+  fail3("parser_version", "Unsupported text parser version.");
 }
 async function documentInfo(job) {
   if (!job.document) return null;
   if (job.example_id !== "custom-text" || !only(job.document, ["source", "dataset_id"]))
-    fail2("invalid_document", "Invalid full-page source or selection.");
-  const plan = planPage(job.document.source, job.parser_version === LEGACY_PROSE_VERSION ? LEGACY_PROSE_VERSION : PROSE_VERSION);
+    fail3("invalid_document", "Invalid full-page source or selection.");
+  const plan = planPage(job.document.source, job.parser_version === LEGACY_PROSE_VERSION ? LEGACY_PROSE_VERSION : PROSE_VERSION, { semantic: job.parser_version === TEXT_FACTS_VERSION });
   const selected = plan.datasets.find((d) => d.id === job.document.dataset_id);
   if (!selected || job.parser_version !== selected.parser_version)
-    fail2("invalid_document", "The selected section or parser does not match the retained page.");
+    fail3("invalid_document", "The selected section or parser does not match the retained page.");
   const rebuilt = await createPacket({ source: { text: selected.text, url: job.document.source.url ?? null }, schema: selected.schema }, job.packet.source.received_at);
   if (canonical(rebuilt) !== canonical(job.packet))
-    fail2("document_mismatch", "The selected packet does not match its original full-page source.");
+    fail3("document_mismatch", "The selected packet does not match its original full-page source.");
   return { plan, selected, hash: await digest(plan.text), original_hash: await digest(job.document.source.text) };
 }
 function publicDocument(info, job) {
@@ -3035,11 +3266,11 @@ function publicDocument(info, job) {
 }
 async function checkJob(job) {
   if (!only(job, ["example_id", "packet", "cache_entry", "events", "revisions", "parser_version", "document", "mapping", "retrieval"]) || !Array.isArray(job.events) || job.events.length > 64 || job.revisions !== void 0 && (!Array.isArray(job.revisions) || job.revisions.length > 8))
-    fail2("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
-  if (job.mapping !== void 0 && ![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail2("column_mapping", "Recorded column mappings require a mapped table session.");
+    fail3("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
+  if (job.mapping !== void 0 && ![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail3("column_mapping", "Recorded column mappings require a mapped table session.");
   if (job.retrieval !== void 0) {
     const r = job.retrieval;
-    if (!only(r, ["method", "source", "retrieved_at", "snapshot_hash", "label", "content_kind"]) || !["static-html", "local-chromium"].includes(r.method) || r.content_kind !== void 0 && !["table", "prose"].includes(r.content_kind) || r.source !== job.packet.source.url || r.snapshot_hash !== job.packet.source.text_hash || typeof r.label !== "string" || r.label.length > 1e3 || typeof r.retrieved_at !== "string" || !Number.isFinite(Date.parse(r.retrieved_at))) fail2("retrieval_metadata", "Retrieval description does not match the retained text snapshot.");
+    if (!only(r, ["method", "source", "retrieved_at", "snapshot_hash", "label", "content_kind"]) || !["static-html", "local-chromium"].includes(r.method) || r.content_kind !== void 0 && !["table", "prose"].includes(r.content_kind) || r.source !== job.packet.source.url || r.snapshot_hash !== job.packet.source.text_hash || typeof r.label !== "string" || r.label.length > 1e3 || typeof r.retrieved_at !== "string" || !Number.isFinite(Date.parse(r.retrieved_at))) fail3("retrieval_metadata", "Retrieval description does not match the retained text snapshot.");
   }
   await revalidate(job.packet, job.cache_entry);
   await documentInfo(job);
@@ -3047,10 +3278,10 @@ async function checkJob(job) {
   if (job.example_id === "custom-text") {
     response = originalResponse(job);
   } else {
-    if (!Object.hasOwn(examples, job.example_id)) fail2("invalid_lab_job", "Unknown example.");
+    if (!Object.hasOwn(examples, job.example_id)) fail3("invalid_lab_job", "Unknown example.");
     const fixture = examples[job.example_id];
     if (job.packet.source.text !== fixture.source.text || job.packet.source.url !== fixture.source.url || canonical(job.packet.schema) !== canonical(fixture.schema))
-      fail2("example_mismatch", "The fictional example source or columns changed. Start again.");
+      fail3("example_mismatch", "The fictional example source or columns changed. Start again.");
     response = fixture.scripted_response;
   }
   for (const change of job.revisions || []) {
@@ -3059,8 +3290,9 @@ async function checkJob(job) {
     response = applyCorrection(job.packet, response, change);
     await revalidate(job.packet, await entryFor(job.packet, response));
   }
+  if (job.parser_version === TEXT_FACTS_VERSION) assertTextFactConsistency(response);
   if (canonical(job.cache_entry.raw_response) !== canonical(response))
-    fail2("example_mismatch", "Candidate data differs from its rule output and recorded corrections.");
+    fail3("example_mismatch", "Candidate data differs from its rule output and recorded corrections.");
   return exportInterpretation(job.packet, job.cache_entry, job.events, { approvedOnly: false });
 }
 async function view(job, result) {
@@ -3068,10 +3300,12 @@ async function view(job, result) {
   if (info) result.json.validation = documentEvidence(result.json.validation, info.selected, info.plan.text, info.hash);
   const records = result.json.validation.records;
   const mapped = mappingFor(job);
+  const meaning = job.parser_version === RANKING_VERSION ? rankingMeaning(job.packet) : job.parser_version === TEXT_FACTS_VERSION ? textFactMeaning() : null;
   const unmatched = result.json.validation.outcomes.filter((o) => o.status === "no_result");
   const tableLike = /(?:percent of total employment|mean hourly wage|major occupational group)/i.test(job.packet.source.text) || job.packet.passages.some((p) => /^.+?\s+\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?$/.test(p.text.trim()));
   return {
     job,
+    meaning,
     column_mapping: mapped ? {
       editable: true,
       delimiter: mapped.plan.delimiter,
@@ -3102,7 +3336,7 @@ async function view(job, result) {
     interpretation: {
       method: job.parser_version || "fictional-scripted-example",
       columns: job.packet.schema.fields.map((f) => f.name),
-      explanation: mapped ? "Delimited table: suggested columns from the header and literal cell formats. Identifiers stay text; units are not converted. Malformed rows are listed in the mapping preview. Review the row/header association before approval." : info ? "Full page retained. Current section: " + info.selected.label + ". Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets." : [WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version) ? "Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = " + wageHeader(job.packet).local + ". Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval." : [PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version) ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
+      explanation: meaning ? meaning.explanation : mapped ? "Delimited table: suggested columns from the header and literal cell formats. Identifiers stay text; units are not converted. Malformed rows are listed in the mapping preview. Review the row/header association before approval." : info ? "Full page retained. Current section: " + info.selected.label + ". Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets." : [WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version) ? "Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = " + wageHeader(job.packet).local + ". Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval." : [PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version) ? "Suggested measure, value, unit and qualifier columns from explicit quantitative patterns. All suggestions require review. Counts, rates and scores can describe different concepts; inspect the full quotation. Unmatched text is retained. This is limited rule-based interpretation, not general language understanding." : "Limited name/number rules or prewritten examples. All candidates require review."
     },
     notice: "Rule-based or scripted candidates, with optional human corrections. No AI inference. Session-only, self-declared review; not an authenticated audit service."
   };
@@ -3151,28 +3385,33 @@ async function labFetch(request) {
       let packet, response, parserVersion, document, mapping;
       if (body?.example_id === "custom-text") {
         if (!only(body, ["example_id", "source", "schema", "mode", "dataset_id", "mapping", "retrieval"]) || body.mode !== void 0 && !["auto", "pair"].includes(body.mode))
-          fail2("invalid_input", "Choose automatic suggestions or manual pair columns.");
-        if (body.mapping !== void 0 && (body.mode !== "auto" || body.dataset_id !== void 0)) fail2("column_mapping", "Column mapping requires automatic mode on one pasted table.");
+          fail3("invalid_input", "Choose automatic suggestions or manual pair columns.");
+        if (body.mapping !== void 0 && (body.mode !== "auto" || body.dataset_id !== void 0)) fail3("column_mapping", "Column mapping requires automatic mode on one pasted table.");
         if (body.mode === "auto" && body.schema !== void 0)
-          fail2("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
+          fail3("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
         const columns = body.mode === "auto" ? detectColumns(body.source?.text?.replace(/\r\n?/g, "\n"), MAPPING_VERSION, body.retrieval?.content_kind === "table") : null;
-        if (body.mapping !== void 0 && !columns) fail2("column_mapping", "No supported delimited header found.");
-        if (columns && body.dataset_id === void 0) {
+        if (body.mapping !== void 0 && !columns) fail3("column_mapping", "No supported delimited header found.");
+        const ranking = body.mode === "auto" ? rankingPlan(body.source?.text?.replace(/\r\n?/g, "\n")) : null;
+        if (ranking && body.mapping === void 0 && body.dataset_id === void 0) {
+          packet = await createPacket({ source: body.source, schema: ranking.schema });
+          parserVersion = RANKING_VERSION;
+        } else if (columns && body.dataset_id === void 0) {
           const mapped = mappedSchema(columns, body.mapping);
           mapping = mapped.columns;
           packet = await createPacket({ source: body.source, schema: mapped.schema });
           parserVersion = MAPPING_VERSION;
         } else if (body.mode === "auto" && (needsPageIntake(body.source) || body.dataset_id !== void 0)) {
-          const plan = planPage(body.source);
+          const plan = planPage(body.source, PROSE_VERSION, { semantic: true });
           const selected = body.dataset_id === void 0 ? plan.datasets[0] : plan.datasets.find((d) => d.id === body.dataset_id);
-          if (!selected) fail2("invalid_selection", "Choose a listed full-page section.");
+          if (!selected) fail3("invalid_selection", "Choose a listed full-page section.");
           document = { source: body.source, dataset_id: selected.id };
           packet = await createPacket({ source: { text: selected.text, url: body.source.url ?? null }, schema: selected.schema });
           parserVersion = selected.parser_version;
         } else {
-          if (body.dataset_id !== void 0) fail2("invalid_selection", "Section selection requires automatic mode.");
-          packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? PROSE_SCHEMA : body.schema });
-          parserVersion = body.mode === "auto" ? PROSE_VERSION : "name-number-v1";
+          if (body.dataset_id !== void 0) fail3("invalid_selection", "Section selection requires automatic mode.");
+          const textFacts = body.mode === "auto" && hasTextRelations(body.source?.text);
+          packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? textFacts ? TEXT_FACTS_SCHEMA : PROSE_SCHEMA : body.schema });
+          parserVersion = body.mode === "auto" ? textFacts ? TEXT_FACTS_VERSION : PROSE_VERSION : "name-number-v1";
           if (body.mode === "auto" && wageHeader(packet)) {
             packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
             parserVersion = WAGE_VERSION;
@@ -3181,7 +3420,7 @@ async function labFetch(request) {
         response = originalResponse({ example_id: "custom-text", parser_version: parserVersion, packet, ...mapping ? { mapping } : {}, ...body.retrieval ? { retrieval: body.retrieval } : {} });
       } else {
         if (!only(body, ["example_id"]) || !Object.hasOwn(examples, body.example_id))
-          fail2("unknown_example", "Choose an example or paste your own text.");
+          fail3("unknown_example", "Choose an example or paste your own text.");
         const fixture = examples[body.example_id];
         packet = await createPacket(fixture);
         response = fixture.scripted_response;
@@ -3190,7 +3429,7 @@ async function labFetch(request) {
         packet,
         await scriptedInterpreter(response)
       );
-      if (body.retrieval && document && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail2("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
+      if (body.retrieval && document && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail3("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
       const job = {
         example_id: body.example_id,
         packet,
@@ -3207,21 +3446,21 @@ async function labFetch(request) {
     if (url.pathname !== "/api/interpretation/action")
       return reply2({ error: "Not found", code: "not_found" }, 404);
     if (!only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !["revalidate", "review", "export", "correct", "save", "restore", "review_batch"].includes(body.action))
-      fail2("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
+      fail3("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
     if (body.action === "restore") {
       if (!only(body, ["action", "session"]) || !only(body.session, ["format", "job"]) || body.session.format !== "toolkit-review-session-v1")
-        fail2("invalid_session", "Choose a toolkit review session JSON file, not a CSV or data export.");
+        fail3("invalid_session", "Choose a toolkit review session JSON file, not a CSV or data export.");
       return reply2(await view(body.session.job, await checkJob(body.session.job)));
     }
     const result = await checkJob(body.job);
     if (body.action === "review_batch") {
       const queue = reviewQueue(body.job, result.json.validation);
       if (!only(body, ["action", "job", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !Array.isArray(body.record_ids) || !body.record_ids.length || body.record_ids.length > 50 || new Set(body.record_ids).size !== body.record_ids.length || body.record_ids.some((id) => !queue.eligible_ids.includes(id)) || body.confirmed_mapping !== true)
-        fail2("batch_not_eligible", "Select pending, unchanged table rows with clean checks and explicitly confirm the column mapping. Prose and exceptions need individual review.");
+        fail3("batch_not_eligible", "Select pending, unchanged table rows with clean checks and explicitly confirm the column mapping. Prose and exceptions need individual review.");
       if (body.record_ids.length > queue.remaining_review_events)
-        fail2("review_limit", "This batch exceeds the session review limit. Save the session and reduce the selection.", 413);
+        fail3("review_limit", "This batch exceeds the session review limit. Save the session and reduce the selection.", 413);
       if (typeof body.reviewer !== "string" || !body.reviewer.trim() || body.reviewer.length > 80 || typeof body.note !== "string" || !body.note.trim() || body.note.length > 900)
-        fail2("invalid_review", "Enter a reviewer name and a batch review note (up to 900 characters).");
+        fail3("invalid_review", "Enter a reviewer name and a batch review note (up to 900 characters).");
       const events = await appendReviewBatch(
         body.job.packet,
         body.job.cache_entry,
@@ -3240,7 +3479,7 @@ async function labFetch(request) {
     if (body.action === "save") {
       const session = JSON.stringify({ format: "toolkit-review-session-v1", job: body.job });
       if (new TextEncoder().encode(session).byteLength > 1e6)
-        fail2("session_limit", "This review session exceeds the portable file limit. Export diagnostic JSON instead.", 413);
+        fail3("session_limit", "This review session exceeds the portable file limit. Export diagnostic JSON instead.", 413);
       return new Response(session + "\n", { headers: {
         ...headers2,
         "Content-Type": "application/json; charset=utf-8",
@@ -3248,8 +3487,8 @@ async function labFetch(request) {
       } });
     }
     if (body.action === "correct") {
-      if ((body.job.revisions || []).length >= 8) fail2("revision_limit", "Maximum 8 revisions. Download diagnostic JSON before starting a new session.");
-      if (!only(body.correction, ["record_id", "fields", "reviewer", "note"])) fail2("invalid_correction", "Unexpected correction fields.");
+      if ((body.job.revisions || []).length >= 8) fail3("revision_limit", "Maximum 8 revisions. Download diagnostic JSON before starting a new session.");
+      if (!only(body.correction, ["record_id", "fields", "reviewer", "note"])) fail3("invalid_correction", "Unexpected correction fields.");
       const change = { ...body.correction, at: (/* @__PURE__ */ new Date()).toISOString(), prior_events: body.job.events };
       const response = applyCorrection(body.job.packet, body.job.cache_entry.raw_response, change);
       const job = {
@@ -3262,7 +3501,7 @@ async function labFetch(request) {
     }
     if (body.action === "review") {
       if (body.job.events.length >= 64)
-        fail2(
+        fail3(
           "review_limit",
           "This demo is limited to 64 review events. Download a diagnostic report, then load a new example.",
           413
@@ -3278,7 +3517,7 @@ async function labFetch(request) {
     }
     if (body.action === "revalidate") return reply2(await view(body.job, result));
     if (!["csv", "json"].includes(body.format) || body.diagnostic !== void 0 && typeof body.diagnostic !== "boolean")
-      fail2(
+      fail3(
         "invalid_export",
         "Choose CSV or JSON and a boolean diagnostic flag."
       );
@@ -3296,6 +3535,8 @@ async function labFetch(request) {
     exported.json.candidate_revision_history = body.job.revisions || [];
     exported.json.original_candidates = originalResponse(body.job);
     if (body.job.retrieval) exported.json.source_retrieval = { ...body.job.retrieval, notice: "Descriptive session metadata, not authenticated source provenance. Snapshot hash is revalidated." };
+    if (body.job.parser_version === RANKING_VERSION) exported.json.interpretation_context = rankingMeaning(body.job.packet);
+    if (body.job.parser_version === TEXT_FACTS_VERSION) exported.json.interpretation_context = textFactMeaning();
     exported.json.method = body.job.parser_version || "fictional-scripted-example";
     exported.json.notice = "Limited rules or scripted examples, with optional human corrections. No AI inference. Original automated findings are retained separately from human review.";
     const prefix = body.diagnostic ? "interpretation-diagnostic" : "interpretation-approved";

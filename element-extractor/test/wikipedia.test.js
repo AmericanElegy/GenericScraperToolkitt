@@ -18,10 +18,10 @@ test('Wikipedia-shaped pages recover data from wrappers, omit navigation, keep s
   const tables=f.datasets.filter(d=>d.kind==='table');assert.equal(tables.length,7);
   const labels=tables.map(d=>d.label);assert.ok(labels.some(l=>l.startsWith('Summary')));assert.ok(!labels.some(l=>l.includes('Unsupported grid')));
   const wide=tables.filter(d=>d.label.startsWith('Wide thresholds'));assert.equal(wide.length,2);assert.deepEqual([...new Set(wide.flatMap(d=>d.column_indices))],[0,1,2,3,4,5,6,7,8]);assert.equal(wide[0].table_key,wide[1].table_key);
-  for(const d of tables){const r=await start(mf,f,d);assert.equal(r.status,200,d.label);const v=await r.json();assert.equal(v.counts.candidates,d.row_count,d.label);assert.ok(v.job.packet.schema.fields.length<=8);
+  for(const d of tables){const r=await start(mf,f,d);assert.equal(r.status,200,d.label);const v=await r.json();assert.equal(v.counts.candidates,d.label.startsWith('Ranked')?d.row_count*2:d.row_count,d.label);assert.ok(v.job.packet.schema.fields.length<=8);
    for(const row of v.validation.records)for(const field of Object.values(row.fields))for(const e of field.evidence)assert.equal(d.text.slice(e.source_start,e.source_end),e.quote);
    if(d.label.startsWith('Summary'))assert.equal(v.validation.records[0].fields.count.value,1234);
-   if(d.label.startsWith('Ranked'))assert.equal(v.validation.records[0].fields.column_1.value,'Alpha');
+   if(d.label.startsWith('Ranked'))assert.equal(v.validation.records[0].fields.item.value,'Alpha');
    if(d.label.startsWith('Shares')){const fields=v.validation.records[0].fields;assert.equal(fields.share_percent.value,8);assert.equal(fields.notes.value,null);assert.equal(fields.image.value,null);assert.equal(fields.notes.issues.length,0);assert.equal(v.job.packet.schema.fields.find(f=>f.name==='notes').required,false);assert.equal(v.review_queue.eligible_ids.length,2);}
    if(d.label.startsWith('Required numbers')){assert.equal(v.validation.records[1].fields.count.value,null);assert.ok(v.validation.records[1].fields.count.issues.some(i=>i.code==='required_value_missing'));assert.equal(v.review_queue.exception_ids.length,1);}
    if(d.label.startsWith('Totals'))assert.equal(v.counts.candidates,2);

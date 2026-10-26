@@ -20,6 +20,7 @@
     return scope?.kind === "table_batch" && /^row-\d+$/.test(row.id) ? String(scope.row_start+Number(row.id.slice(4))-1) : row.id.replace(/^row-/, "");
   }
   const columnLabels = {
+    year: "Year", rank: "Rank", item: "Item", metric: "Ranking measure", category: "Category", subject: "Subject", relationship: "Relationship", answer: "Answer", numeric_value: "Numeric value", time_context: "Period",
     measure: "Measure", value: "Value", unit: "Unit", qualifier: "Qualifier", entity_name: "Name", corps_name: "Corps", score: "Score",
     occupational_group: "Occupational group", occupation: "Occupation", employment_count: "Jobs", location_quotient: "Location quotient",
     employment_percent_national: "National %", employment_percent_local: "Local %", hourly_wage_national_dollars: "National $/hour", hourly_wage_local_dollars: "Local $/hour",
@@ -234,7 +235,7 @@
     return value;
   }
   function renderTable() {
-    const columns = state.view.job.packet.schema.fields;
+    const columns = state.view.job.packet.schema.fields.filter(f => state.view.job.parser_version !== "text-relations-v1" || f.required || state.view.validation.records.some(r => r.fields[f.name].value !== null));
     const head = document.createElement("tr");
     for (const value of [
       ...(queue().structured ? ["Select"] : []),
@@ -380,6 +381,16 @@
       $("full-page").textContent = doc.text;
     }
     renderMapping();
+    const meaning=state.view.meaning;
+    $("meaning-panel").hidden=!meaning;
+    $("candidates-title").textContent="2. Review "+(meaning?.kind==="ranking"?"ranked items":meaning?.kind==="text_relationships"?"recognized facts":"records");
+    if(meaning){
+      $("meaning-title").textContent=meaning.title;
+      $("meaning-explanation").textContent=meaning.explanation;
+      $("meaning-context").hidden=!meaning.context;
+      $("meaning-context").textContent=meaning.context||"";
+      $("meaning-count").textContent=meaning.kind==="ranking"?meaning.source_rows+" source rows → "+meaning.record_count+" ranked items. "+(meaning.unsupported_items?meaning.unsupported_items+" additional lines were retained without interpretation.":""):"Empty optional columns are hidden in this preview; exports preserve the complete schema.";
+    }
     $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
     const batch=state.view.document?.selected_scope?.kind === "table_batch";
