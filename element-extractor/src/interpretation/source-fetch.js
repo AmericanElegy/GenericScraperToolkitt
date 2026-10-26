@@ -1,3 +1,4 @@
+import {descriptiveTableName,capturedTableCatalog} from './table-selection.js';
 import {rankShape,rankingPlan} from './ranking-rules.js';
 import {hasTextRelations} from './text-facts.js';
 import { detectColumns, MAPPING_VERSION } from './column-mapping.js';
@@ -39,7 +40,9 @@ function tableDatasets(tables,issues) {
    if(t.headers.length<2||t.headers.length>100){issues.push(title+': Import requires 2–100 source columns.');continue;}
 
    const groups=t.headers.length<=8?[t.headers.map((_,i)=>i)]:Array.from({length:Math.ceil((t.headers.length-1)/7)},(_,part)=>[0,...Array.from({length:Math.min(7,t.headers.length-1-part*7)},(_,i)=>1+part*7+i)]);
-   const line=cells=>cells.map(c=>String(c).replace(/\s+/g,' ').trim()).join('\t');
+   const normalizeCells=cells=>cells.map(c=>String(c).replace(/\s+/g,' ').trim());
+   const line=cells=>normalizeCells(cells).join('\t');
+   const table_name=descriptiveTableName(title,t.headers);
    const local=[];
    for(const columns of groups){
     const selectedHeaders=columns.map(i=>t.headers[i]),ranked=rankShape(selectedHeaders);
@@ -53,7 +56,7 @@ function tableDatasets(tables,issues) {
      const meaning=rankingPlan(text);
      const mapping=meaning||detectColumns(text,MAPPING_VERSION,true);
      if(!mapping)error('table_mapping','Source column headings cannot be mapped; no zero-record table was reported as imported.');
-     local.push({kind:'table',label:title+' · rows '+start+'–'+(start+batch.length-1)+' of '+t.rows.length+columnLabel,text,row_count:batch.length,column_count:columns.length,record_count:meaning?.factCount??batch.length,table_key,row_start:start,total_columns:t.headers.length,column_indices:columns});start+=batch.length;batch=[];length=context.length+header.length;};
+     local.push({kind:'table',table_title:title,table_name,total_rows:t.rows.length,grid:{headers:normalizeCells(selectedHeaders),rows:batch.map(v=>v.split('\t'))},display_label:table_name+' · rows '+start+'–'+(start+batch.length-1)+' of '+t.rows.length+columnLabel,label:title+' · rows '+start+'–'+(start+batch.length-1)+' of '+t.rows.length+columnLabel,text,row_count:batch.length,column_count:columns.length,record_count:meaning?.factCount??batch.length,table_key,row_start:start,total_columns:t.headers.length,column_indices:columns});start+=batch.length;batch=[];length=context.length+header.length;};
     for(const row of t.rows){const value=line(columns.map(i=>row[i]??''));if(value.length>2048)error('source_limit','A table row exceeds the 2,048-character evidence limit.');if(batch.length===rowLimit||length+value.length+1>12000)flush();batch.push(value);length+=value.length+1;}
     flush();
    }
@@ -106,8 +109,10 @@ export async function sourceFetch(request,url,env,{fetchPage,analyze}) {
   if(!datasets.length)return reply({error:issues.length?'No importable selections: '+issues.join(' '):analysis.message||'No supported tables or article text found.',code:'no_importable_content',source,checks,issues,discovery:analysis.discovery},422);
   let size=0,omitted=0,selectedCount=0;datasets=datasets.filter(d=>{if(selectedCount>=32||size+d.text.length>128000){omitted++;return false;}size+=d.text.length;selectedCount++;return true;});
   if(omitted)issues.push(omitted+' selections were not imported because the 32-selection / 128,000-character budget was reached. Use a narrower source or paste a selected section.');
+  const table_catalog=capturedTableCatalog(datasets);
+  for(const d of datasets)if(d.grid){d.table_preview={headers:d.grid.headers,rows:d.grid.rows.slice(0,3)};delete d.grid;}
   const retrieved_at=new Date().toISOString();
   for(const [i,d] of datasets.entries()){d.id='retrieved-'+(i+1);d.snapshot_hash=await digest(d.text);}
-  return reply({source,method,retrieved_at,datasets,checks,issues,discovery:analysis.discovery,notice:'Normalized text snapshots, not raw HTML or authenticated source proofs. Choose content to start a new unapproved review; saved reviews retain their source snapshot. Rendering is a timed snapshot and may omit later updates.'});
+  return reply({source,method,retrieved_at,datasets,table_catalog,checks,issues,discovery:analysis.discovery,notice:'Normalized text snapshots, not raw HTML or authenticated source proofs. Choose content to start a new unapproved review; saved reviews retain their source snapshot. Rendering is a timed snapshot and may omit later updates.'});
  }catch(e){return reply({error:e.message,code:e.code||'fetch_stopped',checks:[...checks,{method:'static-html',status:'failed',message:e.message}],issues},e.status||422);}
 }

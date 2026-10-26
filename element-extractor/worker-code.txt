@@ -721,34 +721,6 @@ async function exportInterpretation(packet, entry, events = [], { approvedOnly =
   return { json: json2, csv };
 }
 
-// src/interpretation/feedback-snapshots.js
-var SNAPSHOT_FORMAT = "toolkit-feedback-snapshot-v1";
-async function makeFeedbackSnapshot(job, example) {
-  const history = [];
-  for (const revision of job.revisions || []) {
-    for (const event of revision.prior_events) history.push(await digest(event));
-    const { prior_events, ...change } = revision;
-    history.push(await digest(change));
-  }
-  for (const event of job.events) history.push(await digest(event));
-  const data = { format: SNAPSHOT_FORMAT, session: job.packet.hash, history, example, ...example ? {} : { job } };
-  return { ...data, id: await digest(data) };
-}
-
-// src/interpretation/feedback.js
-var FEEDBACK_FORMAT = "toolkit-feedback-case-v1";
-async function feedbackCase(job, validation, original) {
-  const reviewed = validation.records.filter((r) => r.review_status === "approved" || r.review_status === "rejected");
-  if (!reviewed.length) throw new ContractError("feedback_needs_review", "Approve or reject at least one record before collecting feedback. Corrections remain proposals until reviewed.");
-  const values = (r) => Object.fromEntries(Object.entries(r.fields).map(([name, f]) => [name, f.value]));
-  const expectations = { approved: reviewed.filter((r) => r.review_status === "approved").map((r) => ({ record_id: r.id, values: values(r) })), rejected: reviewed.filter((r) => r.review_status === "rejected").map((r) => ({ record_id: r.id, values: values(r) })), unreviewed_count: validation.records.length - reviewed.length, coverage: "partial-review; unreviewed or absent records are not ground truth" };
-  const baseline = { candidate_values: original.records.map(values) };
-  const payload = { format: FEEDBACK_FORMAT, job, expectations, baseline };
-  const result = { ...payload, id: await digest(payload) };
-  if (new TextEncoder().encode(canonical(result)).byteLength > 95e4) throw new ContractError("feedback_limit", "This feedback case exceeds the portable case limit. Use a smaller source selection.");
-  return result;
-}
-
 // src/interpretation/ranking-rules.js
 var RANKING_VERSION = "semantic-ranking-v1";
 var fail = (message) => {
@@ -868,6 +840,106 @@ function rankingMeaning(packet) {
     context_evidence: p.context ? sourceSpan(packet, p.context) : null,
     unsupported_items: p.unrecognized.length
   };
+}
+
+// src/interpretation/table-selection.js
+var fail2 = (message) => {
+  throw new ContractError("table_selection", message);
+};
+function descriptiveTableName(title, headers3) {
+  const actual = String(title || "").slice(0, 180);
+  if (!/^(?:Accessible table|Table) \d+$/i.test(actual)) return (/^item$/i.test(headers3[0]) && /^count$/i.test(headers3[1]) ? actual + " \u2014 item counts" : actual).slice(0, 180);
+  const lead = headers3[0] || "Rows", others = headers3.slice(1, 4).join(", ");
+  return (lead + " comparison" + (others ? " \u2014 " + others + (headers3.length > 4 ? "\u2026" : "") : "")).slice(0, 180);
+}
+function capturedTableCatalog(datasets) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const d of datasets) {
+    if (!d.grid) continue;
+    if (!groups.has(d.table_key)) groups.set(d.table_key, []);
+    groups.get(d.table_key).push(d);
+  }
+  const catalog = [];
+  for (const [key, parts] of groups) {
+    const columns = [...new Set(parts.flatMap((p) => p.column_indices))].sort((a, b) => a - b), labels = /* @__PURE__ */ new Map(), rows = /* @__PURE__ */ new Map();
+    for (const part of parts) {
+      part.column_indices.forEach((c, i) => {
+        if (labels.has(c) && labels.get(c) !== part.grid.headers[i]) fail2("Captured column headings disagree.");
+        labels.set(c, part.grid.headers[i]);
+      });
+      part.grid.rows.forEach((cells, i) => {
+        const row = part.row_start + i;
+        if (!rows.has(row)) rows.set(row, /* @__PURE__ */ new Map());
+        const target = rows.get(row);
+        part.column_indices.forEach((c, j) => {
+          if (target.has(c) && target.get(c) !== cells[j]) fail2("Overlapping captured cells disagree.");
+          target.set(c, cells[j]);
+        });
+      });
+    }
+    const parent = { version: "captured-table-v1", key, title: parts[0].table_title, name: parts[0].table_name, source_rows: parts[0].total_rows, source_columns: parts[0].total_columns, columns: columns.map((index) => ({ index, label: labels.get(index) })), rows: [...rows].sort((a, b) => a[0] - b[0]).map(([index, cells]) => ({ index, cells: columns.map((c) => cells.has(c) ? cells.get(c) : null) })) };
+    catalog.push(parent);
+  }
+  return catalog;
+}
+function validateParent(p) {
+  if (!p || p.version !== "captured-table-v1" || typeof p.key !== "string" || p.key.length > 100 || typeof p.title !== "string" || p.title.length > 2048 || /[\t\r\n]/.test(p.title) || typeof p.name !== "string" || p.name.length > 180 || !Number.isInteger(p.source_rows) || p.source_rows < 1 || p.source_rows > 5e3 || !Number.isInteger(p.source_columns) || p.source_columns < 2 || p.source_columns > 100 || !Array.isArray(p.columns) || p.columns.length < 2 || p.columns.length > 100 || !Array.isArray(p.rows) || !p.rows.length || p.rows.length > 800 || canonical(p).length > 5e5) fail2("Captured table is outside the supported size or shape.");
+  if (p.columns.some((c, i) => !Number.isInteger(c.index) || c.index < 0 || c.index >= p.source_columns || i && c.index <= p.columns[i - 1].index || typeof c.label !== "string" || c.label.length > 2048)) fail2("Captured source columns must be distinct and ordered.");
+  if (p.rows.some((r, i) => !Number.isInteger(r.index) || r.index < 1 || r.index > p.source_rows || i && r.index <= p.rows[i - 1].index || !Array.isArray(r.cells) || r.cells.length !== p.columns.length || r.cells.some((c) => c !== null && (typeof c !== "string" || c.length > 2048 || /[\t\n\r]/.test(c))))) fail2("Captured source rows must retain their original positions and cells.");
+}
+async function selectCapturedTable(parent, options) {
+  validateParent(parent);
+  if (!options || Object.keys(options).some((k) => !["columns", "first_row", "last_row"].includes(k)) || !Array.isArray(options.columns) || options.columns.length < 2 || options.columns.length > 8 || new Set(options.columns).size !== options.columns.length || options.columns.some((c) => !Number.isInteger(c) || !parent.columns.some((p) => p.index === c))) fail2("Choose 2\u20138 distinct captured columns.");
+  if (!Number.isInteger(options.first_row) || !Number.isInteger(options.last_row) || options.first_row < 1 || options.last_row < options.first_row || options.last_row > parent.source_rows) fail2("Choose a valid source row range.");
+  const selected = parent.rows.filter((r) => r.index >= options.first_row && r.index <= options.last_row);
+  if (selected.length !== options.last_row - options.first_row + 1) fail2("That row range includes rows that were not captured. Choose a smaller captured range.");
+  if (selected.length > 50) fail2("Choose no more than 50 source rows per review.");
+  const positions = options.columns.map((c) => parent.columns.findIndex((p) => p.index === c)), headers3 = positions.map((i) => parent.columns[i].label), rows = selected.map((r) => positions.map((i) => {
+    if (r.cells[i] === null) fail2("A selected cell was not captured. Choose available rows and columns.");
+    return r.cells[i];
+  }));
+  const line = (cells) => cells.join("	"), ranked = rankShape(headers3), context = ranked && parent.title.length <= 500 ? "Table context: " + parent.title + "\n\n" : "";
+  if (headers3.some((h) => /[\t\n\r]/.test(h)) || [headers3, ...rows].some((r) => line(r).length > LIMITS.quote)) fail2("The selected header or row exceeds the evidence size limit.");
+  const text = context + [headers3, ...rows].map(line).join("\n");
+  if (text.length > LIMITS.text) fail2("Selected text exceeds 16,000 characters. Choose fewer rows or columns.");
+  const ranking = rankingPlan(text);
+  const selection = { version: "table-slice-v1", parent, parent_hash: await digest(parent), columns: [...options.columns], first_row: options.first_row, last_row: options.last_row };
+  const label = (parent.name + " \xB7 selected rows " + options.first_row + "\u2013" + options.last_row + " of " + parent.source_rows + " \xB7 columns " + options.columns.map((c) => c + 1).join(", ")).slice(0, 1e3);
+  return { kind: "table", label, text, snapshot_hash: await digest(text), row_count: rows.length, column_count: headers3.length, record_count: ranking?.factCount || rows.length, table_key: parent.key, table_selection: selection, table_preview: { headers: headers3, rows: rows.slice(0, 3) }, total_columns: parent.source_columns };
+}
+async function validateTableSelection(selection, text) {
+  if (!selection || selection.version !== "table-slice-v1" || Object.keys(selection).some((k) => !["version", "parent", "parent_hash", "columns", "first_row", "last_row"].includes(k))) fail2("Invalid saved table selection.");
+  const result = await selectCapturedTable(selection.parent, { columns: selection.columns, first_row: selection.first_row, last_row: selection.last_row });
+  if (selection.parent_hash !== result.table_selection.parent_hash || text !== result.text) fail2("Selected content does not match the retained captured table and row/column choices.");
+  return result;
+}
+
+// src/interpretation/feedback-snapshots.js
+var SNAPSHOT_FORMAT = "toolkit-feedback-snapshot-v1";
+async function makeFeedbackSnapshot(job, example) {
+  const history = [];
+  for (const revision of job.revisions || []) {
+    for (const event of revision.prior_events) history.push(await digest(event));
+    const { prior_events, ...change } = revision;
+    history.push(await digest(change));
+  }
+  for (const event of job.events) history.push(await digest(event));
+  const data = { format: SNAPSHOT_FORMAT, session: job.packet.hash, history, example, ...example ? {} : { job } };
+  return { ...data, id: await digest(data) };
+}
+
+// src/interpretation/feedback.js
+var FEEDBACK_FORMAT = "toolkit-feedback-case-v1";
+async function feedbackCase(job, validation, original) {
+  const reviewed = validation.records.filter((r) => r.review_status === "approved" || r.review_status === "rejected");
+  if (!reviewed.length) throw new ContractError("feedback_needs_review", "Approve or reject at least one record before collecting feedback. Corrections remain proposals until reviewed.");
+  const values = (r) => Object.fromEntries(Object.entries(r.fields).map(([name, f]) => [name, f.value]));
+  const expectations = { approved: reviewed.filter((r) => r.review_status === "approved").map((r) => ({ record_id: r.id, values: values(r) })), rejected: reviewed.filter((r) => r.review_status === "rejected").map((r) => ({ record_id: r.id, values: values(r) })), unreviewed_count: validation.records.length - reviewed.length, coverage: "partial-review; unreviewed or absent records are not ground truth" };
+  const baseline = { candidate_values: original.records.map(values) };
+  const payload = { format: FEEDBACK_FORMAT, job, expectations, baseline };
+  const result = { ...payload, id: await digest(payload) };
+  if (new TextEncoder().encode(canonical(result)).byteLength > 95e4) throw new ContractError("feedback_limit", "This feedback case exceeds the portable case limit. Use a smaller source selection.");
+  return result;
 }
 
 // src/interpretation/text-rules.js
@@ -1130,7 +1202,7 @@ function textFactMeaning() {
 // src/interpretation/column-mapping.js
 var MAPPING_VERSION = "mapped-table-v2";
 var LEGACY_MAPPING_VERSION = "mapped-table-v1";
-var fail2 = (message) => {
+var fail3 = (message) => {
   throw new ContractError("column_mapping", message);
 };
 var literal = /^([+-]?)\$?([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(%)?$/;
@@ -1191,8 +1263,8 @@ function detectColumns(text, version = MAPPING_VERSION, explicitHeader = false) 
     rows.push({ ...line, cells });
   }
   if (!rows.length) return null;
-  if (rows.length > LIMITS.records) fail2("More than 50 mapped rows. Paste a smaller table; no rows were truncated.");
-  if (header.quote.length > LIMITS.quote) fail2("The header exceeds the evidence limit.");
+  if (rows.length > LIMITS.records) fail3("More than 50 mapped rows. Paste a smaller table; no rows were truncated.");
+  if (header.quote.length > LIMITS.quote) fail3("The header exceeds the evidence limit.");
   const used = /* @__PURE__ */ new Set();
   const columns = labels.map((label, index) => {
     const values = rows.map((r) => r.cells[index]).filter(Boolean), numbers = values.map((v) => numeric(v, version));
@@ -1224,7 +1296,7 @@ function detectColumns(text, version = MAPPING_VERSION, explicitHeader = false) 
 }
 function mappedSchema(plan, overrides) {
   const columns = overrides === void 0 ? plan.columns.map(({ name, kind }) => ({ name, kind })) : overrides;
-  if (!Array.isArray(columns) || columns.length !== plan.columns.length || columns.some((c) => !c || Object.keys(c).some((k) => !["name", "kind"].includes(k)) || typeof c.name !== "string" || !kinds.has(c.kind))) fail2("Choose one valid mapping for every source column.");
+  if (!Array.isArray(columns) || columns.length !== plan.columns.length || columns.some((c) => !c || Object.keys(c).some((k) => !["name", "kind"].includes(k)) || typeof c.name !== "string" || !kinds.has(c.kind))) fail3("Choose one valid mapping for every source column.");
   const schema = { fields: columns.map((c) => ({
     name: c.name,
     type: c.kind === "text" ? "string" : "number",
@@ -1237,9 +1309,9 @@ function mappedSchema(plan, overrides) {
 function mappingFor(job) {
   if (![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) return null;
   const plan = detectColumns(job.packet.source.text, job.parser_version, job.retrieval?.content_kind === "table");
-  if (!plan) fail2("No supported delimited table remains in this source.");
+  if (!plan) fail3("No supported delimited table remains in this source.");
   const mapping = mappedSchema(plan, job.mapping);
-  if (canonical(mapping.schema) !== canonical(job.packet.schema)) fail2("Saved columns differ from the recorded mapping.");
+  if (canonical(mapping.schema) !== canonical(job.packet.schema)) fail3("Saved columns differ from the recorded mapping.");
   return { plan, ...mapping };
 }
 function extractMappedTable(job) {
@@ -1247,7 +1319,7 @@ function extractMappedTable(job) {
   const locate = (line) => {
     const quote = line.quote.trim(), start = line.start + line.quote.length - line.quote.trimStart().length;
     const passage = packet.passages.find((p) => start >= p.start && start + quote.length <= p.end);
-    if (!passage) fail2("A mapped row crosses a source boundary.");
+    if (!passage) fail3("A mapped row crosses a source boundary.");
     let occurrence = 0, found = passage.text.indexOf(quote);
     while (found >= 0 && found + passage.start < start) {
       occurrence++;
@@ -1639,12 +1711,13 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f5f7fa;color:#203149;font:15px system-ui,sans-serif}main{max-width:1500px;margin:auto;padding:24px 28px 48px}h1{font-size:28px;letter-spacing:-.7px;margin:6px 0}h2{font-size:18px;margin:0 0 12px}h3{font-size:15px;margin:16px 0 8px}p{line-height:1.55;margin:8px 0 12px}a{color:#245e91}#retrieved-source{overflow-wrap:anywhere}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:22px}.eyebrow,.hint{font-size:13px;color:#63738a}.eyebrow{letter-spacing:.08em;text-transform:uppercase}.card{background:#fff;border:1px solid #dfe5ed;border-radius:12px;padding:18px;margin-bottom:16px}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.between{justify-content:space-between}button,input,select,textarea{font:inherit}button{border:1px solid #245a84;border-radius:7px;background:#245a84;color:#fff;padding:9px 14px;cursor:pointer}button.secondary{background:#fff;color:#304860;border-color:#cbd5e1}button:disabled{opacity:.45;cursor:not-allowed}input,select,textarea{background:#fff;color:inherit;border:1px solid #c7d1de;border-radius:7px;padding:9px;max-width:100%}input,textarea{width:100%}textarea{min-height:78px;resize:vertical}#source-text{min-height:130px}label{display:block;font-size:13px;font-weight:600;margin:10px 0 5px}fieldset{border:1px solid #dfe5ed;border-radius:8px;margin-top:12px}details{margin:12px 0}details.card{margin:0 0 16px}summary{cursor:pointer;font-weight:600;color:#344f6d;font-size:14px}details[open]>summary{margin-bottom:12px}.check{display:flex;gap:8px;align-items:flex-start;font-weight:400;line-height:1.45}.check input{width:auto;margin-top:4px}.review-layout{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:18px;align-items:start}.preview{min-width:0}.inspector{position:sticky;top:16px;min-width:0;max-height:calc(100vh - 32px);overflow:auto}.scroll{overflow:auto;max-height:65vh}table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}th{position:sticky;top:0;background:#f8fafc;font-size:12px;font-weight:600;color:#65748a;z-index:1}th,td{padding:10px 8px;border-bottom:1px solid #edf0f5;vertical-align:middle}tr.is-selected{background:#f0f6fc}td button.value{border:0;background:transparent;color:#273f5a;padding:4px 3px;min-width:0;max-width:240px;text-align:left;font-size:13px;line-height:1.4;border-radius:4px}td button.value[aria-pressed=true]{background:#dbeaf9;color:#164b79;box-shadow:0 0 0 1px #9dbfdf}td.numeric button{white-space:nowrap;font-variant-numeric:tabular-nums}td input[type=checkbox]{width:auto}.status{font-size:11px;white-space:nowrap;color:#67758b}.status.approved{color:#197351}.status.rejected{color:#a34d42}.status.needs_review{color:#936614}blockquote{margin:8px 0;padding:12px;background:#f5f8fc;border-left:3px solid #97b4d0;border-radius:0 6px 6px 0;font-size:13px;line-height:1.55;overflow-wrap:anywhere;max-height:210px;overflow:auto}mark{background:#ffe5ad;color:#203149}.passage{border-bottom:1px solid #e6ecf2;padding:8px 0;font-size:13px;overflow-wrap:anywhere}.passage.focused{border-left:3px solid #8db0d2;padding-left:10px}.passage h3{margin:6px 0;font-size:13px}.findings{font-size:13px;line-height:1.5}ul,ol{padding-left:20px}li{margin:7px 0;line-height:1.5}.hash{font-family:monospace;overflow-wrap:anywhere;font-size:11px}.batch{background:#f5f9fd;border:1px solid #d9e5f2;border-radius:9px;padding:12px;margin-top:14px}.batch-fields{display:grid;grid-template-columns:1fr 2fr;gap:10px}.batch .hint{margin:6px 0}.toolbar{margin-bottom:12px}#counts{font-size:15px}#queue-summary{font-size:12px;color:#65758b}#status{font-size:13px;line-height:1.5;color:#47607b;margin:10px 0;overflow-wrap:anywhere}.empty{padding:24px;text-align:center;color:#68788c}caption{font-size:12px;text-align:left;color:#748197;padding:0 8px 8px}#history,#revision-history{font-size:13px;overflow-wrap:anywhere}.session-tools input[type=file]{width:auto;max-width:100%}.badge{font-size:12px;background:#e8f2eb;color:#357252;border-radius:20px;padding:5px 10px}footer{font-size:12px;color:#79869a;margin-top:18px}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #d59a32;outline-offset:3px}[hidden]{display:none!important}@media(max-width:1000px){.review-layout{grid-template-columns:minmax(0,1fr)}.inspector{position:static;max-height:none}.scroll{max-height:55vh}}@media(max-width:600px){main{padding:18px 12px}.top{align-items:flex-start}.card{padding:14px}.batch-fields{grid-template-columns:1fr}.bar select{max-width:100%;width:100%}h1{font-size:24px}.top .badge{display:none}th,td{padding:8px 6px}}
 .review-reason{font-size:13px;background:#f2f6fa;padding:10px 12px;border-radius:7px}.review-reason[data-blocked=true]{background:#fff6e6;color:#79520e}.selected-value{font-weight:600;font-size:16px;overflow-wrap:anywhere;max-height:90px;overflow:auto}.review-navigation button{padding:6px 9px;font-size:12px}#review-field{width:100%;font-size:13px}#evidence>blockquote{max-height:145px}#evidence details blockquote{max-height:145px}
+.part-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:4px 12px}.part-columns input{width:auto}#retrieved-grid{max-height:210px}#table-part-panel input[type=number]{width:105px}#part-columns{max-height:220px;overflow:auto}
 </style><script src="/interpretation-client.js" defer><\/script></head><body><main>
 <header class="top"><div><a class="eyebrow" href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><p class="hint">Paste a page. Review what matters. Export your data.</p></div><span class="badge">Local review workspace</span></header>
 <details class="card" id="input-panel" open><summary>1. Add source text</summary><form id="custom-input"><label for="source-url">Source URL \xB7 reference unless you click Fetch page</label><div class="bar"><input id="source-url" type="url" placeholder="https://example.org/article" style="flex:1;min-width:180px"><button id="fetch-source" type="button" class="secondary">Fetch page</button></div><p class="hint">Tries ordinary HTML first. The local server can try JavaScript rendering when indicated. Pasting below never fetches a URL.</p><label for="source-text">Or paste a passage or full page</label><textarea id="source-text" required placeholder="Paste your page here. Columns are suggested automatically."></textarea><p class="hint">Up to 64,000 characters in automatic mode. New text starts a new review.</p><details><summary>Source and extraction options</summary><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Automatically detect tables and facts</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"><p class="hint">Use lowercase names and underscores. This mode accepts simple name/number pairs.</p></fieldset></details><button id="extract" type="submit">Preview suggested records</button></form><details><summary>Try an example</summary><div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load" type="button" class="secondary">Load example</button></div></details></details>
 <details class="card session-tools"><summary>Save or open a review</summary><div class="bar"><button id="save-session" type="button">Save review session</button><form id="restore-form" class="bar"><label for="session-file">Saved session JSON</label><input id="session-file" type="file" accept=".json,application/json" required><button id="restore-session" type="submit" class="secondary">Open saved session</button></form></div><p class="hint">Continue on another computer with a saved session. Files include full source and review history. Imported reviewers are self-declared. Reloading without saving clears your review.</p></details>
 <section id="page-sections" class="card" hidden><h2 id="batch-summary"></h2><div class="bar"><button id="previous-batch" type="button" class="secondary">Previous batch</button><button id="next-batch" type="button" class="secondary">Next batch</button></div><div class="bar"><label for="dataset">Page section</label><select id="dataset"></select><button id="open-section" type="button" class="secondary">Open selected section</button></div><p class="hint">Switching starts a new review. Save this section's review before switching; approvals do not carry between batches.</p><details><summary>Section scope and retained page</summary><p id="page-scope" class="hint"></p><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
-<section id="retrieved-panel" class="card" hidden><h2 id="retrieved-method"></h2><p><a id="retrieved-source" target="_blank" rel="noopener noreferrer"></a></p><p id="retrieved-summary" class="hint"></p><p id="retrieved-current"></p><div class="bar"><label for="retrieved-dataset">Retrieved content</label><select id="retrieved-dataset"></select><button id="open-retrieved" type="button" class="secondary">Open retrieved content</button></div><p id="retrieved-preview" class="hint"></p><p class="hint">Opening another selection starts a new review. Save your current session first. Retrieved text is a normalized snapshot; coverage may be incomplete.</p><details><summary>Fetch attempts and issues</summary><pre id="retrieval-checks" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section><p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
+<section id="retrieved-panel" class="card" hidden><h2 id="retrieved-method"></h2><p><a id="retrieved-source" target="_blank" rel="noopener noreferrer"></a></p><p id="retrieved-summary" class="hint"></p><p id="retrieved-current"></p><p class="hint">These are separate source tables or batches, not different versions. Compare the headings and sample rows below.</p><div class="bar"><label for="retrieved-dataset">Retrieved content</label><select id="retrieved-dataset"></select><button id="open-retrieved" type="button" class="secondary">Open retrieved content</button></div><p id="retrieved-preview" class="hint"></p><div id="retrieved-grid" class="scroll" hidden></div><details id="table-part-panel" hidden><summary>Choose part of this table</summary><p id="table-part-info" class="hint"></p><fieldset id="part-columns"><legend>Columns to keep \xB7 choose 2\u20138</legend><div id="part-column-options" class="part-columns"></div></fieldset><div class="bar"><label>First source row <input id="part-first-row" type="number" min="1" step="1"></label><label>Last source row <input id="part-last-row" type="number" min="1" step="1"></label></div><div class="bar"><button id="preview-table-part" type="button" class="secondary">Preview chosen part</button><button id="reset-table-part" type="button" class="secondary">Use original selection</button></div><p id="table-part-status" class="hint" role="status" aria-live="polite"></p></details><p class="hint">Opening another selection starts a new review. Save your current session first. Retrieved text is a normalized snapshot; coverage may be incomplete.</p><details><summary>Fetch attempts and issues</summary><pre id="retrieval-checks" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section><p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
 <section class="card" aria-label="Feedback automatic saving"><strong>Feedback autosave</strong><p id="storage-status" class="hint" role="status" aria-live="polite">Checking local feedback storage\u2026</p><details><summary>Drive folder and recovery</summary><p class="hint">Choose your Google Drive folder once on each computer. This app creates its own Web Table Toolkit/feedback subfolder. It cannot verify Drive cloud upload status.</p><label for="drive-root">Existing Google Drive folder</label><input id="drive-root" placeholder="G:\\My Drive" autocomplete="off"><div class="bar"><button id="connect-storage" type="button" class="secondary">Connect folder</button><button id="reload-storage" type="button" class="secondary">Reload / retry saving</button></div><p id="storage-count" class="hint"></p></details></section><details class="card"><summary>Improvement examples \xB7 collect reviewed cases</summary><p class="hint">Collect reviewed examples to test future updates across pages. Approved records are expected answers; rejected proposals track known issues. Pending records are excluded. This does not teach or change the extractor automatically.</p><p id="feedback-summary" class="hint">No examples collected. Automatic saving depends on the Drive connection above; portable downloads remain available.</p><div class="bar"><button id="collect-feedback" class="secondary" disabled>Add current reviewed example</button><button id="download-feedback" class="secondary" disabled>Download feedback collection</button></div><label for="saved-feedback">Collected examples</label><select id="saved-feedback"></select><button id="open-feedback-review" type="button" class="secondary" disabled>Open selected review</button><label for="feedback-file">Open a feedback collection to continue adding examples</label><input id="feedback-file" type="file" accept=".json,application/json"><button id="import-feedback" class="secondary">Open collection</button><p class="hint">Files contain source text and review history. Keep them with your project files; nothing is uploaded to an AI service.</p></details><section id="workspace" hidden><section id="meaning-panel" class="card" hidden><h2 id="meaning-title"></h2><p id="meaning-explanation" class="hint"></p><blockquote id="meaning-context" hidden></blockquote><p id="meaning-count" class="hint"></p></section><details id="mapping-panel" class="card"><summary>Column mapping \xB7 suggested automatically</summary><p id="mapping-notice" class="hint"></p><form id="mapping-form"><div class="scroll"><table><thead><tr><th>Source heading</th><th>Export column</th><th>Format</th><th>Sample values</th></tr></thead><tbody id="mapping-columns"></tbody></table></div><p id="mapping-issues" class="hint"></p><button id="apply-mapping" type="submit" class="secondary" hidden>Apply column changes \xB7 starts a new review</button></form></details><div class="bar between toolbar"><div><strong id="counts"></strong><p id="queue-summary"></p><p id="export-scope" class="hint"></p></div><div class="bar"><button id="approved-csv">Export CSV</button><button id="approved-json" class="secondary">Export JSON</button></div></div>
 <div class="review-layout"><section class="card preview" aria-labelledby="candidates-title"><div class="bar between"><h2 id="candidates-title">2. Review records</h2><label for="record-filter">Show <select id="record-filter"><option value="all">All records</option><option value="attention">Needs individual attention</option><option value="pending">Pending reviews</option></select></label></div><p class="hint">Click a value to inspect its source. Checked table rows can be approved together.</p><div class="scroll"><table><caption>Records in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
 <section id="batch-panel" class="batch" hidden><div class="bar between"><strong id="batch-count">No rows selected</strong><div class="bar"><button id="select-eligible" class="secondary" type="button">Select eligible rows</button><button id="clear-selection" class="secondary" type="button">Clear selection</button></div></div><p id="batch-help" class="hint"></p><form id="batch-form"><div class="batch-fields"><div><label for="batch-reviewer">Reviewer name</label><input id="batch-reviewer" required maxlength="80" autocomplete="off"></div><div><label for="batch-note">Batch review note</label><input id="batch-note" required maxlength="900" placeholder="What did you check about this table?"></div></div><label class="check"><input id="batch-confirm" type="checkbox"><span>I checked the source header mapping and confirm that the selected rows use it correctly.</span></label><button id="approve-batch" type="submit">Approve selected rows</button></form><p class="hint">This records a human batch decision. Prose, corrections and flagged rows require individual review.</p></section>
@@ -1660,7 +1733,7 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 var lab_client_default = `"use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null, feedback: [], storage: null, savedReviews: [], unsavedFeedback: new Map() };
+  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null, partSelection:null, partDirty:false, feedback: [], storage: null, savedReviews: [], unsavedFeedback: new Map() };
   let storageReady=Promise.resolve();
   const labels = {
     approved: "Approved",
@@ -1732,15 +1805,18 @@ var lab_client_default = `"use strict";
   }
   function controls() {
     $("fetch-source").disabled=state.busy;
-    const chosen=state.retrieved?.datasets.find(d=>d.id===$("retrieved-dataset").value);
+    const chosen=chosenRetrieved();
     const current=state.view?.job.retrieval;
-    const alreadyOpen=chosen&&current?.source===state.retrieved.source&&current.snapshot_hash===chosen.snapshot_hash&&current.label===chosen.label;
-    $("open-retrieved").disabled=state.busy||!chosen||alreadyOpen;
-    $("open-retrieved").textContent=alreadyOpen?"Already open in review":"Open selected content";
+    const alreadyOpen=chosen&&current?.source===state.retrieved.source&&current.snapshot_hash===chosen.snapshot_hash&&current.label===(chosen.display_label||chosen.label);
+    $("open-retrieved").disabled=state.busy||!chosen||alreadyOpen||state.partDirty;
+    $("open-retrieved").textContent=state.partDirty?"Preview your chosen part first":alreadyOpen?"Already open in review":state.partSelection?"Open selected part":"Open selected content";
     if(state.retrieved){
       $("retrieved-current").textContent=current?"Open in review: "+current.label+". Counts and exports below cover this selection only.":"No retrieved selection is open in the current review.";
-      $("retrieved-preview").textContent=chosen?(chosen.kind==="table"?"Table snapshot \xB7 "+chosen.row_count+" captured rows \xB7 "+chosen.column_count+(chosen.total_columns>chosen.column_count?" of "+chosen.total_columns+" source columns (shared first column)":" columns"):"Article snapshot \xB7 "+chosen.text.split(/\\n\\s*\\n/).length+" text blocks")+(alreadyOpen?" \xB7 currently open.":" \xB7 selected but not open yet."):"";
+      $("retrieved-preview").textContent=chosen?(chosen.kind==="table"?"Table snapshot \xB7 "+chosen.row_count+" captured rows \xB7 "+chosen.column_count+(chosen.total_columns>chosen.column_count?" of "+chosen.total_columns+" source columns"+(chosen.table_selection?" \xB7 custom part":" (shared first column)"):" columns"):"Article snapshot \xB7 "+chosen.text.split(/\\n\\s*\\n/).length+" text blocks")+(alreadyOpen?" \xB7 currently open.":" \xB7 selected but not open yet."):"";
     }
+    renderRetrievedGrid(chosen);
+    for(const id of ["preview-table-part","reset-table-part","part-first-row","part-last-row"])$(id).disabled=state.busy;
+    for(const input of document.querySelectorAll("#part-column-options input"))input.disabled=state.busy;
     $("retrieved-dataset").disabled=state.busy||!state.retrieved;
     for (const input of document.querySelectorAll('#mapping-columns input, #mapping-columns select')) input.disabled = state.busy;
     $("apply-mapping").disabled = state.busy || !state.view?.column_mapping?.editable;
@@ -2212,16 +2288,49 @@ var lab_client_default = `"use strict";
       say("Column mapping applied to a new review. No previous approval was carried over. " + state.view.extraction.message);
     });
   };
-  function clearRetrieved() {state.retrieved=null;$("retrieved-panel").hidden=true;$("retrieved-dataset").replaceChildren();}
+  function originalRetrieved(){return state.retrieved?.datasets.find(d=>d.id===$("retrieved-dataset").value);}
+  function chosenRetrieved(){return state.partSelection||originalRetrieved();}
+  function renderRetrievedGrid(dataset){
+    const preview=dataset?.table_preview;$("retrieved-grid").hidden=!preview;
+    if(!preview){$("retrieved-grid").replaceChildren();return;}
+    const table=document.createElement("table"),head=document.createElement("thead"),body=document.createElement("tbody"),tr=document.createElement("tr");
+    const custom=Boolean(dataset.table_selection),start=custom?dataset.table_selection.first_row:dataset.row_start||1;
+    table.append(text("caption",(custom?"Chosen part":"Captured selection")+" \xB7 first "+preview.rows.length+" of "+dataset.row_count+" source rows \xB7 review status is shown below"));
+    for(const label of ["Source row",...preview.headers]){const th=text("th",label);th.scope="col";tr.append(th);}head.append(tr);
+    preview.rows.forEach((cells,i)=>{const row=document.createElement("tr");row.append(text("td",start+i));for(const cell of cells)row.append(text("td",cell||"\u2014"));body.append(row);});
+    table.append(head,body);$("retrieved-grid").replaceChildren(table);
+  }
+  function configureTablePart(){
+    const d=originalRetrieved(),parent=state.retrieved?.table_catalog?.find(t=>t.key===d?.table_key);
+    $("table-part-panel").hidden=!parent;$("table-part-status").textContent="";
+    if(!parent)return;
+    $("table-part-info").textContent=parent.name+". "+parent.rows.length+" captured source rows of "+parent.source_rows+"; "+parent.columns.length+" captured columns of "+parent.source_columns+". Choose from the captured table, including its other batches. Include a name/identifier column when you need row context.";
+    const defaults=d.column_indices||parent.columns.slice(0,8).map(c=>c.index);
+    $("part-column-options").replaceChildren(...parent.columns.map(c=>{const label=text("label", "" ,"check"),input=document.createElement("input");input.type="checkbox";input.value=c.index;input.checked=defaults.includes(c.index);input.onchange=partChanged;label.append(input,document.createTextNode((c.index+1)+". "+c.label));return label;}));
+    $("part-first-row").value=d.row_start||parent.rows[0].index;
+    $("part-last-row").value=(d.row_start||parent.rows[0].index)+d.row_count-1;
+    $("part-first-row").max=parent.source_rows;$("part-last-row").max=parent.source_rows;
+  }
+  function partChanged(){state.partSelection=null;state.partDirty=true;$("table-part-status").textContent="Choices changed. Preview this part before opening it. Your current review is unchanged.";controls();}
+  $("part-first-row").oninput=partChanged;$("part-last-row").oninput=partChanged;
+  $("preview-table-part").onclick=()=>perform(async()=>{
+    const parent=state.retrieved?.table_catalog?.find(t=>t.key===originalRetrieved()?.table_key);if(!parent)throw Error("Select a captured table first.");
+    const options={columns:[...document.querySelectorAll("#part-column-options input:checked")].map(i=>Number(i.value)),first_row:Number($("part-first-row").value),last_row:Number($("part-last-row").value)};
+    const response=await request("/api/interpretation/select",{parent,options});state.partSelection=await response.json();state.partDirty=false;
+    $("table-part-status").textContent="Preview ready: "+state.partSelection.label+". "+state.partSelection.record_count+" proposed records when opened. Current approvals are unchanged until you open a new review.";
+    controls();say("Chosen part previewed. Click Open selected part to start its review.");
+  });
+  $("reset-table-part").onclick=()=>{state.partSelection=null;state.partDirty=false;configureTablePart();controls();};
+  function clearRetrieved() {state.retrieved=null;state.partSelection=null;state.partDirty=false;$("retrieved-panel").hidden=true;$("retrieved-dataset").replaceChildren();}
   async function openRetrieved() {
-    const dataset=state.retrieved.datasets.find(d=>d.id===$("retrieved-dataset").value);
-    if(!dataset)throw Error("Select retrieved content first.");
-    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.label,content_kind:dataset.kind};
+    const dataset=chosenRetrieved();
+    if(!dataset||state.partDirty)throw Error("Select content and preview your chosen part first.");
+    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.display_label||dataset.label,content_kind:dataset.kind,...(dataset.table_selection?{table_selection:dataset.table_selection}:{})};
     const response=await request("/api/interpretation/start",{example_id:"custom-text",mode:"auto",source:{text:dataset.text,url:state.retrieved.source},retrieval});
     state.view=await response.json();state.rowId=null;state.field=null;
     $("source-text").value=dataset.text;$("source-url").value=state.retrieved.source;$("text-mode").value="auto";
     clearDecision();render();editCandidate();
-    say("Fetched using "+(state.retrieved.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML")+". "+dataset.label+". "+state.view.extraction.message);
+    say("Fetched using "+(state.retrieved.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML")+". "+(dataset.display_label||dataset.label)+". "+state.view.extraction.message);
   }
   $("fetch-source").onclick=()=>perform(async()=>{
     if(!$("source-url").value.trim())throw Error("Enter a public HTTPS source URL first.");
@@ -2231,18 +2340,18 @@ var lab_client_default = `"use strict";
     $("retrieval-checks").textContent=(value.checks||[]).map(c=>(c.method==="static-html"?"Ordinary HTML":"Local JavaScript renderer")+" \u2014 "+c.status.replaceAll("_"," ")+": "+c.message).join("\\n\\n")+((value.issues||[]).length?"\\n\\nCapture notes:\\n"+value.issues.map(i=>"\u2022 "+i).join("\\n"):"");
     if(value.discovery)$("retrieval-checks").textContent+="\\n\\nTable discovery: "+value.discovery.scanned_tables+" table elements scanned; "+value.discovery.ignored_tables+" navigation/layout candidates excluded.\\n"+value.discovery.inventory.map(t=>t.title+" \u2014 "+t.status+" \xB7 "+t.rows+" rows \xB7 "+t.columns+" columns"+(t.reason?" \xB7 "+t.reason:"")).join("\\n");
     $("retrieved-panel").hidden=false;
-    if(!response.ok){state.retrieved=null;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";$("retrieved-source").textContent="";$("retrieved-source").removeAttribute("href");$("retrieved-summary").textContent="No new content was imported.";$("retrieved-preview").textContent="";$("retrieved-current").textContent=state.view?"The existing review below is unchanged.":"";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
-    state.retrieved=value;
+    if(!response.ok){state.retrieved=null;state.partSelection=null;state.partDirty=false;$("table-part-panel").hidden=true;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";$("retrieved-source").textContent="";$("retrieved-source").removeAttribute("href");$("retrieved-summary").textContent="No new content was imported.";$("retrieved-preview").textContent="";$("retrieved-current").textContent=state.view?"The existing review below is unchanged.":"";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
+    state.retrieved=value;state.partSelection=null;state.partDirty=false;
     $("retrieved-source").href=value.source;$("retrieved-source").textContent=value.source;
     const tables=value.datasets.filter(d=>d.kind==="table"),articles=value.datasets.filter(d=>d.kind==="prose");
     const sourceRows=new Set();for(const d of tables)for(let row=0;row<d.row_count;row++)sourceRows.add((d.table_key||d.id)+":"+((d.row_start||1)+row));
     $("retrieved-summary").textContent=tables.length+" table selection"+(tables.length===1?"":"s")+" \xB7 "+sourceRows.size+" captured table rows \xB7 "+articles.length+" article section"+(articles.length===1?"":"s")+" \xB7 retrieved "+new Date(value.retrieved_at).toLocaleString()+"."+((value.issues||[]).length?" "+value.issues.length+" capture notes below.":"");
     $("retrieved-method").textContent=value.method==="local-chromium"?"Retrieved with local JavaScript rendering":"Retrieved with ordinary HTML";
-    $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text("option",d.label);o.value=d.id;return o;}));
-    await openRetrieved();
+    $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text("option",d.display_label||d.label);o.value=d.id;return o;}));
+    configureTablePart();await openRetrieved();
   });
   $("open-retrieved").onclick=()=>perform(openRetrieved);
-  $("retrieved-dataset").onchange=controls;
+  $("retrieved-dataset").onchange=()=>{state.partSelection=null;state.partDirty=false;configureTablePart();controls();};
   $("custom-input").onsubmit = (event) => {
     event.preventDefault();
     perform(async () => {
@@ -2601,7 +2710,7 @@ var reply = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: { ...headers, "Content-Type": "application/json; charset=utf-8" }
 });
-var fail3 = (code, message, status = 400) => {
+var fail4 = (code, message, status = 400) => {
   const error2 = new ContractError(code, message);
   error2.status = status;
   throw error2;
@@ -2612,7 +2721,7 @@ async function readBody(request) {
   if (!/^application\/json(?:;|$)/i.test(
     request.headers.get("content-type") || ""
   ))
-    fail3("json_required", "Send a JSON request.", 415);
+    fail4("json_required", "Send a JSON request.", 415);
   let oversized = Number(request.headers.get("content-length")) > 1048576;
   const reader = request.body?.getReader(), chunks = [];
   let bytes = 0;
@@ -2628,19 +2737,19 @@ async function readBody(request) {
         }
         if (bytes > 2097152) {
           await reader.cancel();
-          fail3("request_limit", "The lab request exceeds 1 MiB.", 413);
+          fail4("request_limit", "The lab request exceeds 1 MiB.", 413);
         }
         if (!oversized) chunks.push(value);
       }
     } finally {
       reader.releaseLock();
     }
-  if (oversized) fail3("request_limit", "The lab request exceeds 1 MiB. Export the current diagnostic report before starting a smaller session.", 413);
+  if (oversized) fail4("request_limit", "The lab request exceeds 1 MiB. Export the current diagnostic report before starting a smaller session.", 413);
   let body;
   try {
     body = JSON.parse(await new Blob(chunks).text());
   } catch {
-    fail3("invalid_json", "The lab request is not valid JSON.");
+    fail4("invalid_json", "The lab request is not valid JSON.");
   }
   return body;
 }
@@ -2649,10 +2758,10 @@ async function entryFor(packet, response) {
 }
 function applyCorrection(packet, response, change) {
   if (!only(change, ["record_id", "fields", "reviewer", "note", "at", "prior_events"]) || typeof change.reviewer !== "string" || !change.reviewer.trim() || change.reviewer.length > 80 || typeof change.note !== "string" || !change.note.trim() || change.note.length > 1e3 || typeof change.at !== "string" || !Number.isFinite(Date.parse(change.at)) || !Array.isArray(change.prior_events) || change.prior_events.length > 64 || !plain2(change.fields))
-    fail3("invalid_correction", "A correction requires a reviewer, note, timestamp and requested fields.");
+    fail4("invalid_correction", "A correction requires a reviewer, note, timestamp and requested fields.");
   const next = structuredClone(response);
   const index = next.records.findIndex((r) => r.id === change.record_id);
-  if (change.record_id !== null && index < 0) fail3("unknown_record", "Select an existing record to correct.");
+  if (change.record_id !== null && index < 0) fail4("unknown_record", "Select an existing record to correct.");
   const candidate = { id: index < 0 ? "manual-" + (next.records.length + 1) : change.record_id, fields: change.fields };
   if (index < 0) next.records.push(candidate);
   else next.records[index] = candidate;
@@ -2676,19 +2785,19 @@ function originalResponse(job) {
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if ([WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)) return extractWageTable(job.packet, job.parser_version);
   if ([PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version)) return extractProseRules(job.packet, job.parser_version);
-  fail3("parser_version", "Unsupported text parser version.");
+  fail4("parser_version", "Unsupported text parser version.");
 }
 async function documentInfo(job) {
   if (!job.document) return null;
   if (job.example_id !== "custom-text" || !only(job.document, ["source", "dataset_id"]))
-    fail3("invalid_document", "Invalid full-page source or selection.");
+    fail4("invalid_document", "Invalid full-page source or selection.");
   const plan = planPage(job.document.source, job.parser_version === LEGACY_PROSE_VERSION ? LEGACY_PROSE_VERSION : PROSE_VERSION, { semantic: job.parser_version === TEXT_FACTS_VERSION });
   const selected = plan.datasets.find((d) => d.id === job.document.dataset_id);
   if (!selected || job.parser_version !== selected.parser_version)
-    fail3("invalid_document", "The selected section or parser does not match the retained page.");
+    fail4("invalid_document", "The selected section or parser does not match the retained page.");
   const rebuilt = await createPacket({ source: { text: selected.text, url: job.document.source.url ?? null }, schema: selected.schema }, job.packet.source.received_at);
   if (canonical(rebuilt) !== canonical(job.packet))
-    fail3("document_mismatch", "The selected packet does not match its original full-page source.");
+    fail4("document_mismatch", "The selected packet does not match its original full-page source.");
   return { plan, selected, hash: await digest(plan.text), original_hash: await digest(job.document.source.text) };
 }
 function publicDocument(info, job) {
@@ -2720,11 +2829,15 @@ function publicDocument(info, job) {
 }
 async function checkJob(job) {
   if (!only(job, ["example_id", "packet", "cache_entry", "events", "revisions", "parser_version", "document", "mapping", "retrieval"]) || !Array.isArray(job.events) || job.events.length > 64 || job.revisions !== void 0 && (!Array.isArray(job.revisions) || job.revisions.length > 8))
-    fail3("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
-  if (job.mapping !== void 0 && ![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail3("column_mapping", "Recorded column mappings require a mapped table session.");
+    fail4("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
+  if (job.mapping !== void 0 && ![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail4("column_mapping", "Recorded column mappings require a mapped table session.");
   if (job.retrieval !== void 0) {
     const r = job.retrieval;
-    if (!only(r, ["method", "source", "retrieved_at", "snapshot_hash", "label", "content_kind"]) || !["static-html", "local-chromium"].includes(r.method) || r.content_kind !== void 0 && !["table", "prose"].includes(r.content_kind) || r.source !== job.packet.source.url || r.snapshot_hash !== job.packet.source.text_hash || typeof r.label !== "string" || r.label.length > 1e3 || typeof r.retrieved_at !== "string" || !Number.isFinite(Date.parse(r.retrieved_at))) fail3("retrieval_metadata", "Retrieval description does not match the retained text snapshot.");
+    if (!only(r, ["method", "source", "retrieved_at", "snapshot_hash", "label", "content_kind", "table_selection"]) || !["static-html", "local-chromium"].includes(r.method) || r.content_kind !== void 0 && !["table", "prose"].includes(r.content_kind) || r.source !== job.packet.source.url || r.snapshot_hash !== job.packet.source.text_hash || typeof r.label !== "string" || r.label.length > 1e3 || typeof r.retrieved_at !== "string" || !Number.isFinite(Date.parse(r.retrieved_at))) fail4("retrieval_metadata", "Retrieval description does not match the retained text snapshot.");
+  }
+  if (job.retrieval && job.retrieval.table_selection !== void 0) {
+    if (job.retrieval.content_kind !== "table") fail4("table_selection", "Selections require table content.");
+    await validateTableSelection(job.retrieval.table_selection, job.packet.source.text);
   }
   await revalidate(job.packet, job.cache_entry);
   await documentInfo(job);
@@ -2732,10 +2845,10 @@ async function checkJob(job) {
   if (job.example_id === "custom-text") {
     response = originalResponse(job);
   } else {
-    if (!Object.hasOwn(examples, job.example_id)) fail3("invalid_lab_job", "Unknown example.");
+    if (!Object.hasOwn(examples, job.example_id)) fail4("invalid_lab_job", "Unknown example.");
     const fixture = examples[job.example_id];
     if (job.packet.source.text !== fixture.source.text || job.packet.source.url !== fixture.source.url || canonical(job.packet.schema) !== canonical(fixture.schema))
-      fail3("example_mismatch", "The fictional example source or columns changed. Start again.");
+      fail4("example_mismatch", "The fictional example source or columns changed. Start again.");
     response = fixture.scripted_response;
   }
   for (const change of job.revisions || []) {
@@ -2746,7 +2859,7 @@ async function checkJob(job) {
   }
   if (job.parser_version === TEXT_FACTS_VERSION) assertTextFactConsistency(response);
   if (canonical(job.cache_entry.raw_response) !== canonical(response))
-    fail3("example_mismatch", "Candidate data differs from its rule output and recorded corrections.");
+    fail4("example_mismatch", "Candidate data differs from its rule output and recorded corrections.");
   return exportInterpretation(job.packet, job.cache_entry, job.events, { approvedOnly: false });
 }
 async function view(job, result) {
@@ -2835,16 +2948,20 @@ async function labFetch(request) {
     );
   try {
     const body = await readBody(request);
+    if (url.pathname === "/api/interpretation/select") {
+      if (!only(body, ["parent", "options"])) fail4("table_selection", "Choose a captured table and row/column options.");
+      return reply(await selectCapturedTable(body.parent, body.options));
+    }
     if (url.pathname === "/api/interpretation/start") {
       let packet, response, parserVersion, document, mapping;
       if (body?.example_id === "custom-text") {
         if (!only(body, ["example_id", "source", "schema", "mode", "dataset_id", "mapping", "retrieval"]) || body.mode !== void 0 && !["auto", "pair"].includes(body.mode))
-          fail3("invalid_input", "Choose automatic suggestions or manual pair columns.");
-        if (body.mapping !== void 0 && (body.mode !== "auto" || body.dataset_id !== void 0)) fail3("column_mapping", "Column mapping requires automatic mode on one pasted table.");
+          fail4("invalid_input", "Choose automatic suggestions or manual pair columns.");
+        if (body.mapping !== void 0 && (body.mode !== "auto" || body.dataset_id !== void 0)) fail4("column_mapping", "Column mapping requires automatic mode on one pasted table.");
         if (body.mode === "auto" && body.schema !== void 0)
-          fail3("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
+          fail4("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
         const columns = body.mode === "auto" ? detectColumns(body.source?.text?.replace(/\r\n?/g, "\n"), MAPPING_VERSION, body.retrieval?.content_kind === "table") : null;
-        if (body.mapping !== void 0 && !columns) fail3("column_mapping", "No supported delimited header found.");
+        if (body.mapping !== void 0 && !columns) fail4("column_mapping", "No supported delimited header found.");
         const ranking = body.mode === "auto" ? rankingPlan(body.source?.text?.replace(/\r\n?/g, "\n")) : null;
         if (ranking && body.mapping === void 0 && body.dataset_id === void 0) {
           packet = await createPacket({ source: body.source, schema: ranking.schema });
@@ -2857,12 +2974,12 @@ async function labFetch(request) {
         } else if (body.mode === "auto" && (needsPageIntake(body.source) || body.dataset_id !== void 0)) {
           const plan = planPage(body.source, PROSE_VERSION, { semantic: true });
           const selected = body.dataset_id === void 0 ? plan.datasets[0] : plan.datasets.find((d) => d.id === body.dataset_id);
-          if (!selected) fail3("invalid_selection", "Choose a listed full-page section.");
+          if (!selected) fail4("invalid_selection", "Choose a listed full-page section.");
           document = { source: body.source, dataset_id: selected.id };
           packet = await createPacket({ source: { text: selected.text, url: body.source.url ?? null }, schema: selected.schema });
           parserVersion = selected.parser_version;
         } else {
-          if (body.dataset_id !== void 0) fail3("invalid_selection", "Section selection requires automatic mode.");
+          if (body.dataset_id !== void 0) fail4("invalid_selection", "Section selection requires automatic mode.");
           const textFacts = body.mode === "auto" && hasTextRelations(body.source?.text);
           packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? textFacts ? TEXT_FACTS_SCHEMA : PROSE_SCHEMA : body.schema });
           parserVersion = body.mode === "auto" ? textFacts ? TEXT_FACTS_VERSION : PROSE_VERSION : "name-number-v1";
@@ -2874,7 +2991,7 @@ async function labFetch(request) {
         response = originalResponse({ example_id: "custom-text", parser_version: parserVersion, packet, ...mapping ? { mapping } : {}, ...body.retrieval ? { retrieval: body.retrieval } : {} });
       } else {
         if (!only(body, ["example_id"]) || !Object.hasOwn(examples, body.example_id))
-          fail3("unknown_example", "Choose an example or paste your own text.");
+          fail4("unknown_example", "Choose an example or paste your own text.");
         const fixture = examples[body.example_id];
         packet = await createPacket(fixture);
         response = fixture.scripted_response;
@@ -2883,7 +3000,7 @@ async function labFetch(request) {
         packet,
         await scriptedInterpreter(response)
       );
-      if (body.retrieval && document && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail3("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
+      if (body.retrieval && document && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail4("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
       const job = {
         example_id: body.example_id,
         packet,
@@ -2900,10 +3017,10 @@ async function labFetch(request) {
     if (url.pathname !== "/api/interpretation/action")
       return reply({ error: "Not found", code: "not_found" }, 404);
     if (!only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !["revalidate", "review", "export", "correct", "save", "restore", "review_batch", "feedback"].includes(body.action))
-      fail3("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
+      fail4("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
     if (body.action === "restore") {
       if (!only(body, ["action", "session"]) || !only(body.session, ["format", "job"]) || body.session.format !== "toolkit-review-session-v1")
-        fail3("invalid_session", "Choose a toolkit review session JSON file, not a CSV or data export.");
+        fail4("invalid_session", "Choose a toolkit review session JSON file, not a CSV or data export.");
       return reply(await view(body.session.job, await checkJob(body.session.job)));
     }
     const result = await checkJob(body.job);
@@ -2911,11 +3028,11 @@ async function labFetch(request) {
     if (body.action === "review_batch") {
       const queue = reviewQueue(body.job, result.json.validation);
       if (!only(body, ["action", "job", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !Array.isArray(body.record_ids) || !body.record_ids.length || body.record_ids.length > 50 || new Set(body.record_ids).size !== body.record_ids.length || body.record_ids.some((id) => !queue.eligible_ids.includes(id)) || body.confirmed_mapping !== true)
-        fail3("batch_not_eligible", "Select pending, unchanged table rows with clean checks and explicitly confirm the column mapping. Prose and exceptions need individual review.");
+        fail4("batch_not_eligible", "Select pending, unchanged table rows with clean checks and explicitly confirm the column mapping. Prose and exceptions need individual review.");
       if (body.record_ids.length > queue.remaining_review_events)
-        fail3("review_limit", "This batch exceeds the session review limit. Save the session and reduce the selection.", 413);
+        fail4("review_limit", "This batch exceeds the session review limit. Save the session and reduce the selection.", 413);
       if (typeof body.reviewer !== "string" || !body.reviewer.trim() || body.reviewer.length > 80 || typeof body.note !== "string" || !body.note.trim() || body.note.length > 900)
-        fail3("invalid_review", "Enter a reviewer name and a batch review note (up to 900 characters).");
+        fail4("invalid_review", "Enter a reviewer name and a batch review note (up to 900 characters).");
       const events = await appendReviewBatch(
         body.job.packet,
         body.job.cache_entry,
@@ -2934,7 +3051,7 @@ async function labFetch(request) {
     if (body.action === "save") {
       const session = JSON.stringify({ format: "toolkit-review-session-v1", job: body.job });
       if (new TextEncoder().encode(session).byteLength > 1e6)
-        fail3("session_limit", "This review session exceeds the portable file limit. Export diagnostic JSON instead.", 413);
+        fail4("session_limit", "This review session exceeds the portable file limit. Export diagnostic JSON instead.", 413);
       return new Response(session + "\n", { headers: {
         ...headers,
         "Content-Type": "application/json; charset=utf-8",
@@ -2942,8 +3059,8 @@ async function labFetch(request) {
       } });
     }
     if (body.action === "correct") {
-      if ((body.job.revisions || []).length >= 8) fail3("revision_limit", "Maximum 8 revisions. Download diagnostic JSON before starting a new session.");
-      if (!only(body.correction, ["record_id", "fields", "reviewer", "note"])) fail3("invalid_correction", "Unexpected correction fields.");
+      if ((body.job.revisions || []).length >= 8) fail4("revision_limit", "Maximum 8 revisions. Download diagnostic JSON before starting a new session.");
+      if (!only(body.correction, ["record_id", "fields", "reviewer", "note"])) fail4("invalid_correction", "Unexpected correction fields.");
       const change = { ...body.correction, at: (/* @__PURE__ */ new Date()).toISOString(), prior_events: body.job.events };
       const response = applyCorrection(body.job.packet, body.job.cache_entry.raw_response, change);
       const job = {
@@ -2956,7 +3073,7 @@ async function labFetch(request) {
     }
     if (body.action === "review") {
       if (body.job.events.length >= 64)
-        fail3(
+        fail4(
           "review_limit",
           "This demo is limited to 64 review events. Download a diagnostic report, then load a new example.",
           413
@@ -2972,7 +3089,7 @@ async function labFetch(request) {
     }
     if (body.action === "revalidate") return reply(await view(body.job, result));
     if (!["csv", "json"].includes(body.format) || body.diagnostic !== void 0 && typeof body.diagnostic !== "boolean")
-      fail3(
+      fail4(
         "invalid_export",
         "Choose CSV or JSON and a boolean diagnostic flag."
       );
@@ -3624,7 +3741,9 @@ function tableDatasets(tables, issues) {
         continue;
       }
       const groups = t.headers.length <= 8 ? [t.headers.map((_, i) => i)] : Array.from({ length: Math.ceil((t.headers.length - 1) / 7) }, (_, part) => [0, ...Array.from({ length: Math.min(7, t.headers.length - 1 - part * 7) }, (_2, i) => 1 + part * 7 + i)]);
-      const line = (cells) => cells.map((c) => String(c).replace(/\s+/g, " ").trim()).join("	");
+      const normalizeCells = (cells) => cells.map((c) => String(c).replace(/\s+/g, " ").trim());
+      const line = (cells) => normalizeCells(cells).join("	");
+      const table_name = descriptiveTableName(title, t.headers);
       const local = [];
       for (const columns of groups) {
         const selectedHeaders = columns.map((i) => t.headers[i]), ranked = rankShape(selectedHeaders);
@@ -3641,7 +3760,7 @@ function tableDatasets(tables, issues) {
           const meaning = rankingPlan(text);
           const mapping = meaning || detectColumns(text, MAPPING_VERSION, true);
           if (!mapping) error("table_mapping", "Source column headings cannot be mapped; no zero-record table was reported as imported.");
-          local.push({ kind: "table", label: title + " \xB7 rows " + start + "\u2013" + (start + batch.length - 1) + " of " + t.rows.length + columnLabel, text, row_count: batch.length, column_count: columns.length, record_count: meaning?.factCount ?? batch.length, table_key, row_start: start, total_columns: t.headers.length, column_indices: columns });
+          local.push({ kind: "table", table_title: title, table_name, total_rows: t.rows.length, grid: { headers: normalizeCells(selectedHeaders), rows: batch.map((v) => v.split("	")) }, display_label: table_name + " \xB7 rows " + start + "\u2013" + (start + batch.length - 1) + " of " + t.rows.length + columnLabel, label: title + " \xB7 rows " + start + "\u2013" + (start + batch.length - 1) + " of " + t.rows.length + columnLabel, text, row_count: batch.length, column_count: columns.length, record_count: meaning?.factCount ?? batch.length, table_key, row_start: start, total_columns: t.headers.length, column_indices: columns });
           start += batch.length;
           batch = [];
           length = context.length + header.length;
@@ -3771,12 +3890,17 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
       return true;
     });
     if (omitted) issues.push(omitted + " selections were not imported because the 32-selection / 128,000-character budget was reached. Use a narrower source or paste a selected section.");
+    const table_catalog = capturedTableCatalog(datasets);
+    for (const d of datasets) if (d.grid) {
+      d.table_preview = { headers: d.grid.headers, rows: d.grid.rows.slice(0, 3) };
+      delete d.grid;
+    }
     const retrieved_at = (/* @__PURE__ */ new Date()).toISOString();
     for (const [i, d] of datasets.entries()) {
       d.id = "retrieved-" + (i + 1);
       d.snapshot_hash = await digest(d.text);
     }
-    return reply3({ source, method, retrieved_at, datasets, checks, issues, discovery: analysis.discovery, notice: "Normalized text snapshots, not raw HTML or authenticated source proofs. Choose content to start a new unapproved review; saved reviews retain their source snapshot. Rendering is a timed snapshot and may omit later updates." });
+    return reply3({ source, method, retrieved_at, datasets, table_catalog, checks, issues, discovery: analysis.discovery, notice: "Normalized text snapshots, not raw HTML or authenticated source proofs. Choose content to start a new unapproved review; saved reviews retain their source snapshot. Rendering is a timed snapshot and may omit later updates." });
   } catch (e) {
     return reply3({ error: e.message, code: e.code || "fetch_stopped", checks: [...checks, { method: "static-html", status: "failed", message: e.message }], issues }, e.status || 422);
   }
@@ -4283,7 +4407,7 @@ var worker_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/interpretation/storage") return feedbackStorage(request, env);
-    if (["/interpretation", "/interpretation-client.js", "/api/interpretation/start", "/api/interpretation/action"].includes(url.pathname)) return labFetch(request);
+    if (["/interpretation", "/interpretation-client.js", "/api/interpretation/start", "/api/interpretation/action", "/api/interpretation/select"].includes(url.pathname)) return labFetch(request);
     if (url.pathname === "/api/interpretation/fetch") return sourceFetch(request, url, env, { fetchPage: fetchPublicPage, analyze: analyzePage });
     if (url.pathname === "/api/tables") return tablesAPI(request, url);
     if (request.method !== "GET") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET" } });

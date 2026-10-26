@@ -1,3 +1,4 @@
+import {selectCapturedTable,validateTableSelection} from './table-selection.js';
 import {makeFeedbackSnapshot} from './feedback-snapshots.js';
 import {feedbackCase} from './feedback.js';
 import {RANKING_VERSION,rankingPlan,extractRanking,rankingMeaning} from './ranking-rules.js';
@@ -213,8 +214,9 @@ async function checkJob(job) {
   if (job.mapping !== undefined && ![MAPPING_VERSION,LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail('column_mapping', 'Recorded column mappings require a mapped table session.');
   if(job.retrieval!==undefined){
     const r=job.retrieval;
-    if(!only(r,['method','source','retrieved_at','snapshot_hash','label','content_kind']) || !['static-html','local-chromium'].includes(r.method) || (r.content_kind!==undefined&&!['table','prose'].includes(r.content_kind)) || r.source!==job.packet.source.url || r.snapshot_hash!==job.packet.source.text_hash || typeof r.label!=='string'||r.label.length>1000||typeof r.retrieved_at!=='string'||!Number.isFinite(Date.parse(r.retrieved_at))) fail('retrieval_metadata','Retrieval description does not match the retained text snapshot.');
+    if(!only(r,['method','source','retrieved_at','snapshot_hash','label','content_kind','table_selection']) || !['static-html','local-chromium'].includes(r.method) || (r.content_kind!==undefined&&!['table','prose'].includes(r.content_kind)) || r.source!==job.packet.source.url || r.snapshot_hash!==job.packet.source.text_hash || typeof r.label!=='string'||r.label.length>1000||typeof r.retrieved_at!=='string'||!Number.isFinite(Date.parse(r.retrieved_at))) fail('retrieval_metadata','Retrieval description does not match the retained text snapshot.');
   }
+  if(job.retrieval&&job.retrieval.table_selection!==undefined){if(job.retrieval.content_kind!=='table')fail('table_selection','Selections require table content.');await validateTableSelection(job.retrieval.table_selection,job.packet.source.text);}
   await revalidate(job.packet, job.cache_entry);
   await documentInfo(job);
   let response;
@@ -338,6 +340,10 @@ export async function labFetch(request) {
     );
   try {
     const body = await readBody(request);
+    if(url.pathname==="/api/interpretation/select"){
+      if(!only(body,["parent","options"]))fail("table_selection","Choose a captured table and row/column options.");
+      return reply(await selectCapturedTable(body.parent,body.options));
+    }
     if (url.pathname === "/api/interpretation/start") {
       let packet, response, parserVersion, document, mapping;
       if (body?.example_id === 'custom-text') {

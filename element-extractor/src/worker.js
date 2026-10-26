@@ -345,7 +345,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if(url.pathname==='/api/interpretation/storage')return feedbackStorage(request,env);
-    if (['/interpretation','/interpretation-client.js','/api/interpretation/start','/api/interpretation/action'].includes(url.pathname)) return labFetch(request);
+    if (['/interpretation','/interpretation-client.js','/api/interpretation/start','/api/interpretation/action','/api/interpretation/select'].includes(url.pathname)) return labFetch(request);
     if (url.pathname === '/api/interpretation/fetch') return sourceFetch(request,url,env,{fetchPage:fetchPublicPage,analyze:analyzePage});
     if (url.pathname === '/api/tables') return tablesAPI(request, url);
     if (request.method !== 'GET') return new Response('Method not allowed', {status:405, headers:{Allow:'GET'}});

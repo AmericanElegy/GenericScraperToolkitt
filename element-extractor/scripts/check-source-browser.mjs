@@ -92,6 +92,26 @@ try{
  assert.match(await browser.evaluate('document.getElementById("retrieved-preview").textContent'),/2 of 9 source columns/);
  assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=column_9_percent]").textContent'),'40%');
  assert.match(await browser.evaluate('document.getElementById("retrieved-summary").textContent'),/11 captured table rows/);
+ // Choose a source ranking part without changing the current approved review until opening.
+ await choose('Ranked articles');
+ const beforePart=await browser.evaluate('document.getElementById("counts").textContent');
+ await browser.evaluate('(()=>{const inputs=[...document.querySelectorAll("#part-column-options input")];inputs.find(i=>i.value==="1").checked=false;inputs[0].dispatchEvent(new Event("change"));document.getElementById("part-first-row").value="2";document.getElementById("part-last-row").value="2";document.getElementById("part-first-row").dispatchEvent(new Event("input"));})()');
+ assert.equal(await browser.evaluate('document.getElementById("open-retrieved").disabled'),true);
+ await browser.evaluate('document.getElementById("preview-table-part").click()');
+ await waitFor(()=>browser.evaluate('document.getElementById("table-part-status").textContent.includes("Preview ready")&&!document.getElementById("load").disabled'));
+ assert.equal(await browser.evaluate('document.getElementById("counts").textContent'),beforePart,'Preview alone must not discard the current review.');
+ assert.match(await browser.evaluate('document.getElementById("retrieved-grid").textContent'),/Year.*#2.*2025.*Delta/);
+ await browser.evaluate('document.getElementById("open-retrieved").click()');
+ await waitFor(()=>browser.evaluate('document.getElementById("counts").textContent.includes("1 candidate")&&!document.getElementById("load").disabled'));
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=item]").textContent'),'Delta');
+ assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-1][data-field=rank]").textContent'),'2');
+ assert.match(await browser.evaluate('document.getElementById("retrieved-current").textContent'),/selected rows 2–2.*columns 1, 3/);
+ assert.match(await browser.evaluate('document.getElementById("counts").textContent'),/0 approved/);
+ await browser.evaluate('document.getElementById("part-last-row").value="99";document.getElementById("part-last-row").dispatchEvent(new Event("input"));document.getElementById("preview-table-part").click()');
+ await waitFor(()=>browser.evaluate('document.getElementById("status").textContent.includes("valid source row range")&&!document.getElementById("load").disabled'));
+ assert.equal(await browser.evaluate('document.getElementById("open-retrieved").disabled'),true);
+ assert.match(await browser.evaluate('document.getElementById("counts").textContent'),/1 candidate/);
+ await browser.evaluate('document.getElementById("reset-table-part").click()');
  await browser.evaluate('document.getElementById("source-text").value="The most popular article in 2025 was Solar eclipse. Widgets reached 12.6 percent.";document.getElementById("extract").click()');
  await waitFor(()=>browser.evaluate('document.getElementById("counts").textContent.includes("2 candidates")&&!document.getElementById("load").disabled'));
  assert.match(await browser.evaluate('document.getElementById("candidate-head").textContent'),/Subject.*Relationship.*Answer.*Numeric value/);
@@ -99,5 +119,5 @@ try{
  assert.equal(await browser.evaluate('document.querySelector("button[data-record=row-2][data-field=numeric_value]").textContent'),'12.6');
  assert.match(await browser.evaluate('document.getElementById("meaning-explanation").textContent'),/Answers may be names or nouns/);
  if(process.env.SOURCE_SCREENSHOT){await browser.evaluate('window.scrollTo(0,0)');const shot=await browser.send('Page.captureScreenshot',{captureBeyondViewport:true});await writeFile(process.env.SOURCE_SCREENSHOT,Buffer.from(shot.data,'base64'));}
- console.log('PASS: real lab browser fetches static tables/article, preserves snapshot metadata in approved JSON, automatically renders a JavaScript-only table, leaves manual paste offline, and never retries an access barrier with rendering.');
+ console.log('PASS: real lab browser fetches static tables/article, preserves snapshot metadata in approved JSON, automatically renders a JavaScript-only table, leaves manual paste offline, previews and opens selected table rows/columns with fresh approvals, and never retries an access barrier with rendering.');
 }finally{await browser?.close();await mf.dispose();await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
