@@ -1,3 +1,4 @@
+import {feedbackStorage} from './interpretation/feedback-storage-api.js';
 import { sourceFetch } from './interpretation/source-fetch.js';
 import { InputError, publicURL, publicAddress } from './public-network.js';
 import { labFetch } from './interpretation/lab-api.js';
@@ -343,6 +344,7 @@ async function tablesAPI(request, url) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if(url.pathname==='/api/interpretation/storage')return feedbackStorage(request,env);
     if (['/interpretation','/interpretation-client.js','/api/interpretation/start','/api/interpretation/action'].includes(url.pathname)) return labFetch(request);
     if (url.pathname === '/api/interpretation/fetch') return sourceFetch(request,url,env,{fetchPage:fetchPublicPage,analyze:analyzePage});
     if (url.pathname === '/api/tables') return tablesAPI(request, url);

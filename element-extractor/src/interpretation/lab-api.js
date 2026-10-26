@@ -1,3 +1,4 @@
+import {makeFeedbackSnapshot} from './feedback-snapshots.js';
 import {feedbackCase} from './feedback.js';
 import {RANKING_VERSION,rankingPlan,extractRanking,rankingMeaning} from './ranking-rules.js';
 import {TEXT_FACTS_VERSION,TEXT_FACTS_SCHEMA,hasTextRelations,extractTextFacts,assertTextFactConsistency,textFactMeaning} from './text-facts.js';
@@ -527,4 +528,12 @@ export async function labFetch(request) {
       error.status || (error instanceof ContractError ? 400 : 500),
     );
   }
+}
+
+// Reuse the exact review/source validation for durable local feedback.
+export async function validatedFeedbackSnapshot(job){
+ const result=await checkJob(job);
+ const reviewed=result.json.validation.records.some(r=>['approved','rejected'].includes(r.review_status));
+ const example=reviewed?await feedbackCase(job,result.json.validation,originalResponse(job)):null;
+ return makeFeedbackSnapshot(job,example);
 }

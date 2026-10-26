@@ -61,6 +61,10 @@ try {
             $body = @{ example_id = 'scores-and-correction' } | ConvertTo-Json -Compress
             $check = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/interpretation/start" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 3
             if (-not $check.job -or -not $check.validation) { throw 'Offline backend response is incomplete.' }
+            $storageBody = @{ action = 'status' } | ConvertTo-Json -Compress
+            $feedbackStorage = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/interpretation/storage" -Method Post -ContentType 'application/json' -Body $storageBody -TimeoutSec 3
+            if ($feedbackStorage.PSObject.Properties.Name -notcontains 'enabled') { throw 'Feedback storage endpoint is missing.' }
+
             $ready = $true
             break
         } catch { $lastProblem = $_.Exception.Message }
@@ -72,6 +76,10 @@ try {
     Write-Host "Open: $url"
     Write-Host "To stop this server only: Stop-Process -Id $($server.Id)"
     Write-Host "Server logs: $outLog and $errLog"
+    if ($feedbackStorage.enabled) { Write-Host ("Feedback folder: " + $feedbackStorage.directory) }
+    else { Write-Host ("Feedback setup: " + $feedbackStorage.message) }
+    Write-Host 'Feedback autosave: the app detects a single Google Drive My Drive mount, or asks for its folder once.'
+    Write-Host 'Feedback files stay in the dedicated Drive folder across launcher updates. Check the Feedback autosave panel.'
     Write-Host 'This server runs locally. Nothing was deployed or enabled in Cloudflare.'
     Start-Process $url
 } catch {

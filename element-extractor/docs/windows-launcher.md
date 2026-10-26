@@ -34,3 +34,8 @@ On failure it stops its own new server, retains logs, and exits with status 1.
 
 The app and its browser workflow are verified in the Linux cloud Workers runtime.
 The PowerShell launcher still requires a Windows run to establish Windows readiness.
+
+
+## Feedback survives launcher updates
+
+The launcher starts the local feedback companion. It detects a single Windows Google Drive `My Drive` mount or offers one-time folder selection in the app. Files go in **Web Table Toolkit/feedback**, independently of the freshly downloaded code folder. Configuration stays in `%LOCALAPPDATA%\WebTableToolkit\feedback-storage.json`. Use the same synced root on both computers. The app reports local writes only; confirm actual upload status in Google Drive before switching machines. See [Drive feedback setup and recovery](interpretation-lab.md#automatic-google-drive-feedback-saving).

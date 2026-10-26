@@ -20,6 +20,7 @@ try {
     ['Interpretation browser workflow', ['scripts/check-lab-browser.mjs']],
     ['JavaScript renderer browser workflow', ['scripts/check-renderer-browser.mjs']],
     ['Source URL fetch and fallback browser workflow', ['scripts/check-source-browser.mjs']],
+    ['Drive feedback persistence browser workflow', ['scripts/check-feedback-storage-browser.mjs']],
     ['Cloudflare bundle dry run', ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--dry-run']],
   ]) {
     process.stdout.write('\nChecking: ' + name + '\n');

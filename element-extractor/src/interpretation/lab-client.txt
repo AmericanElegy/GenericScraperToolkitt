@@ -1,7 +1,8 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null, feedback: [] };
+  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null, feedback: [], storage: null, savedReviews: [], unsavedFeedback: new Map() };
+  let storageReady=Promise.resolve();
   const labels = {
     approved: "Approved",
     rejected: "Rejected",
@@ -127,6 +128,9 @@
     $("download-feedback").disabled=state.busy||!state.feedback.length;
     $("import-feedback").disabled=state.busy;
     $("feedback-file").disabled=state.busy;
+    $("saved-feedback").disabled=state.busy||!feedbackChoices().length;
+    $("open-feedback-review").disabled=state.busy||!feedbackChoices().length;
+    for(const id of ["connect-storage","reload-storage","drive-root"])$(id).disabled=state.busy;
     $("edit-selected").disabled = state.busy || !selected();
     const row = selected();
     const reviewRows=visibleRows(),reviewIndex=reviewRows.findIndex(r=>r.id===row?.id);
@@ -624,6 +628,7 @@
       state.rowId = state.editingId || state.view.validation.records.at(-1)?.id;
       state.field = state.view.job.packet.schema.fields[0].name;
       clearDecision(); render(); editCandidate();
+      await autoSaveFeedback(state.view.job);
       say("Candidate revision saved and evidence revalidated. All current approvals reset; earlier decisions retained in revision history. Review the revised candidates before exporting.");
     });
   };
@@ -643,6 +648,7 @@
         record_ids: ids, reviewer: $("batch-reviewer").value.trim(), note: $("batch-note").value.trim(), confirmed_mapping: $("batch-confirm").checked });
       state.view = await response.json(); state.checked.clear(); $("batch-confirm").checked = false; $("batch-note").value = "";
       clearDecision(); render();
+      await autoSaveFeedback(state.view.job);
       say("Approved " + ids.length + " table rows in one human batch review. Each decision is recorded in the review history.");
     });
   };
@@ -696,6 +702,7 @@
       state.view = await response.json();
       clearDecision();
       render();
+      await autoSaveFeedback(state.view.job);
       say(
         "Appended " +
           labels[decision].toLowerCase() +
@@ -722,9 +729,72 @@
     anchor.href = url; anchor.download = filename; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  async function storageRequest(body){return (await request("/api/interpretation/storage",body)).json();}
+  function storageMessage(message){$("storage-status").textContent=message;}
+  function storageInventory(data){
+    $("storage-count").textContent=(data.snapshot_count||0)+" saved review snapshots · "+(data.active_count||0)+" active examples · "+(data.review_count||0)+" reviews available to reopen"+(data.conflicts?.length?" · "+data.conflicts.length+" conflicting review histories need attention; those examples were not loaded.":"")+(data.review_count>20?". This tab loads the newest 20; other files remain in the folder.":"");
+  }
+  async function loadStorage(){
+    state.storage=await storageRequest({action:"status"});feedbackSummary();
+    if(!state.storage.enabled){storageMessage(state.storage.message+" Reviewed changes remain unsaved until connected; keep a portable backup.");return;}
+    const data=await storageRequest({action:"list"}),verified=[];
+    for(const entry of data.reviews.slice(0,20)){const value=await storageRequest({action:"read",id:entry.id});verified.push(value.snapshot);}
+    // Merge only after every loaded case passed independent validation.
+    const unsaved=[...state.feedback].filter(c=>state.unsavedFeedback.has(c.job.packet.hash));
+    state.savedReviews=verified;
+    const examples=verified.filter(s=>s.example).map(s=>s.example);
+    state.feedback=[...unsaved,...examples.filter(c=>!unsaved.some(u=>u.job.packet.hash===c.job.packet.hash))].slice(0,20);
+    storageInventory(data);feedbackSummary();controls();
+    storageMessage("Connected: "+state.storage.directory+". Reviewed changes save automatically. Google Drive cloud synchronization is not verified."+(data.conflicts.length?" Conflicting histories are excluded; see recovery details.":""));
+  }
+  async function savePendingFeedback(){
+    if(!state.storage?.enabled)return;
+    for(const [key,job]of state.unsavedFeedback){
+      const result=await storageRequest({action:"save",job});
+      state.unsavedFeedback.delete(key);
+      state.savedReviews=state.savedReviews.filter(s=>s.session!==key&&!result.conflicts.includes(s.session));
+      if(!result.conflicts.includes(key))state.savedReviews.unshift(result.snapshot);state.savedReviews=state.savedReviews.slice(0,20);
+      state.feedback=state.feedback.filter(c=>c.job.packet.hash!==key&&!result.conflicts.includes(c.job.packet.hash));
+      if(result.snapshot.example&&!result.conflicts.includes(key))state.feedback.unshift(result.snapshot.example);
+      state.feedback=state.feedback.slice(0,20);storageInventory(result);feedbackSummary();
+      storageMessage(result.message+" Folder: "+state.storage.directory+(result.conflicts.length?" Conflicting review histories need attention; those examples are excluded.":""));
+    }
+    controls();
+  }
+  async function autoSaveFeedback(job){
+    state.unsavedFeedback.set(job.packet.hash,job);
+    try{await storageReady;if(!state.storage?.enabled){storageMessage("Feedback not saved to disk. Connect your Drive folder or keep a portable backup before closing.");return;}await savePendingFeedback();}
+    catch(error){storageMessage("Feedback not saved: "+error.message+" Review decisions are still in this tab. Reconnect Drive and retry, or save the review session before closing.");}
+  }
+  $("connect-storage").onclick=()=>perform(async()=>{
+    await storageReady;
+    state.storage=await storageRequest({action:"configure",drive_root:$("drive-root").value.trim()});
+    await loadStorage();
+    if(state.view?.job.events.length||state.view?.job.revisions.length)state.unsavedFeedback.set(state.view.job.packet.hash,state.view.job);
+    await savePendingFeedback();
+  });
+  $("reload-storage").onclick=()=>perform(async()=>{await storageReady;await loadStorage();await savePendingFeedback();});
+  window.addEventListener("beforeunload",event=>{if(state.unsavedFeedback.size){event.preventDefault();event.returnValue="";}});
   const stableFeedback=value=>Array.isArray(value)?"["+value.map(stableFeedback).join(",")+"]":value&&typeof value==="object"?"{"+Object.keys(value).sort().map(k=>JSON.stringify(k)+":"+stableFeedback(value[k])).join(",")+"}":JSON.stringify(value);
+  $("open-feedback-review").onclick=()=>perform(async()=>{
+    await storageReady;const item=feedbackChoices().find(c=>c.id===$("saved-feedback").value);if(!item)return;
+    const response=await request("/api/interpretation/action",{action:"restore",session:{format:"toolkit-review-session-v1",job:item.job}});
+    state.view=await response.json();state.rowId=null;state.field=null;clearRetrieved();clearDecision();render();editCandidate();
+    $("source-text").value=state.view.job.document?.source.text||state.view.job.packet.source.text;
+    $("source-url").value=state.view.job.packet.source.url||"";$("reviewer").value="";$("batch-reviewer").value="";
+    $("text-mode").value=state.view.job.parser_version==="name-number-v1"?"pair":"auto";
+    if($("text-mode").value==="pair"){$("name-column").value=state.view.job.packet.schema.fields[0].name;$("number-column").value=state.view.job.packet.schema.fields[1].name;}
+    controls();say("Saved feedback review reopened and independently revalidated. No source fetch or AI call was made.");
+  });
+  function feedbackChoices(){
+    const saved=state.savedReviews.map(s=>({id:s.id,job:s.example?.job||s.job,expectations:s.example?.expectations}));
+    return [...saved,...state.feedback.filter(c=>!saved.some(s=>s.job.packet.hash===c.job.packet.hash))];
+  }
   function feedbackSummary(){
-    $("feedback-summary").textContent=state.feedback.length+" reviewed examples collected. Download before closing; collection is held in this tab only. New source pages do not clear it.";
+    const selectedId=$("saved-feedback").value;
+    $("saved-feedback").replaceChildren(...feedbackChoices().map(c=>{const label=c.job.retrieval?.label||c.job.packet.source.url||c.job.parser_version||"Scripted example";const option=text("option",label+(c.expectations?" · "+c.expectations.approved.length+" approved · "+c.expectations.rejected.length+" rejected":" · pending review"));option.value=c.id;return option;}));
+    if(feedbackChoices().some(c=>c.id===selectedId))$("saved-feedback").value=selectedId;
+    $("feedback-summary").textContent=state.feedback.length+" reviewed examples collected. "+(state.storage?.enabled?"Reviewed changes save automatically to the connected folder. Downloads are optional backups.":"Download before closing; Drive saving is not connected.")+" New source pages do not clear this collection.";
   }
   const feedbackText=items=>JSON.stringify({format:"toolkit-feedback-collection-v1",cases:items},null,2)+"\n";
   function addFeedback(items){
@@ -734,14 +804,16 @@
     state.feedback=merged;feedbackSummary();controls();
   }
   $("collect-feedback").onclick=()=>perform(async()=>{
+    await storageReady;
     const response=await request("/api/interpretation/action",{action:"feedback",job:state.view.job});
-    addFeedback([await response.json()]);say("Reviewed example collected. Download the feedback collection to keep it. No extraction rules were changed.");
+    addFeedback([await response.json()]);await autoSaveFeedback(state.view.job);say("Reviewed example collected. See Feedback autosave for disk-save status. No extraction rules were changed.");
   });
   $("download-feedback").onclick=()=>{
     saveBlob(new Blob([feedbackText(state.feedback)],{type:"application/json"}),"toolkit-feedback-collection.json");
     say("Feedback collection downloaded. Open it here later to add more cases, or run the offline feedback check against a future update.");
   };
   $("import-feedback").onclick=()=>perform(async()=>{
+    await storageReady;
     const file=$("feedback-file").files[0];if(!file||file.size>5000000)throw Error("Choose a feedback collection JSON file up to 5 MB.");
     const collection=JSON.parse(await file.text());
     if(collection.format!=="toolkit-feedback-collection-v1"||!Array.isArray(collection.cases)||!collection.cases.length||collection.cases.length>20)throw Error("Choose a collection containing 1–20 reviewed examples.");
@@ -751,7 +823,7 @@
       if(item.format!==actual.format||item.id!==actual.id||stableFeedback(item)!==stableFeedback(actual))throw Error("A feedback case differs from its validated review history. Your current collection was kept.");
       verified.push(actual);
     }
-    addFeedback(verified);say("Feedback collection opened and review histories revalidated. Current extraction is unchanged.");
+    addFeedback(verified);for(const item of verified)await autoSaveFeedback(item.job);say("Feedback collection opened and review histories revalidated. Current extraction is unchanged.");
   });
   $("save-session").onclick = () => perform(async () => {
     const response = await request("/api/interpretation/action", { action: "save", job: state.view.job });
@@ -801,4 +873,5 @@
   $("approved-json").onclick = () => perform(() => download("json", false));
   $("diagnostic-json").onclick = () => perform(() => download("json", true));
   controls();
+  storageReady=loadStorage().catch(error=>storageMessage("Feedback storage could not be loaded: "+error.message+" Keep a portable backup and retry."));
 })();
