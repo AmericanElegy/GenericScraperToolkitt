@@ -21,7 +21,8 @@
     "dev:browser": "node scripts/browser-render-server.mjs",
     "check:renderer-browser": "node scripts/check-renderer-browser.mjs",
     "check:source-browser": "npm run build && node scripts/check-source-browser.mjs",
-    "test:live-sources": "npm run build && node scripts/check-live-sources.mjs"
+    "test:live-sources": "npm run build && node scripts/check-live-sources.mjs",
+    "feedback": "node scripts/feedback.mjs"
   },
   "repository": {
     "type": "git",

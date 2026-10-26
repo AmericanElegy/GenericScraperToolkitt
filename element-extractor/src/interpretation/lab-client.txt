@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null };
+  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null, feedback: [] };
   const labels = {
     approved: "Approved",
     rejected: "Rejected",
@@ -105,6 +105,7 @@
     for (const id of [
       "revalidate",
       "save-session",
+      "collect-feedback",
       "approved-csv",
       "approved-json",
       "diagnostic-json",
@@ -122,8 +123,16 @@
     for (const button of document.querySelectorAll("#candidate-rows button"))
       button.disabled = state.busy;
     for (const field of document.querySelectorAll('#correction-fields input, #correction-fields select, #correction-fields textarea')) field.disabled = state.busy;
+    $("collect-feedback").disabled=state.busy||!state.view||!state.view.validation.records.some(r=>["approved","rejected"].includes(r.review_status));
+    $("download-feedback").disabled=state.busy||!state.feedback.length;
+    $("import-feedback").disabled=state.busy;
+    $("feedback-file").disabled=state.busy;
     $("edit-selected").disabled = state.busy || !selected();
     const row = selected();
+    const reviewRows=visibleRows(),reviewIndex=reviewRows.findIndex(r=>r.id===row?.id);
+    $("previous-record").disabled=state.busy||reviewIndex<=0;
+    $("next-record").disabled=state.busy||reviewIndex<0||reviewIndex>=reviewRows.length-1;
+    $("review-field").disabled=state.busy||!row;
     const missing = [];
     if (!$("reviewer").value.trim()) missing.push("enter your reviewer name");
     if (!$("note").value.trim()) missing.push("enter a review note");
@@ -138,7 +147,7 @@
       : approved
         ? "This record is already approved and will be included in Approved CSV and Approved JSON. No further approval is needed."
         : blocking(row)
-          ? "Cannot approve this record: " + blockers(row).map((issue) => issue.message).join(" ") + " You can reject it or leave it pending."
+          ? "Cannot approve until flagged values receive a correction. See All checks for details, or reject / leave pending."
           : missing.length
             ? "To approve record " + recordNumber(row) + ": " + missing.join("; ") + "."
             : "Ready to approve record " + recordNumber(row) + ". Approval confirms that you checked the values against their source.";
@@ -308,19 +317,30 @@
       $("field-title").textContent = state.view.validation.records.length ? "No records in this view" : "No candidates yet";
       $("evidence").replaceChildren(text("p", state.view.validation.records.length ? "Choose All records to see completed or batch-ready rows." : "No supported pattern matched. You can add a record manually with supporting text."));
       $("findings-details").open = false;
+      $("review-position").textContent="No selected record";$("review-reason").textContent="Select a record or change the filter.";$("selected-value").textContent="";$("review-field").replaceChildren();
       $("findings").replaceChildren();
       $("review-title").textContent = "Add a candidate to review";
       return;
     }
     $("field-title").textContent =
       columnLabel(state.field) + " · record " + recordNumber(row);
+    const rows=visibleRows();
+    $("review-position").textContent=(rows.findIndex(r=>r.id===row.id)+1)+" of "+rows.length;
+    const reasons=blockers(row),reason=reasons[0]?.message;
+    $("review-reason").dataset.blocked=String(reasons.length>0);
+    $("review-reason").textContent=reason?(reason.length>170?reason.slice(0,167)+"…":reason)+" Full details below.":row.review_status==="approved"?"Approved. This record is included in approved exports.":row.review_status==="rejected"?"Rejected. This record is excluded from approved exports.":"Check the values against the source, then approve, reject or leave pending.";
+    $("selected-value").textContent=displayValue(row,state.view.job.packet.schema.fields.find(f=>f.name===state.field));
+    $("review-field").replaceChildren(...state.view.job.packet.schema.fields.map(f=>{const option=text("option",columnLabel(f.name));option.value=f.name;return option;}));
+    $("review-field").value=state.field;
     const evidence = [];
-    for (const e of field.evidence) {
+    const additional=document.createElement("details");
+    additional.append(text("summary","More supporting quotations ("+Math.max(0,field.evidence.length-1)+")"));
+    for (const [index,e] of field.evidence.entries()) {
       const reference = document.createElement("details");
       reference.append(text("summary", passageLabel(e.passage_id) + " · source reference"),
         text("p", "Internal ID " + e.passage_id + " · snapshot offsets " + e.source_start + "–" + e.source_end +
           (e.document_start !== undefined ? " · original page offsets " + e.document_start + "–" + e.document_end : ""), "hint"));
-      evidence.push(text("blockquote", e.quote), reference);
+      if(index===0)evidence.push(text("blockquote", e.quote), reference);else additional.append(text("blockquote",e.quote),reference);
     }
     if (!field.evidence.length) {
       evidence.push(
@@ -335,15 +355,18 @@
           text("p", "Proposed quotation · not validated", "hint"),
         );
     }
+    if(field.evidence.length>1)evidence.push(additional);
     $("evidence").replaceChildren(...evidence);
-    $("findings-details").open = blocking(row);
+    if(state.inspectedRow!==row.id||state.inspectedPacket!==state.view.job.packet.hash){$("findings-details").open=false;state.inspectedRow=row.id;state.inspectedPacket=state.view.job.packet.hash;}
     const list = document.createElement("ul");
-    for (const finding of [
+    const findings=[
       ...state.view.validation.issues,
       ...row.issues,
       ...Object.values(row.fields).flatMap((f) => f.issues),
-    ])
-      list.append(text("li", finding.message));
+    ];
+    const uniqueFindings=[...new Set(findings.map(f=>f.message))];
+    for(const message of uniqueFindings)list.append(text("li",message));
+    $("findings-summary").textContent="All checks and findings ("+uniqueFindings.length+")";
     $("findings").replaceChildren(
       text("strong", row.review_status === "approved" ? "Original automated findings · human association review completed" : "System findings — retained after review"),
       list,
@@ -576,6 +599,13 @@
       say(state.view.document ? "Full page accepted and divided into sections. " + state.view.extraction.message + " Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. " + state.view.extraction.message + " No AI calls.");
     });
   };
+  function moveReview(direction){
+    if(state.busy)return;const rows=visibleRows(),at=rows.findIndex(r=>r.id===state.rowId),next=rows[at+direction];if(!next)return;
+    clearDecision();state.rowId=next.id;state.field=state.view.job.packet.schema.fields[0].name;render();editCandidate();
+  }
+  $("previous-record").onclick=()=>moveReview(-1);
+  $("next-record").onclick=()=>moveReview(1);
+  $("review-field").onchange=()=>{state.field=$("review-field").value;render();};
   $("correction-form").onsubmit = (event) => {
     event.preventDefault();
     if (!$("reviewer").value.trim()) { say("Enter your reviewer name above before saving a candidate."); return; }
@@ -692,6 +722,37 @@
     anchor.href = url; anchor.download = filename; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  const stableFeedback=value=>Array.isArray(value)?"["+value.map(stableFeedback).join(",")+"]":value&&typeof value==="object"?"{"+Object.keys(value).sort().map(k=>JSON.stringify(k)+":"+stableFeedback(value[k])).join(",")+"}":JSON.stringify(value);
+  function feedbackSummary(){
+    $("feedback-summary").textContent=state.feedback.length+" reviewed examples collected. Download before closing; collection is held in this tab only. New source pages do not clear it.";
+  }
+  const feedbackText=items=>JSON.stringify({format:"toolkit-feedback-collection-v1",cases:items},null,2)+"\n";
+  function addFeedback(items){
+    const merged=[...state.feedback];
+    for(const item of items)if(!merged.some(c=>c.id===item.id))merged.push(item);
+    if(merged.length>20||new Blob([feedbackText(merged)]).size>5000000)throw Error("A collection supports up to 20 cases or 5 MB. Download this collection and start another tab for more.");
+    state.feedback=merged;feedbackSummary();controls();
+  }
+  $("collect-feedback").onclick=()=>perform(async()=>{
+    const response=await request("/api/interpretation/action",{action:"feedback",job:state.view.job});
+    addFeedback([await response.json()]);say("Reviewed example collected. Download the feedback collection to keep it. No extraction rules were changed.");
+  });
+  $("download-feedback").onclick=()=>{
+    saveBlob(new Blob([feedbackText(state.feedback)],{type:"application/json"}),"toolkit-feedback-collection.json");
+    say("Feedback collection downloaded. Open it here later to add more cases, or run the offline feedback check against a future update.");
+  };
+  $("import-feedback").onclick=()=>perform(async()=>{
+    const file=$("feedback-file").files[0];if(!file||file.size>5000000)throw Error("Choose a feedback collection JSON file up to 5 MB.");
+    const collection=JSON.parse(await file.text());
+    if(collection.format!=="toolkit-feedback-collection-v1"||!Array.isArray(collection.cases)||!collection.cases.length||collection.cases.length>20)throw Error("Choose a collection containing 1–20 reviewed examples.");
+    const verified=[];
+    for(const item of collection.cases){
+      const response=await request("/api/interpretation/action",{action:"feedback",job:item.job});const actual=await response.json();
+      if(item.format!==actual.format||item.id!==actual.id||stableFeedback(item)!==stableFeedback(actual))throw Error("A feedback case differs from its validated review history. Your current collection was kept.");
+      verified.push(actual);
+    }
+    addFeedback(verified);say("Feedback collection opened and review histories revalidated. Current extraction is unchanged.");
+  });
   $("save-session").onclick = () => perform(async () => {
     const response = await request("/api/interpretation/action", { action: "save", job: state.view.job });
     saveBlob(await response.blob(), "toolkit-review-session.json");

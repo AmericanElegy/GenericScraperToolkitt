@@ -2197,6 +2197,20 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
   }
 }
 
+// src/interpretation/feedback.js
+var FEEDBACK_FORMAT = "toolkit-feedback-case-v1";
+async function feedbackCase(job, validation, original) {
+  const reviewed = validation.records.filter((r) => r.review_status === "approved" || r.review_status === "rejected");
+  if (!reviewed.length) throw new ContractError("feedback_needs_review", "Approve or reject at least one record before collecting feedback. Corrections remain proposals until reviewed.");
+  const values = (r) => Object.fromEntries(Object.entries(r.fields).map(([name, f]) => [name, f.value]));
+  const expectations = { approved: reviewed.filter((r) => r.review_status === "approved").map((r) => ({ record_id: r.id, values: values(r) })), rejected: reviewed.filter((r) => r.review_status === "rejected").map((r) => ({ record_id: r.id, values: values(r) })), unreviewed_count: validation.records.length - reviewed.length, coverage: "partial-review; unreviewed or absent records are not ground truth" };
+  const baseline = { candidate_values: original.records.map(values) };
+  const payload = { format: FEEDBACK_FORMAT, job, expectations, baseline };
+  const result = { ...payload, id: await digest(payload) };
+  if (new TextEncoder().encode(canonical(result)).byteLength > 95e4) throw new ContractError("feedback_limit", "This feedback case exceeds the portable case limit. Use a smaller source selection.");
+  return result;
+}
+
 // src/interpretation/review-queue.js
 var tableMethods = /* @__PURE__ */ new Set(["semantic-ranking-v1", "mapped-table-v1", "mapped-table-v2", "pasted-wage-table-v1", "pasted-wage-table-v2", "pasted-page-table-v1"]);
 var reviewOnly = /* @__PURE__ */ new Set(["association_unverified", "cross_passage_association"]);
@@ -2319,17 +2333,18 @@ var interpretation_scripted_default = {
 var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Interpretation Lab \xB7 Web Table Toolkit</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f5f7fa;color:#203149;font:15px system-ui,sans-serif}main{max-width:1500px;margin:auto;padding:24px 28px 48px}h1{font-size:28px;letter-spacing:-.7px;margin:6px 0}h2{font-size:18px;margin:0 0 12px}h3{font-size:15px;margin:16px 0 8px}p{line-height:1.55;margin:8px 0 12px}a{color:#245e91}#retrieved-source{overflow-wrap:anywhere}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:22px}.eyebrow,.hint{font-size:13px;color:#63738a}.eyebrow{letter-spacing:.08em;text-transform:uppercase}.card{background:#fff;border:1px solid #dfe5ed;border-radius:12px;padding:18px;margin-bottom:16px}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.between{justify-content:space-between}button,input,select,textarea{font:inherit}button{border:1px solid #245a84;border-radius:7px;background:#245a84;color:#fff;padding:9px 14px;cursor:pointer}button.secondary{background:#fff;color:#304860;border-color:#cbd5e1}button:disabled{opacity:.45;cursor:not-allowed}input,select,textarea{background:#fff;color:inherit;border:1px solid #c7d1de;border-radius:7px;padding:9px;max-width:100%}input,textarea{width:100%}textarea{min-height:78px;resize:vertical}#source-text{min-height:130px}label{display:block;font-size:13px;font-weight:600;margin:10px 0 5px}fieldset{border:1px solid #dfe5ed;border-radius:8px;margin-top:12px}details{margin:12px 0}details.card{margin:0 0 16px}summary{cursor:pointer;font-weight:600;color:#344f6d;font-size:14px}details[open]>summary{margin-bottom:12px}.check{display:flex;gap:8px;align-items:flex-start;font-weight:400;line-height:1.45}.check input{width:auto;margin-top:4px}.review-layout{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:18px;align-items:start}.preview{min-width:0}.inspector{position:sticky;top:16px;min-width:0;max-height:calc(100vh - 32px);overflow:auto}.scroll{overflow:auto;max-height:65vh}table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}th{position:sticky;top:0;background:#f8fafc;font-size:12px;font-weight:600;color:#65748a;z-index:1}th,td{padding:10px 8px;border-bottom:1px solid #edf0f5;vertical-align:middle}tr.is-selected{background:#f0f6fc}td button.value{border:0;background:transparent;color:#273f5a;padding:4px 3px;min-width:0;max-width:240px;text-align:left;font-size:13px;line-height:1.4;border-radius:4px}td button.value[aria-pressed=true]{background:#dbeaf9;color:#164b79;box-shadow:0 0 0 1px #9dbfdf}td.numeric button{white-space:nowrap;font-variant-numeric:tabular-nums}td input[type=checkbox]{width:auto}.status{font-size:11px;white-space:nowrap;color:#67758b}.status.approved{color:#197351}.status.rejected{color:#a34d42}.status.needs_review{color:#936614}blockquote{margin:8px 0;padding:12px;background:#f5f8fc;border-left:3px solid #97b4d0;border-radius:0 6px 6px 0;font-size:13px;line-height:1.55;overflow-wrap:anywhere;max-height:210px;overflow:auto}mark{background:#ffe5ad;color:#203149}.passage{border-bottom:1px solid #e6ecf2;padding:8px 0;font-size:13px;overflow-wrap:anywhere}.passage.focused{border-left:3px solid #8db0d2;padding-left:10px}.passage h3{margin:6px 0;font-size:13px}.findings{font-size:13px;line-height:1.5}ul,ol{padding-left:20px}li{margin:7px 0;line-height:1.5}.hash{font-family:monospace;overflow-wrap:anywhere;font-size:11px}.batch{background:#f5f9fd;border:1px solid #d9e5f2;border-radius:9px;padding:12px;margin-top:14px}.batch-fields{display:grid;grid-template-columns:1fr 2fr;gap:10px}.batch .hint{margin:6px 0}.toolbar{margin-bottom:12px}#counts{font-size:15px}#queue-summary{font-size:12px;color:#65758b}#status{font-size:13px;line-height:1.5;color:#47607b;margin:10px 0;overflow-wrap:anywhere}.empty{padding:24px;text-align:center;color:#68788c}caption{font-size:12px;text-align:left;color:#748197;padding:0 8px 8px}#history,#revision-history{font-size:13px;overflow-wrap:anywhere}.session-tools input[type=file]{width:auto;max-width:100%}.badge{font-size:12px;background:#e8f2eb;color:#357252;border-radius:20px;padding:5px 10px}footer{font-size:12px;color:#79869a;margin-top:18px}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #d59a32;outline-offset:3px}[hidden]{display:none!important}@media(max-width:1000px){.review-layout{grid-template-columns:minmax(0,1fr)}.inspector{position:static;max-height:none}.scroll{max-height:55vh}}@media(max-width:600px){main{padding:18px 12px}.top{align-items:flex-start}.card{padding:14px}.batch-fields{grid-template-columns:1fr}.bar select{max-width:100%;width:100%}h1{font-size:24px}.top .badge{display:none}th,td{padding:8px 6px}}
+.review-reason{font-size:13px;background:#f2f6fa;padding:10px 12px;border-radius:7px}.review-reason[data-blocked=true]{background:#fff6e6;color:#79520e}.selected-value{font-weight:600;font-size:16px;overflow-wrap:anywhere;max-height:90px;overflow:auto}.review-navigation button{padding:6px 9px;font-size:12px}#review-field{width:100%;font-size:13px}#evidence>blockquote{max-height:145px}#evidence details blockquote{max-height:145px}
 </style><script src="/interpretation-client.js" defer><\/script></head><body><main>
 <header class="top"><div><a class="eyebrow" href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><p class="hint">Paste a page. Review what matters. Export your data.</p></div><span class="badge">Local review workspace</span></header>
 <details class="card" id="input-panel" open><summary>1. Add source text</summary><form id="custom-input"><label for="source-url">Source URL \xB7 reference unless you click Fetch page</label><div class="bar"><input id="source-url" type="url" placeholder="https://example.org/article" style="flex:1;min-width:180px"><button id="fetch-source" type="button" class="secondary">Fetch page</button></div><p class="hint">Tries ordinary HTML first. The local server can try JavaScript rendering when indicated. Pasting below never fetches a URL.</p><label for="source-text">Or paste a passage or full page</label><textarea id="source-text" required placeholder="Paste your page here. Columns are suggested automatically."></textarea><p class="hint">Up to 64,000 characters in automatic mode. New text starts a new review.</p><details><summary>Source and extraction options</summary><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Automatically detect tables and facts</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"><p class="hint">Use lowercase names and underscores. This mode accepts simple name/number pairs.</p></fieldset></details><button id="extract" type="submit">Preview suggested records</button></form><details><summary>Try an example</summary><div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load" type="button" class="secondary">Load example</button></div></details></details>
 <details class="card session-tools"><summary>Save or open a review</summary><div class="bar"><button id="save-session" type="button">Save review session</button><form id="restore-form" class="bar"><label for="session-file">Saved session JSON</label><input id="session-file" type="file" accept=".json,application/json" required><button id="restore-session" type="submit" class="secondary">Open saved session</button></form></div><p class="hint">Continue on another computer with a saved session. Files include full source and review history. Imported reviewers are self-declared. Reloading without saving clears your review.</p></details>
 <section id="page-sections" class="card" hidden><h2 id="batch-summary"></h2><div class="bar"><button id="previous-batch" type="button" class="secondary">Previous batch</button><button id="next-batch" type="button" class="secondary">Next batch</button></div><div class="bar"><label for="dataset">Page section</label><select id="dataset"></select><button id="open-section" type="button" class="secondary">Open selected section</button></div><p class="hint">Switching starts a new review. Save this section's review before switching; approvals do not carry between batches.</p><details><summary>Section scope and retained page</summary><p id="page-scope" class="hint"></p><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
 <section id="retrieved-panel" class="card" hidden><h2 id="retrieved-method"></h2><p><a id="retrieved-source" target="_blank" rel="noopener noreferrer"></a></p><p id="retrieved-summary" class="hint"></p><p id="retrieved-current"></p><div class="bar"><label for="retrieved-dataset">Retrieved content</label><select id="retrieved-dataset"></select><button id="open-retrieved" type="button" class="secondary">Open retrieved content</button></div><p id="retrieved-preview" class="hint"></p><p class="hint">Opening another selection starts a new review. Save your current session first. Retrieved text is a normalized snapshot; coverage may be incomplete.</p><details><summary>Fetch attempts and issues</summary><pre id="retrieval-checks" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section><p id="status" role="status" aria-live="polite">Paste text or load an example to begin.</p>
-<section id="workspace" hidden><section id="meaning-panel" class="card" hidden><h2 id="meaning-title"></h2><p id="meaning-explanation" class="hint"></p><blockquote id="meaning-context" hidden></blockquote><p id="meaning-count" class="hint"></p></section><details id="mapping-panel" class="card"><summary>Column mapping \xB7 suggested automatically</summary><p id="mapping-notice" class="hint"></p><form id="mapping-form"><div class="scroll"><table><thead><tr><th>Source heading</th><th>Export column</th><th>Format</th><th>Sample values</th></tr></thead><tbody id="mapping-columns"></tbody></table></div><p id="mapping-issues" class="hint"></p><button id="apply-mapping" type="submit" class="secondary" hidden>Apply column changes \xB7 starts a new review</button></form></details><div class="bar between toolbar"><div><strong id="counts"></strong><p id="queue-summary"></p><p id="export-scope" class="hint"></p></div><div class="bar"><button id="approved-csv">Export CSV</button><button id="approved-json" class="secondary">Export JSON</button></div></div>
+<details class="card"><summary>Improvement examples \xB7 collect reviewed cases</summary><p class="hint">Collect reviewed examples to test future updates across pages. Approved records are expected answers; rejected proposals track known issues. Pending records are excluded. This does not teach or change the extractor automatically.</p><p id="feedback-summary" class="hint">No examples collected. Download the collection before closing; it is not stored automatically.</p><div class="bar"><button id="collect-feedback" class="secondary" disabled>Add current reviewed example</button><button id="download-feedback" class="secondary" disabled>Download feedback collection</button></div><label for="feedback-file">Open a feedback collection to continue adding examples</label><input id="feedback-file" type="file" accept=".json,application/json"><button id="import-feedback" class="secondary">Open collection</button><p class="hint">Files contain source text and review history. Keep them with your project files; nothing is uploaded to an AI service.</p></details><section id="workspace" hidden><section id="meaning-panel" class="card" hidden><h2 id="meaning-title"></h2><p id="meaning-explanation" class="hint"></p><blockquote id="meaning-context" hidden></blockquote><p id="meaning-count" class="hint"></p></section><details id="mapping-panel" class="card"><summary>Column mapping \xB7 suggested automatically</summary><p id="mapping-notice" class="hint"></p><form id="mapping-form"><div class="scroll"><table><thead><tr><th>Source heading</th><th>Export column</th><th>Format</th><th>Sample values</th></tr></thead><tbody id="mapping-columns"></tbody></table></div><p id="mapping-issues" class="hint"></p><button id="apply-mapping" type="submit" class="secondary" hidden>Apply column changes \xB7 starts a new review</button></form></details><div class="bar between toolbar"><div><strong id="counts"></strong><p id="queue-summary"></p><p id="export-scope" class="hint"></p></div><div class="bar"><button id="approved-csv">Export CSV</button><button id="approved-json" class="secondary">Export JSON</button></div></div>
 <div class="review-layout"><section class="card preview" aria-labelledby="candidates-title"><div class="bar between"><h2 id="candidates-title">2. Review records</h2><label for="record-filter">Show <select id="record-filter"><option value="all">All records</option><option value="attention">Needs individual attention</option><option value="pending">Pending reviews</option></select></label></div><p class="hint">Click a value to inspect its source. Checked table rows can be approved together.</p><div class="scroll"><table><caption>Records in requested column order</caption><thead id="candidate-head"></thead><tbody id="candidate-rows"></tbody></table></div>
 <section id="batch-panel" class="batch" hidden><div class="bar between"><strong id="batch-count">No rows selected</strong><div class="bar"><button id="select-eligible" class="secondary" type="button">Select eligible rows</button><button id="clear-selection" class="secondary" type="button">Clear selection</button></div></div><p id="batch-help" class="hint"></p><form id="batch-form"><div class="batch-fields"><div><label for="batch-reviewer">Reviewer name</label><input id="batch-reviewer" required maxlength="80" autocomplete="off"></div><div><label for="batch-note">Batch review note</label><input id="batch-note" required maxlength="900" placeholder="What did you check about this table?"></div></div><label class="check"><input id="batch-confirm" type="checkbox"><span>I checked the source header mapping and confirm that the selected rows use it correctly.</span></label><button id="approve-batch" type="submit">Approve selected rows</button></form><p class="hint">This records a human batch decision. Prose, corrections and flagged rows require individual review.</p></section>
 <details><summary>How this was extracted</summary><p id="interpretation-summary" class="hint"></p><button id="revalidate" class="secondary">Revalidate evidence</button><p class="hint">Rules suggest records; matching text alone does not prove the relationship between values. No automatic acceptance is enabled.</p></details></section>
-<aside class="card inspector" aria-label="Selected record source and review"><h2>Inspect &amp; decide</h2><h3 id="field-title"></h3><div id="evidence"></div><details id="findings-details"><summary>Checks and findings</summary><div id="findings" class="findings"></div></details><form id="review"><h3 id="review-title">Review selected record</h3><p id="approval-note" class="hint"></p><label for="reviewer">Reviewer name</label><input id="reviewer" required maxlength="80" autocomplete="off"><label for="note">Review note</label><textarea id="note" required maxlength="1000" placeholder="Explain your decision."></textarea><label class="check"><input type="checkbox" id="confirm"><span>I compared the proposed values with the source and confirm their association.</span></label><div class="bar"><button id="approve" data-decision="approved" type="submit">Approve</button><button id="reject" data-decision="rejected" class="secondary" type="submit">Reject</button><button id="pending" data-decision="needs_review" class="secondary" type="submit">Leave pending</button></div></form>
+<aside class="card inspector" aria-label="Selected record source and review"><h2>Review one record</h2><div class="bar between review-navigation"><button id="previous-record" class="secondary" type="button" aria-label="Previous record">\u2190 Previous</button><span id="review-position" class="hint"></span><button id="next-record" class="secondary" type="button" aria-label="Next record">Next \u2192</button></div><p id="review-reason" class="review-reason"></p><label for="review-field">Value to check</label><select id="review-field"></select><h3 id="field-title"></h3><p id="selected-value" class="selected-value"></p><div id="evidence"></div><details id="findings-details"><summary id="findings-summary">All checks and findings</summary><div id="findings" class="findings"></div></details><form id="review"><h3 id="review-title">Review selected record</h3><p id="approval-note" class="hint"></p><label for="reviewer">Reviewer name</label><input id="reviewer" required maxlength="80" autocomplete="off"><label for="note">Review note</label><textarea id="note" required maxlength="1000" placeholder="Explain your decision."></textarea><label class="check"><input type="checkbox" id="confirm"><span>I compared the proposed values with the source and confirm their association.</span></label><div class="bar"><button id="approve" data-decision="approved" type="submit">Approve</button><button id="reject" data-decision="rejected" class="secondary" type="submit">Reject</button><button id="pending" data-decision="needs_review" class="secondary" type="submit">Leave pending</button></div></form>
 <details id="correction-panel"><summary>Correct or add a record</summary><p class="hint">Use exact source quotations. Saving changes resets current approvals; earlier decisions remain in the history.</p><div class="bar"><button id="edit-selected" type="button" class="secondary">Edit selected record</button><button id="add-record" type="button" class="secondary">Add a record</button></div><form id="correction-form"><h3 id="correction-title">Correct candidate</h3><div id="correction-fields"></div><label for="correction-note">Reason for correction or addition</label><textarea id="correction-note" required maxlength="1000"></textarea><p class="hint">Uses the reviewer name above.</p><button id="save-correction" type="submit">Save candidate and revalidate</button></form></details>
 <details id="source-details"><summary>All source passages</summary><p class="hint">Passage numbers identify paragraphs in this section, not page numbers.</p><p id="source-info" class="hint"></p><div id="passages"></div><details><summary>Source integrity</summary><p class="hint">Offsets use UTF-16 characters, start inclusive and end exclusive.</p><p id="source-hash" class="hash"></p></details></details></aside></div>
 <details class="card"><summary>Review history and additional exports</summary><p class="hint">Approved exports contain approved current-section records only. JSON/session files retain full source and history, including unapproved content. CSV keeps original automatic findings separate from human review status.</p><button id="diagnostic-json" class="secondary">Diagnostic JSON \xB7 all statuses</button><h3>Candidate revision history</h3><ol id="revision-history"></ol><h3>Session review log</h3><ol id="history"></ol><p id="empty-history" class="hint">No review decisions yet.</p></details></section>
@@ -2340,7 +2355,7 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 var lab_client_default = `"use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null };
+  const state = { view: null, rowId: null, field: null, busy: false, editingId: null, checked: new Set(), lastPacket: null, retrieved: null, feedback: [] };
   const labels = {
     approved: "Approved",
     rejected: "Rejected",
@@ -2444,6 +2459,7 @@ var lab_client_default = `"use strict";
     for (const id of [
       "revalidate",
       "save-session",
+      "collect-feedback",
       "approved-csv",
       "approved-json",
       "diagnostic-json",
@@ -2461,8 +2477,16 @@ var lab_client_default = `"use strict";
     for (const button of document.querySelectorAll("#candidate-rows button"))
       button.disabled = state.busy;
     for (const field of document.querySelectorAll('#correction-fields input, #correction-fields select, #correction-fields textarea')) field.disabled = state.busy;
+    $("collect-feedback").disabled=state.busy||!state.view||!state.view.validation.records.some(r=>["approved","rejected"].includes(r.review_status));
+    $("download-feedback").disabled=state.busy||!state.feedback.length;
+    $("import-feedback").disabled=state.busy;
+    $("feedback-file").disabled=state.busy;
     $("edit-selected").disabled = state.busy || !selected();
     const row = selected();
+    const reviewRows=visibleRows(),reviewIndex=reviewRows.findIndex(r=>r.id===row?.id);
+    $("previous-record").disabled=state.busy||reviewIndex<=0;
+    $("next-record").disabled=state.busy||reviewIndex<0||reviewIndex>=reviewRows.length-1;
+    $("review-field").disabled=state.busy||!row;
     const missing = [];
     if (!$("reviewer").value.trim()) missing.push("enter your reviewer name");
     if (!$("note").value.trim()) missing.push("enter a review note");
@@ -2477,7 +2501,7 @@ var lab_client_default = `"use strict";
       : approved
         ? "This record is already approved and will be included in Approved CSV and Approved JSON. No further approval is needed."
         : blocking(row)
-          ? "Cannot approve this record: " + blockers(row).map((issue) => issue.message).join(" ") + " You can reject it or leave it pending."
+          ? "Cannot approve until flagged values receive a correction. See All checks for details, or reject / leave pending."
           : missing.length
             ? "To approve record " + recordNumber(row) + ": " + missing.join("; ") + "."
             : "Ready to approve record " + recordNumber(row) + ". Approval confirms that you checked the values against their source.";
@@ -2647,19 +2671,30 @@ var lab_client_default = `"use strict";
       $("field-title").textContent = state.view.validation.records.length ? "No records in this view" : "No candidates yet";
       $("evidence").replaceChildren(text("p", state.view.validation.records.length ? "Choose All records to see completed or batch-ready rows." : "No supported pattern matched. You can add a record manually with supporting text."));
       $("findings-details").open = false;
+      $("review-position").textContent="No selected record";$("review-reason").textContent="Select a record or change the filter.";$("selected-value").textContent="";$("review-field").replaceChildren();
       $("findings").replaceChildren();
       $("review-title").textContent = "Add a candidate to review";
       return;
     }
     $("field-title").textContent =
       columnLabel(state.field) + " \xB7 record " + recordNumber(row);
+    const rows=visibleRows();
+    $("review-position").textContent=(rows.findIndex(r=>r.id===row.id)+1)+" of "+rows.length;
+    const reasons=blockers(row),reason=reasons[0]?.message;
+    $("review-reason").dataset.blocked=String(reasons.length>0);
+    $("review-reason").textContent=reason?(reason.length>170?reason.slice(0,167)+"\u2026":reason)+" Full details below.":row.review_status==="approved"?"Approved. This record is included in approved exports.":row.review_status==="rejected"?"Rejected. This record is excluded from approved exports.":"Check the values against the source, then approve, reject or leave pending.";
+    $("selected-value").textContent=displayValue(row,state.view.job.packet.schema.fields.find(f=>f.name===state.field));
+    $("review-field").replaceChildren(...state.view.job.packet.schema.fields.map(f=>{const option=text("option",columnLabel(f.name));option.value=f.name;return option;}));
+    $("review-field").value=state.field;
     const evidence = [];
-    for (const e of field.evidence) {
+    const additional=document.createElement("details");
+    additional.append(text("summary","More supporting quotations ("+Math.max(0,field.evidence.length-1)+")"));
+    for (const [index,e] of field.evidence.entries()) {
       const reference = document.createElement("details");
       reference.append(text("summary", passageLabel(e.passage_id) + " \xB7 source reference"),
         text("p", "Internal ID " + e.passage_id + " \xB7 snapshot offsets " + e.source_start + "\u2013" + e.source_end +
           (e.document_start !== undefined ? " \xB7 original page offsets " + e.document_start + "\u2013" + e.document_end : ""), "hint"));
-      evidence.push(text("blockquote", e.quote), reference);
+      if(index===0)evidence.push(text("blockquote", e.quote), reference);else additional.append(text("blockquote",e.quote),reference);
     }
     if (!field.evidence.length) {
       evidence.push(
@@ -2674,15 +2709,18 @@ var lab_client_default = `"use strict";
           text("p", "Proposed quotation \xB7 not validated", "hint"),
         );
     }
+    if(field.evidence.length>1)evidence.push(additional);
     $("evidence").replaceChildren(...evidence);
-    $("findings-details").open = blocking(row);
+    if(state.inspectedRow!==row.id||state.inspectedPacket!==state.view.job.packet.hash){$("findings-details").open=false;state.inspectedRow=row.id;state.inspectedPacket=state.view.job.packet.hash;}
     const list = document.createElement("ul");
-    for (const finding of [
+    const findings=[
       ...state.view.validation.issues,
       ...row.issues,
       ...Object.values(row.fields).flatMap((f) => f.issues),
-    ])
-      list.append(text("li", finding.message));
+    ];
+    const uniqueFindings=[...new Set(findings.map(f=>f.message))];
+    for(const message of uniqueFindings)list.append(text("li",message));
+    $("findings-summary").textContent="All checks and findings ("+uniqueFindings.length+")";
     $("findings").replaceChildren(
       text("strong", row.review_status === "approved" ? "Original automated findings \xB7 human association review completed" : "System findings \u2014 retained after review"),
       list,
@@ -2915,6 +2953,13 @@ var lab_client_default = `"use strict";
       say(state.view.document ? "Full page accepted and divided into sections. " + state.view.extraction.message + " Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. " + state.view.extraction.message + " No AI calls.");
     });
   };
+  function moveReview(direction){
+    if(state.busy)return;const rows=visibleRows(),at=rows.findIndex(r=>r.id===state.rowId),next=rows[at+direction];if(!next)return;
+    clearDecision();state.rowId=next.id;state.field=state.view.job.packet.schema.fields[0].name;render();editCandidate();
+  }
+  $("previous-record").onclick=()=>moveReview(-1);
+  $("next-record").onclick=()=>moveReview(1);
+  $("review-field").onchange=()=>{state.field=$("review-field").value;render();};
   $("correction-form").onsubmit = (event) => {
     event.preventDefault();
     if (!$("reviewer").value.trim()) { say("Enter your reviewer name above before saving a candidate."); return; }
@@ -3031,6 +3076,37 @@ var lab_client_default = `"use strict";
     anchor.href = url; anchor.download = filename; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  const stableFeedback=value=>Array.isArray(value)?"["+value.map(stableFeedback).join(",")+"]":value&&typeof value==="object"?"{"+Object.keys(value).sort().map(k=>JSON.stringify(k)+":"+stableFeedback(value[k])).join(",")+"}":JSON.stringify(value);
+  function feedbackSummary(){
+    $("feedback-summary").textContent=state.feedback.length+" reviewed examples collected. Download before closing; collection is held in this tab only. New source pages do not clear it.";
+  }
+  const feedbackText=items=>JSON.stringify({format:"toolkit-feedback-collection-v1",cases:items},null,2)+"\\n";
+  function addFeedback(items){
+    const merged=[...state.feedback];
+    for(const item of items)if(!merged.some(c=>c.id===item.id))merged.push(item);
+    if(merged.length>20||new Blob([feedbackText(merged)]).size>5000000)throw Error("A collection supports up to 20 cases or 5 MB. Download this collection and start another tab for more.");
+    state.feedback=merged;feedbackSummary();controls();
+  }
+  $("collect-feedback").onclick=()=>perform(async()=>{
+    const response=await request("/api/interpretation/action",{action:"feedback",job:state.view.job});
+    addFeedback([await response.json()]);say("Reviewed example collected. Download the feedback collection to keep it. No extraction rules were changed.");
+  });
+  $("download-feedback").onclick=()=>{
+    saveBlob(new Blob([feedbackText(state.feedback)],{type:"application/json"}),"toolkit-feedback-collection.json");
+    say("Feedback collection downloaded. Open it here later to add more cases, or run the offline feedback check against a future update.");
+  };
+  $("import-feedback").onclick=()=>perform(async()=>{
+    const file=$("feedback-file").files[0];if(!file||file.size>5000000)throw Error("Choose a feedback collection JSON file up to 5 MB.");
+    const collection=JSON.parse(await file.text());
+    if(collection.format!=="toolkit-feedback-collection-v1"||!Array.isArray(collection.cases)||!collection.cases.length||collection.cases.length>20)throw Error("Choose a collection containing 1\u201320 reviewed examples.");
+    const verified=[];
+    for(const item of collection.cases){
+      const response=await request("/api/interpretation/action",{action:"feedback",job:item.job});const actual=await response.json();
+      if(item.format!==actual.format||item.id!==actual.id||stableFeedback(item)!==stableFeedback(actual))throw Error("A feedback case differs from its validated review history. Your current collection was kept.");
+      verified.push(actual);
+    }
+    addFeedback(verified);say("Feedback collection opened and review histories revalidated. Current extraction is unchanged.");
+  });
   $("save-session").onclick = () => perform(async () => {
     const response = await request("/api/interpretation/action", { action: "save", job: state.view.job });
     saveBlob(await response.blob(), "toolkit-review-session.json");
@@ -3445,7 +3521,7 @@ async function labFetch(request) {
     }
     if (url.pathname !== "/api/interpretation/action")
       return reply2({ error: "Not found", code: "not_found" }, 404);
-    if (!only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !["revalidate", "review", "export", "correct", "save", "restore", "review_batch"].includes(body.action))
+    if (!only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !["revalidate", "review", "export", "correct", "save", "restore", "review_batch", "feedback"].includes(body.action))
       fail3("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
     if (body.action === "restore") {
       if (!only(body, ["action", "session"]) || !only(body.session, ["format", "job"]) || body.session.format !== "toolkit-review-session-v1")
@@ -3453,6 +3529,7 @@ async function labFetch(request) {
       return reply2(await view(body.session.job, await checkJob(body.session.job)));
     }
     const result = await checkJob(body.job);
+    if (body.action === "feedback") return reply2(await feedbackCase(body.job, result.json.validation, originalResponse(body.job)));
     if (body.action === "review_batch") {
       const queue = reviewQueue(body.job, result.json.validation);
       if (!only(body, ["action", "job", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !Array.isArray(body.record_ids) || !body.record_ids.length || body.record_ids.length > 50 || new Set(body.record_ids).size !== body.record_ids.length || body.record_ids.some((id) => !queue.eligible_ids.includes(id)) || body.confirmed_mapping !== true)

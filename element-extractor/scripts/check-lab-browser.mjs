@@ -232,6 +232,20 @@ try {
     await evaluate('document.getElementById("approval-note").textContent'),
     /Cannot approve.*correction/,
   );
+  assert.equal(await evaluate('document.getElementById("findings-details").open'),false);
+  assert.equal(await evaluate('document.getElementById("review-reason").dataset.blocked'),"true");
+  if(process.env.LAB_SCREENSHOT_DIR){
+    await mkdir(process.env.LAB_SCREENSHOT_DIR,{recursive:true});
+    await evaluate('document.querySelector(".inspector").scrollIntoView({block:"start"})');
+    const desktop=await send("Page.captureScreenshot",{captureBeyondViewport:false});
+    await writeFile(join(process.env.LAB_SCREENSHOT_DIR,"manual-review-desktop.png"),Buffer.from(desktop.data,"base64"));
+    await send("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
+    await evaluate('document.querySelector(".inspector").scrollIntoView({block:"start"})');
+    const mobile=await send("Page.captureScreenshot",{captureBeyondViewport:false});
+    await writeFile(join(process.env.LAB_SCREENSHOT_DIR,"manual-review-mobile.png"),Buffer.from(mobile.data,"base64"));
+    await send("Emulation.setDeviceMetricsOverride",{width:1440,height:1200,deviceScaleFactor:1,mobile:false});
+    await evaluate('window.scrollTo(0,0)');
+  }
   await evaluate('document.getElementById("reject").click()');
   await waitFor(() =>
     evaluate(
@@ -518,10 +532,46 @@ try {
   await waitFor(() => evaluate('!document.getElementById("load").disabled'));
   assert.match(await evaluate('document.getElementById("counts").textContent'), /24 candidates.*1 approved/);
   assert.ok(await evaluate('!document.getElementById("status").textContent.includes("Saved session opened")'));
+  await evaluate('document.getElementById("collect-feedback").click()');
+  await waitFor(()=>evaluate('document.getElementById("status").textContent.includes("Reviewed example collected")&&!document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("feedback-summary").textContent'),/^1 reviewed examples/);
+  await evaluate('document.getElementById("collect-feedback").click()');
+  await waitFor(()=>evaluate('!document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("feedback-summary").textContent'),/^1 reviewed examples/);
+  await evaluate('document.getElementById("download-feedback").click()');
+  await waitFor(async()=> (await readdir(dir)).includes("toolkit-feedback-collection.json"));
+  const feedback=await readFile(join(dir,"toolkit-feedback-collection.json"),"utf8");
+  assert.equal(JSON.parse(feedback).cases[0].expectations.approved.length,1);
+  await evaluate(`(() => {
+    const transfer=new DataTransfer();transfer.items.add(new File([${JSON.stringify(feedback)}],"feedback.json",{type:"application/json"}));
+    document.getElementById("feedback-file").files=transfer.files;document.getElementById("import-feedback").click();
+  })()`);
+  await waitFor(()=>evaluate('document.getElementById("status").textContent.includes("Feedback collection opened")&&!document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("counts").textContent'),/24 candidates.*1 approved/);
+  await evaluate(`(() => {
+    const bad=JSON.parse(${JSON.stringify(feedback)});bad.cases[0].expectations.approved[0].values={forged:"answer"};
+    const transfer=new DataTransfer();transfer.items.add(new File([JSON.stringify(bad)],"changed-feedback.json",{type:"application/json"}));
+    document.getElementById("feedback-file").files=transfer.files;document.getElementById("import-feedback").click();
+  })()`);
+  await waitFor(()=>evaluate('document.getElementById("status").textContent.includes("differs from its validated review history")&&!document.getElementById("load").disabled'));
+  assert.match(await evaluate('document.getElementById("feedback-summary").textContent'),/^1 reviewed examples/);
+  assert.equal(await evaluate('document.getElementById("findings-details").open'),false);
+  await evaluate('document.getElementById("note").value="Must not carry across records";document.getElementById("confirm").checked=true;document.getElementById("next-record").click()');
+  assert.match(await evaluate('document.getElementById("review-position").textContent'),/^2 of 24/);
+  assert.equal(await evaluate('document.getElementById("note").value'),"");
+  assert.equal(await evaluate('document.getElementById("confirm").checked'),false);
+  await evaluate('document.getElementById("review-field").value="hourly_wage_dollars";document.getElementById("review-field").dispatchEvent(new Event("change"))');
+  assert.match(await evaluate('document.getElementById("field-title").textContent'),/Hourly wage/);
+  assert.match(await evaluate('document.getElementById("selected-value").textContent'),/\$/);
+  assert.equal(await evaluate('document.querySelectorAll("#evidence > blockquote").length'),1,'Only the primary quotation is expanded.');
+  assert.equal(await evaluate('document.querySelector("#evidence > details:last-child").open'),false);
+  await evaluate('document.getElementById("previous-record").click()');
+  assert.match(await evaluate('document.getElementById("review-position").textContent'),/^1 of 24/);
+  assert.equal(await evaluate('document.getElementById("previous-record").disabled'),true);
   assert.equal(errors.length, 0, JSON.stringify(errors));
   assert.equal(outboundCalls, 0);
   console.log(
-    "PASS: lab evidence highlighting, review guards, approve/reject/pending history, offline revalidation, real CSV/JSON downloads, inert review text, mobile layout, custom text, manual addition, candidate correction, full-page section switching, grouped numbers, portable save/restore and session reset; no outbound calls.",
+    "PASS: lab evidence highlighting, review guards, approve/reject/pending history, offline revalidation, real CSV/JSON downloads, inert review text, mobile layout, custom text, manual addition, candidate correction, full-page section switching, grouped numbers, portable save/restore, feedback collection downloads/revalidation/deduplication and session reset; no outbound calls.",
   );
 } finally {
   ws?.close();

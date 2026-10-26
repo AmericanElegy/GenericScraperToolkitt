@@ -162,3 +162,31 @@ Automatic mode recognizes `Year`/`Date`/`Period`/`Season` plus explicit `#1`, `#
 The separate `text-relations-v1` profile recognizes bounded literal statements such as “The most popular article in 2025 was Solar eclipse”, “The capital of France is Paris”, and “X belongs to Y”. It uses subject, relationship and text answer fields, with optional period. Existing numerical facts in a mixed passage are retained with numeric value, unit and qualifier. Empty optional columns are hidden in the preview and retained in exports. Numeric-only prose keeps its existing schema. Negated, revised and unsupported statements are not turned into positive noun claims.
 
 These are explicit rules, not general document comprehension. A recognized statement does not imply that every relationship in the passage was understood. Source quotations, computed offsets, independent validation and human review remain required. Rankings can use explicit batch review; prose relations need individual review. Saved sessions pin their parser version, and JSON exports retain the interpretation context. No AI provider, OCR or paid inference is enabled.
+
+## Collect feedback across pages
+
+Open **Improvement examples**. After approving or rejecting records, click **Add current reviewed example**. The collection survives opening another source in the same tab. Re-adding an identical review does not duplicate it. Download **feedback collection** before closing the tab; open that JSON collection later on either computer to continue adding cases. Nothing is automatically stored in browser storage or uploaded. Each collection supports 20 cases and 5 MB. It contains complete source snapshots, corrections and self-declared review histories, including unapproved text.
+
+Approved values become expected answers. Rejected proposals become known negative examples. Pending records are excluded from the answer key. A correction must be reviewed before it becomes an expected answer. Collection import revalidates the source hashes, candidate history and human journal; it does not authenticate the reviewer or establish that their interpretation is correct.
+
+From the `element-extractor` directory, check a collection against the current installed rules:
+
+```powershell
+npm.cmd run build
+npm.cmd run feedback -- check "$HOME\Downloads\toolkit-feedback-collection.json"
+```
+
+The checker runs entirely in the local Workers runtime with outbound fetching disabled. It validates old cases, starts fresh extraction from retained snapshots, and compares full field/value records without replaying human corrections. Missing previously correct answers are regressions. Corrections the original parser could not produce remain unresolved known issues; rejected proposals that still appear also remain known issues. New candidates outside the reviewed examples are unjudged, not automatically wrong. A nonzero exit means at least one regression, unresolved issue or failed check needs attention. JSON output gives the details; it is not an overall accuracy or coverage estimate.
+
+To combine files without overwriting an existing collection:
+
+```powershell
+npm.cmd run feedback -- collect ".\new-feedback.json" ".\first-feedback.json" ".\second-feedback.json"
+```
+
+The feedback loop is deliberate: collect decisions, use examples to improve shared rules, run these saved checks and the release tests, then ship the tested change. The collection never rewrites rules, retrains a model, enables paid inference, or automatically approves another page. Shared table and sentence profiles continue to run across websites; a site adapter remains necessary for some unfamiliar structures. Coverage of several websites is not proof of support for every site.
+
+
+## Focused manual review
+
+The **Review one record** panel shows a short reason for attention, a field selector and its proposed value, and one primary supporting quotation. Additional quotations, source offsets and the full deduplicated findings remain expandable. Blocking checks stay enforced even when their details are collapsed. Use Previous/Next to move within the current filtered records; changing records clears the note and association confirmation so a decision cannot carry over accidentally. The record count reflects the current filter, not the entire source page. These presentation changes do not weaken validation or automatically accept any record.

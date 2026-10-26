@@ -1,3 +1,4 @@
+import {feedbackCase} from './feedback.js';
 import {RANKING_VERSION,rankingPlan,extractRanking,rankingMeaning} from './ranking-rules.js';
 import {TEXT_FACTS_VERSION,TEXT_FACTS_SCHEMA,hasTextRelations,extractTextFacts,assertTextFactConsistency,textFactMeaning} from './text-facts.js';
 import { MAPPING_VERSION, LEGACY_MAPPING_VERSION, detectColumns, mappedSchema, mappingFor, extractMappedTable } from './column-mapping.js';
@@ -402,7 +403,7 @@ export async function labFetch(request) {
       return reply({ error: "Not found", code: "not_found" }, 404);
     if (
       !only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session", "record_ids", "reviewer", "note", "confirmed_mapping"]) ||
-      !["revalidate", "review", "export", "correct", "save", "restore", "review_batch"].includes(body.action)
+      !["revalidate", "review", "export", "correct", "save", "restore", "review_batch", "feedback"].includes(body.action)
     )
       fail("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
     if (body.action === "restore") {
@@ -412,6 +413,7 @@ export async function labFetch(request) {
       return reply(await view(body.session.job, await checkJob(body.session.job)));
     }
     const result = await checkJob(body.job);
+    if (body.action === "feedback") return reply(await feedbackCase(body.job,result.json.validation,originalResponse(body.job)));
     if (body.action === "review_batch") {
       const queue = reviewQueue(body.job, result.json.validation);
       if (!only(body, ["action", "job", "record_ids", "reviewer", "note", "confirmed_mapping"]) ||

@@ -12,6 +12,7 @@ For pages that build their tables with JavaScript, the optional [local browser r
 - **Fetch into the lab:** enter a source URL and click **Fetch page**. Ordinary HTML is tried first; the normal local server can automatically use the installed browser when client rendering is indicated. Paste-only previews remain offline. See [the source-fetch guide](docs/interpretation-lab.md#fetch-a-source-url-and-automatically-try-the-local-renderer).
 - **Pasted text:** open **Interpretation Lab**, paste ordinary text or a whole page, and preview suggested records/columns. Supported table sections keep percentages, job counts and dollar amounts separate.
 - **Review:** inspect source quotations, correct/add candidates, revalidate, then approve or reject. Unsupported content stays visible with an explanation.
+- **Improve over time:** collect reviewed examples across sources, download/reopen the collection, and check future rules against those snapshots offline. See [feedback collection](docs/interpretation-lab.md#collect-feedback-across-pages). Rules never change automatically from a correction.
 - **Move computers:** use **Save review session**, transfer that JSON file, and **Open saved session** on the other computer. Source, corrections, selected section and existing decisions are revalidated. Review names are self-declared; these are local portable files, not authenticated cloud storage.
 
 See [the release guide](docs/local-release.md) for the exact boundary and verification. This release uses limited deterministic rules, not general AI interpretation.
