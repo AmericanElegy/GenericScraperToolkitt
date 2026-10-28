@@ -21,6 +21,7 @@ try {
     ['JavaScript renderer browser workflow', ['scripts/check-renderer-browser.mjs']],
     ['Source URL fetch and fallback browser workflow', ['scripts/check-source-browser.mjs']],
     ['Drive feedback persistence browser workflow', ['scripts/check-feedback-storage-browser.mjs']],
+    ['Batch workspace and review bridge browser workflow', ['scripts/check-workspace-browser.mjs']],
     ['Cloudflare bundle dry run', ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--dry-run']],
   ]) {
     process.stdout.write('\nChecking: ' + name + '\n');

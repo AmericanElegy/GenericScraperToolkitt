@@ -59,3 +59,9 @@ test('known grouped wage headings use the existing bounded schema instead of gue
   }
  }finally{await s.mf.dispose();}
 });
+
+test('incidental unsupported price text does not suppress the JavaScript fallback, but a supported monetary statement does',async()=>{
+ const rendered=()=>Response.json({tables:[{caption:'Scores',headers:['Name','Score'],rows:[['Alpha','98.6']],supported:true}],diagnostics:{message:'Timed rendered snapshot.',blocked_resources:[]}});
+ let s=setup({html:shell+'<p>Buy now for $19.99.</p>',render:rendered});try{const r=await get(s.mf);assert.equal(r.status,200);assert.equal((await r.json()).method,'local-chromium');assert.equal(s.rendered(),1);}finally{await s.mf.dispose();}
+ s=setup({html:shell+'<p>Revenue was $1,234.50.</p>',render:()=>{throw Error('Recognized static facts do not require rendering.');}});try{const r=await get(s.mf);assert.equal(r.status,200);assert.equal((await r.json()).method,'static-html');assert.equal(s.rendered(),0);}finally{await s.mf.dispose();}
+});

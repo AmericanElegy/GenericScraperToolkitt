@@ -2,6 +2,22 @@ var __freeze = Object.freeze;
 var __defProp = Object.defineProperty;
 var __template = (cooked, raw) => __freeze(__defProp(cooked, "raw", { value: __freeze(raw || cooked.slice()) }));
 
+// src/interpretation/workspace-page.js
+var WORKSPACE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Workspace \xB7 Web Table Toolkit</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#21334b;font:15px system-ui,sans-serif}main{max-width:1200px;margin:auto;padding:28px 24px 60px}h1{font-size:30px;margin:8px 0}h2{font-size:19px;margin:0 0 14px}h3{font-size:15px}p{line-height:1.5}.hint,small{color:#65758b;font-size:13px}.card{background:white;border:1px solid #dfe6ef;border-radius:13px;padding:20px;margin:18px 0}.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.between{justify-content:space-between}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.grid>.card{margin:0;min-width:0}label{display:block;font-size:13px;font-weight:600;margin:10px 0 5px}input,textarea,select,button{font:inherit;border-radius:7px;padding:9px 11px;border:1px solid #c7d2e0;max-width:100%;color:inherit;background:white}input,textarea,select{width:100%}textarea{min-height:105px;resize:vertical}button{background:#245c88;color:white;border-color:#245c88;cursor:pointer}button.secondary{background:white;color:#305776;border-color:#c7d2e0}button:disabled{opacity:.45;cursor:not-allowed}a{color:#245c88}.tag{font-size:12px;padding:5px 9px;border-radius:14px;background:#e9f0f8;color:#41617f}.scroll{overflow:auto;max-height:330px}table{border-collapse:collapse;width:100%;font-size:13px;text-align:left}th,td{padding:10px 8px;border-bottom:1px solid #e6edf5;vertical-align:top}th{background:#f7f9fc;position:sticky;top:0;font-size:12px;color:#65758b}td:first-child{max-width:340px;overflow-wrap:anywhere}.active{background:#f0f6fc}details{margin:12px 0}summary{cursor:pointer;font-weight:600;color:#42617f}.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:4px 10px;max-height:180px;overflow:auto}.check{display:flex;gap:8px;align-items:flex-start;font-weight:400;overflow-wrap:anywhere}.check input{width:auto;margin-top:4px}fieldset{border:1px solid #dfe6ef;border-radius:8px;margin:12px 0}#message{min-height:22px;font-size:14px;line-height:1.5}#message[data-error=true]{color:#994c33}#save-state{overflow-wrap:anywhere}#editor[hidden],[hidden]{display:none!important}.metrics{display:flex;flex-wrap:wrap;gap:16px;margin:12px 0}.metrics strong{font-size:22px}.number{width:100px}.source-name{font-weight:600}.warning{background:#fff7e9;padding:12px;border-radius:8px;color:#795727;font-size:13px}#source-log{white-space:pre-wrap;font-size:12px;overflow-wrap:anywhere}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #d39b3c;outline-offset:3px}@media(max-width:800px){main{padding:18px 12px}.grid{grid-template-columns:1fr}.card{padding:15px}.bar select{width:100%}h1{font-size:26px}}
+</style><script src="/workspace-client.js" defer><\/script></head><body><main>
+<header><div class="bar between"><a href="/">\u2190 Web Table Toolkit</a><a href="/interpretation" target="_blank" rel="noopener">Open Interpretation Lab</a></div><h1>Your scraping workspace</h1><p class="hint">Collect pages. Prepare the parts you need. Review and export with their sources.</p></header>
+<section class="card"><div class="bar between"><h2>Workspace</h2><span class="tag">Local processing \xB7 no AI service</span></div><label for="workspace-name">Name</label><input id="workspace-name" maxlength="100" value="Untitled workspace"><p id="save-state" class="hint" role="status">Checking Drive storage\u2026</p><details><summary>Saved workspaces and backups</summary><div class="bar"><select id="saved-workspaces" aria-label="Saved workspace"></select><button id="open-workspace" class="secondary">Open saved</button><button id="new-workspace" class="secondary">New workspace</button><button id="save-workspace" class="secondary">Save / retry</button><button id="download-workspace" class="secondary">Download backup</button></div><label for="workspace-file">Open a portable workspace file</label><input id="workspace-file" type="file" accept=".json,application/json"><button id="import-workspace" class="secondary">Open backup</button><p id="workspace-conflicts" class="warning" hidden></p><p class="hint">Prepared reviews and settings are saved. Unprepared page previews need refetching after reopening. Google Drive upload status is managed by your desktop Drive app.</p></details></section>
+<p id="message" role="status" aria-live="polite">Add up to ten public HTTPS URLs to get started.</p>
+<section class="card"><h2>1. Collect pages</h2><label for="batch-urls">One public HTTPS URL per line</label><textarea id="batch-urls" placeholder="https://example.org/data"></textarea><div class="bar"><button id="add-urls">Add URLs</button><button id="run-batch">Fetch queued pages</button><button id="stop-batch" class="secondary" disabled>Stop after current page</button><label class="check"><input id="use-recipes" type="checkbox" checked>Apply matching saved settings</label></div><p class="hint">Pages run one at a time. Access barriers stop that source; failed sources are not silently retried. Source limits and targeted local JavaScript fallback still apply.</p><div class="metrics" id="workspace-totals"></div><div class="scroll"><table><thead><tr><th>Source</th><th>State</th><th>Review</th><th></th></tr></thead><tbody id="sources"></tbody></table></div></section>
+<div class="grid"><section class="card"><h2>2. Prepare a source</h2><p id="source-prompt" class="hint">Select a source from the queue.</p><div id="editor" hidden><p id="source-url" class="source-name"></p><p id="source-state" class="hint"></p><div class="bar"><button id="refetch-source" class="secondary">Fetch this page again</button><button id="review-source">Review prepared records \u2197</button><button id="another-part" class="secondary">Add another part</button></div><div id="capture-editor" hidden><label for="source-table">Captured table or article section</label><select id="source-table"></select><p id="source-coverage" class="hint"></p><div class="scroll" id="source-preview"></div><div id="table-settings" hidden><fieldset><legend>Columns to keep \xB7 2\u20138</legend><div id="source-columns" class="columns"></div></fieldset><div class="bar"><label>First source row<input class="number" id="row-first" type="number" min="1" step="1"></label><label>Last source row<input class="number" id="row-last" type="number" min="1" step="1"></label></div><details><summary>Reuse these settings</summary><label for="recipe-name">Setting name</label><input id="recipe-name" maxlength="100" placeholder="Project counts"><button id="save-recipe" class="secondary">Save table settings</button><p class="hint">Settings match this hostname, exact headings and any explicit caption. Changed or ambiguous tables require a new selection. Settings never approve records.</p></details></div><button id="prepare-source">Prepare selected content</button></div><details><summary>Attempts and capture notes</summary><pre id="source-log"></pre></details></div></section>
+<section class="card"><h2>3. Review and export</h2><p class="hint">Open a prepared source in Interpretation Lab. Reviewed changes return to this workspace while both tabs remain open. No row is automatically approved.</p><label for="export-group">Compatible records</label><select id="export-group"></select><p id="export-summary" class="hint"></p><div class="bar"><button id="export-csv">Approved CSV</button><button id="export-json" class="secondary">Approved JSON</button></div><p class="hint">Matching field names, types and formats are required. Exports retain source URL, snapshot hash and record identity. Nothing is silently joined or deduplicated. JSON retains complete source packets, including unapproved text.</p><details><summary>Saved table settings</summary><ul id="recipes"></ul></details></section></div>
+<footer class="hint"><p>Standalone toolkit. No FantasyBrief dependency, paid inference, login bypass or scheduled collection. Paragraph parsing uses explicit supported patterns; successful extraction does not establish complete coverage.</p></footer>
+</main></body></html>`;
+
+// src/interpretation/workspace-client.txt
+var workspace_client_default = "'use strict';\n(()=>{\n const $=id=>document.getElementById(id),text=(tag,value)=>{const e=document.createElement(tag);e.textContent=value;return e;};\n const fresh=()=>({format:'toolkit-workspace-v1',id:crypto.randomUUID(),name:'Untitled workspace',modified_at:new Date().toISOString(),history:[],recipes:[],entries:[]});\n let workspace=fresh(),active=null,running=false,stopping=false,dirty=false,version=0,saveChain=Promise.resolve(),preparing=false,lastSavedContent=null;\n const captures=new Map(),edits=new Map(),windows=new Map(),summaries=new Map();\n const entry=()=>workspace.entries.find(e=>e.id===active);\n const say=(message,error=false)=>{$('message').textContent=message;$('message').dataset.error=String(error);};\n async function api(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok){let b;try{b=await r.json();}catch{}throw Error(b?.error||'Request failed.');}return r;}\n const json=async body=>(await api('/api/workspace',body)).json();\n function portable(){return {...workspace,entries:workspace.entries.map(e=>({...e,message:e.message.slice(0,1000),attempts:(e.attempts||[]).slice(-20).map(a=>({...a,message:a.message.slice(0,2000)})),job:e.job||null}))};}\n function blobDownload(blob,name){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}\n function changed(touch=true){if(touch)workspace.modified_at=new Date().toISOString();version++;dirty=true;render();saveChain=saveChain.then(save).catch(error=>{$('save-state').textContent='Workspace not saved: '+error.message+' Download a backup before closing.';});}\n async function save(){const current=version,content=JSON.stringify({...portable(),history:[]});if(content===lastSavedContent){dirty=false;return;}const r=await json({action:'save',workspace:portable()});if(r.saved){lastSavedContent=content;workspace.history=[...r.snapshot.workspace.history,r.snapshot.id];if(version===current)dirty=false;$('save-state').textContent=r.message;await savedList();}else $('save-state').textContent=r.message+' Your changes remain in this tab.';}\n async function savedList(){const r=await json({action:'list'});const old=$('saved-workspaces').value;$('saved-workspaces').replaceChildren(...r.heads.map(h=>{const o=text('option',h.name+' \xB7 '+h.sources+' sources'+(h.modified_at?' \xB7 '+new Date(h.modified_at).toLocaleString():''));o.value=h.id;return o;}));if([...$('saved-workspaces').options].some(o=>o.value===old))$('saved-workspaces').value=old;$('workspace-conflicts').hidden=!r.conflicts.length;$('workspace-conflicts').textContent=r.conflicts.length+' workspace histories have conflicting edits. No winner was selected; retain the files and compare the versions before reopening.';if(!r.enabled)$('save-state').textContent=r.message;else if($('save-state').textContent.startsWith('Checking'))$('save-state').textContent='Drive connected. Prepared reviews and settings save automatically; cloud upload is not verified.';$('open-workspace').disabled=running||!r.heads.length;}\n async function checkJob(e){const r=await json({action:'check_job',job:e.job});summaries.set(e.id,r);return r;}\n function render(){\n  $('run-batch').disabled=running||preparing||!workspace.entries.some(e=>e.status==='queued');$('stop-batch').disabled=!running||stopping;$('add-urls').disabled=running||preparing;$('new-workspace').disabled=running||preparing;$('import-workspace').disabled=running||preparing;$('another-part').disabled=running||preparing||!captures.get(active)||workspace.entries.length>=10;\n  for(const id of ['prepare-source','save-recipe','source-table','row-first','row-last'])$(id).disabled=running||preparing;for(const i of document.querySelectorAll('#source-columns input'))i.disabled=running||preparing;\n  $('sources').replaceChildren(...workspace.entries.map(e=>{const tr=document.createElement('tr');if(e.id===active)tr.className='active';const source=text('td',e.url);if(e.job?.retrieval?.label||e.part_name){source.append(document.createElement('br'),text('small',(e.job?.retrieval?.label||e.part_name).slice(0,160)));}const status=text('td',e.status==='fetching'?'Fetching':e.status==='select'?'Choose content':e.status==='ready'?'Prepared':e.status==='failed'?'Needs attention':'Queued');const s=summaries.get(e.id);const review=text('td',s?s.counts.approved+' approved \xB7 '+s.counts.pending+' pending'+(e.status==='ready'?'':' \xB7 previous snapshot excluded'):'\u2014');const actions=document.createElement('td'),b=text('button',e.id===active?'Selected':'Select');b.className='secondary';b.onclick=()=>{active=e.id;renderEditor();render();};const remove=text('button','Remove');remove.className='secondary';remove.disabled=running||preparing;remove.onclick=()=>{workspace.entries=workspace.entries.filter(x=>x.id!==e.id);captures.delete(e.id);edits.delete(e.id);summaries.delete(e.id);if(active===e.id)active=workspace.entries[0]?.id||null;changed();renderEditor();};actions.append(b,remove);tr.append(source,status,review,actions);return tr;}));\n  const all=workspace.entries.filter(e=>e.status==='ready').map(e=>summaries.get(e.id)).filter(Boolean);$('workspace-totals').replaceChildren(text('span',workspace.entries.length+' sources'),text('span',all.reduce((n,s)=>n+s.counts.approved,0)+' approved records'),text('span',workspace.entries.filter(e=>e.status==='failed').length+' sources need attention'));\n  const groups=new Map();for(const e of workspace.entries){const s=summaries.get(e.id);if(e.status!=='ready'||!s)continue;if(!groups.has(s.schema_key))groups.set(s.schema_key,{columns:s.columns,sources:0,approved:0,pending:0});const g=groups.get(s.schema_key);g.sources++;g.approved+=s.counts.approved;g.pending+=s.counts.pending;}\n  const old=$('export-group').value;$('export-group').replaceChildren(...[...groups].map(([key,g])=>{const o=text('option',g.columns.join(' \xB7 ')+' \u2014 '+g.sources+' sources');o.value=key;return o;}));if(groups.has(old))$('export-group').value=old;\n  const g=groups.get($('export-group').value);$('export-summary').textContent=g?g.approved+' approved records available \xB7 '+g.pending+' pending records excluded.':'Prepare records to see compatible export groups.';for(const id of ['export-csv','export-json'])$(id).disabled=running||!g?.approved;\n  $('recipes').replaceChildren(...workspace.recipes.map(r=>{const li=text('li',r.name+' \xB7 '+r.host+' \xB7 rows '+r.first_row+'\u2013'+r.last_row+' '),b=text('button','Remove');b.className='secondary';b.disabled=running;b.onclick=()=>{workspace.recipes=workspace.recipes.filter(x=>x.id!==r.id);changed();};li.append(b);return li;}));\n }\n function renderEditor(){\n  const e=entry();$('editor').hidden=!e;$('source-prompt').hidden=!!e;if(!e)return;\n  $('source-url').textContent=e.url;$('source-state').textContent=e.message+(e.job?' Snapshot retrieved '+new Date(e.job.retrieval?.retrieved_at||e.job.packet.source.received_at).toLocaleString()+'.':'');$('review-source').textContent=e.status==='ready'?'Review prepared records \u2197':'Review saved snapshot \u2197';$('source-log').textContent=(e.attempts||[]).map(a=>a.at+' \xB7 '+a.message).join('\\n\\n');$('review-source').disabled=!e.job||running;$('refetch-source').disabled=running;\n  const cap=captures.get(e.id);$('another-part').disabled=running||preparing||!cap||workspace.entries.length>=10;$('capture-editor').hidden=!cap;if(!cap)return;\n  const previous=edits.get(e.id)?.dataset_id;\n  $('source-table').replaceChildren(...cap.datasets.map(d=>{const o=text('option',d.display_label||d.label);o.value=d.id;return o;}));if(previous&&cap.datasets.some(d=>d.id===previous))$('source-table').value=previous;selection();\n }\n function selection(){\n  const e=entry(),cap=captures.get(e?.id),d=cap?.datasets.find(d=>d.id===$('source-table').value);if(!d)return;\n  const parent=cap.table_catalog?.find(t=>t.key===d.table_key);$('table-settings').hidden=!parent;\n  $('source-coverage').textContent=parent?parent.rows.length+' captured source rows of '+parent.source_rows+'; '+parent.columns.length+' columns. Choose 2\u20138 columns and up to 50 source rows.':d.row_count?d.row_count+' captured rows. This layout uses its existing parser.':'Article text section; supported paragraph patterns will be tried.';\n  const preview=d.table_preview;$('source-preview').replaceChildren();if(preview){const t=document.createElement('table'),head=document.createElement('tr');preview.headers.forEach(h=>head.append(text('th',h)));t.append(head);for(const cells of preview.rows){const row=document.createElement('tr');cells.forEach(c=>row.append(text('td',c||'\u2014')));t.append(row);}$('source-preview').append(t);}else $('source-preview').append(text('p',d.text.slice(0,400)+(d.text.length>400?'\u2026':'')));\n  if(parent){const old=edits.get(e.id),saved=old?.dataset_id===d.id?old.options:null,defaults=saved?.columns||d.column_indices||parent.columns.slice(0,8).map(c=>c.index);$('source-columns').replaceChildren(...parent.columns.map(c=>{const label=text('label',''),input=document.createElement('input');label.className='check';input.type='checkbox';input.value=c.index;input.checked=defaults.includes(c.index);input.disabled=running||preparing;input.onchange=saveEdits;label.append(input,document.createTextNode((c.index+1)+'. '+c.label));return label;}));$('row-first').value=saved?.first_row??d.row_start??1;$('row-last').value=saved?.last_row??((d.row_start||1)+d.row_count-1);$('recipe-name').value=parent.name.slice(0,100);}\n }\n function saveEdits(){if(entry())edits.set(entry().id,{dataset_id:$('source-table').value,options:selectedOptions()});}\n $('row-first').oninput=saveEdits;$('row-last').oninput=saveEdits;\n function selectedOptions(){return {columns:[...document.querySelectorAll('#source-columns input:checked')].map(i=>Number(i.value)),first_row:Number($('row-first').value),last_row:Number($('row-last').value)};}\n async function stage(e,cap,d,parent=null,options=null){\n  if(!parent&&d.kind==='table'){parent=cap.table_catalog?.find(t=>t.key===d.table_key)||null;if(parent)options={columns:d.column_indices||parent.columns.slice(0,8).map(c=>c.index),first_row:d.row_start||1,last_row:(d.row_start||1)+d.row_count-1};}\n  let selected=d;if(parent)selected=await (await api('/api/interpretation/select',{parent,options})).json();\n  const retrieval={method:cap.method,source:cap.source,retrieved_at:cap.retrieved_at,snapshot_hash:selected.snapshot_hash,label:selected.display_label||selected.label,content_kind:selected.kind,...(selected.table_selection?{table_selection:selected.table_selection}:{})};\n  const v=await (await api('/api/interpretation/start',{example_id:'custom-text',mode:'auto',source:{text:selected.text,url:cap.source},retrieval})).json();\n  e.job=v.job;e.url=cap.source;e.status='ready';e.message=selected.label+' \xB7 '+v.counts.candidates+' candidates \xB7 no approvals transferred.';await checkJob(e);changed();if(e.id===active)renderEditor();\n }\n async function fetchEntry(e){\n  captures.delete(e.id);edits.delete(e.id);\n  e.status='fetching';e.message='Fetching ordinary HTML; targeted JavaScript fallback is available locally.';render();if(active===e.id)renderEditor();\n  try{const cap=await (await api('/api/interpretation/fetch',{url:e.url})).json();e.url=cap.source;captures.set(e.id,cap);edits.delete(e.id);e.attempts=[...(e.attempts||[]),{at:cap.retrieved_at,message:cap.method+' \xB7 '+cap.datasets.length+' selections. '+cap.issues.join(' ')}].slice(-20);\n   e.status='select';e.message='Choose a captured table or article section. Unprepared previews need refetching after reopening.';\n   let applied=false,requiresChoice=false;\n   if($('use-recipes').checked){const matches=[];requiresChoice=workspace.recipes.some(r=>r.host===new URL(e.url).hostname);if(requiresChoice)e.message='Saved settings do not match this layout. Choose its table and columns manually.';for(const recipe of workspace.recipes){const m=await json({action:'match',recipe,tables:cap.table_catalog||[],url:e.url});if(m.status==='matched')matches.push(m);else if(m.status==='ambiguous')e.message=m.reason;}\n    if(matches.length===1){const m=matches[0],d=cap.datasets.find(d=>d.table_key===m.table.key);await stage(e,cap,d,m.table,m.options);e.message='Saved settings applied. '+e.message;applied=true;}else if(matches.length>1)e.message='Several saved settings match. Choose the intended table manually.';\n   }\n   if(!applied&&!requiresChoice&&cap.datasets.length===1)await stage(e,cap,cap.datasets[0]);\n  }catch(error){e.status='failed';e.message=error.message+' No automatic retry was made. Any earlier review is retained but excluded from combined export until prepared again.';e.attempts=[...(e.attempts||[]),{at:new Date().toISOString(),message:e.message}].slice(-20);}\n  changed();if(active===e.id)renderEditor();\n }\n $('add-urls').onclick=async()=>{try{if(running||preparing)return;const targetWorkspace=workspace,values=$('batch-urls').value.split(/\\r?\\n/).map(v=>v.trim()).filter(Boolean);const normalized=await json({action:'urls',urls:values});if(workspace!==targetWorkspace)return;const newURLs=normalized.urls.filter(url=>!workspace.entries.some(e=>e.url===url));if(workspace.entries.length+newURLs.length>10)throw Error('This workspace holds up to ten source URLs.');for(const url of newURLs){const e={id:crypto.randomUUID(),url,status:'queued',message:'Waiting to be fetched.',attempts:[],job:null};workspace.entries.push(e);active||=e.id;}changed();renderEditor();say(newURLs.length+' URLs added; duplicate URLs skipped.');}catch(error){say(error.message,true);}};\n $('run-batch').onclick=async()=>{running=true;stopping=false;render();try{for(const e of workspace.entries.filter(e=>e.status==='queued')){if(stopping)break;say('Fetching '+e.url);await fetchEntry(e);}say(stopping?'Stopped after the current source. Remaining URLs stay queued.':'Batch finished. Choose content for sources that need a selection.');}finally{running=false;render();renderEditor();}};\n $('stop-batch').onclick=()=>{stopping=true;render();};$('source-table').onchange=()=>{if(entry())edits.delete(entry().id);selection();};\n $('refetch-source').onclick=async()=>{if(running)return;running=true;render();try{await fetchEntry(entry());}finally{running=false;render();renderEditor();}};\n $('prepare-source').onclick=async()=>{if(running||preparing)return;preparing=true;render();const e=entry(),cap=captures.get(e?.id);if(!cap){preparing=false;render();return;}try{const d=cap.datasets.find(d=>d.id===$('source-table').value),parent=cap.table_catalog?.find(t=>t.key===d.table_key);await stage(e,cap,d,parent,parent?selectedOptions():null);say('Prepared a fresh unapproved review. Open Review prepared records to inspect it.');}catch(error){say(error.message,true);}finally{preparing=false;render();}};\n $('another-part').onclick=()=>{const e=entry(),cap=captures.get(e?.id);if(!cap||running||preparing||workspace.entries.length>=10)return;const next={id:crypto.randomUUID(),url:e.url,status:'select',message:'Choose another part of this existing capture. No new page request was made.',part_name:'Additional selection',attempts:[...(e.attempts||[])],job:null};workspace.entries.push(next);captures.set(next.id,cap);const previous=edits.get(e.id);if(previous)edits.set(next.id,structuredClone(previous));active=next.id;changed();renderEditor();say('Another selection added from the same captured page. Choose its table, columns and rows.');};\n $('save-recipe').onclick=async()=>{try{const targetWorkspace=workspace,e=entry(),cap=captures.get(e.id),d=cap.datasets.find(d=>d.id===$('source-table').value),parent=cap.table_catalog.find(t=>t.key===d.table_key),options=selectedOptions();await api('/api/interpretation/select',{parent,options});if(parent.columns.some((c,i)=>c.index!==i)||parent.columns.length!==parent.source_columns)throw Error('Save reusable settings only when every source heading was captured.');const recipe={version:'table-recipe-v1',id:crypto.randomUUID(),name:$('recipe-name').value.trim(),host:new URL(e.url).hostname,headers:parent.columns.map(c=>c.label),title:/^(?:Table|Accessible table) \\d+$/.test(parent.title)?null:parent.title,...options};const matched=await json({action:'match',recipe,tables:cap.table_catalog,url:e.url});if(matched.status!=='matched')throw Error(matched.reason);if(workspace!==targetWorkspace)return;const recipeKey=r=>JSON.stringify([r.host,r.title,r.headers,r.columns,r.first_row,r.last_row]);const duplicate=workspace.recipes.find(r=>recipeKey(r)===recipeKey(recipe));if(duplicate){say('These extraction settings are already saved as '+duplicate.name+'.');return;}if(workspace.recipes.length>=20)throw Error('Limit: twenty saved settings.');workspace.recipes.push(recipe);changed();say('Settings saved. Future matching pages can use them; approvals will still be required.');}catch(error){say(error.message,true);}};\n $('review-source').onclick=()=>{const e=entry();if(!e?.job)return;const token=crypto.randomUUID(),child=window.open('/interpretation?workspace='+encodeURIComponent(token),'toolkit-review-'+token);if(!child){say('Allow a new tab to review this source.',true);return;}windows.set(token,{child,entry_id:e.id,packet_hash:e.job.packet.hash});};\n window.addEventListener('message',event=>{\n  if(event.origin!==location.origin||!event.data||event.data.channel!=='toolkit-workspace-v1')return;\n  const ref=windows.get(event.data.token);if(!ref||event.source!==ref.child)return;\n  const e=workspace.entries.find(e=>e.id===ref.entry_id);if(!e)return;\n  if(event.data.action==='ready'){ref.child.postMessage({channel:'toolkit-workspace-v1',token:event.data.token,action:'open',job:e.job},location.origin);return;}\n  if(!['updated','replaced'].includes(event.data.action))return;\n  ref.updates=(ref.updates||Promise.resolve()).then(async()=>{\n   const replacement=event.data.action==='replaced';\n   if(replacement&&event.data.previous_packet!==e.job?.packet.hash)throw Error('This source changed. Reopen its current review from the workspace.');\n   if(!replacement&&event.data.job?.packet?.hash!==ref.packet_hash)return;\n   const checked=await json({action:replacement?'replace_job':'update_job',current:e.job,job:event.data.job});if(checked.stale||!workspace.entries.includes(e))return;\n   e.job=checked.job;e.status='ready';ref.packet_hash=e.job.packet.hash;e.message=replacement?'Column mapping updated. Prior approvals were cleared.':'Review updated from Interpretation Lab.';\n   summaries.set(e.id,checked);changed();if(active===e.id)renderEditor();say(replacement?'Column mapping returned to the workspace; review the new fields before exporting.':'Reviewed changes returned to the workspace.');\n  }).catch(error=>say('Review update rejected: '+error.message,true));\n });\n function restoreCapture(e){\n  const r=e.job?.retrieval,s=r?.table_selection;if(!s)return;\n  const p=s.parent,positions=s.columns.map(c=>p.columns.findIndex(v=>v.index===c)),rows=p.rows.filter(row=>row.index>=s.first_row&&row.index<=s.last_row).map(row=>positions.map(i=>row.cells[i]));\n  const d={id:'restored-table',kind:'table',label:r.label,table_key:p.key,row_start:s.first_row,row_count:rows.length,column_count:s.columns.length,total_columns:p.source_columns,column_indices:s.columns,text:e.job.packet.source.text,snapshot_hash:e.job.packet.source.text_hash,table_preview:{headers:positions.map(i=>p.columns[i].label),rows:rows.slice(0,3)}};\n  captures.set(e.id,{source:e.job.packet.source.url,retrieved_at:r.retrieved_at,method:r.method,datasets:[d],table_catalog:[p],issues:[]});\n }\n async function openSnapshot(snapshot,fromDrive=false){const r=await json({action:'restore',snapshot});workspace=r.workspace;workspace.history=[...workspace.history,snapshot.id];active=workspace.entries[0]?.id||null;captures.clear();edits.clear();summaries.clear();for(const e of workspace.entries){if(e.status==='fetching'){e.status='queued';e.message='An interrupted fetch is queued for the next explicit run.';}}for(const e of workspace.entries)if(e.job){await checkJob(e);restoreCapture(e);}$('workspace-name').value=workspace.name;dirty=false;lastSavedContent=fromDrive?JSON.stringify({...portable(),history:[]}):null;windows.clear();render();renderEditor();say('Workspace reopened and source reviews independently revalidated.');}\n $('workspace-name').onchange=()=>{workspace.name=$('workspace-name').value.trim();changed();};$('save-workspace').onclick=()=>changed(false);\n $('open-workspace').onclick=async()=>{try{if(running||preparing)return;await saveChain;if(dirty)throw Error('Save or download this workspace before opening another.');const r=await json({action:'read',id:$('saved-workspaces').value});await openSnapshot(r.snapshot,true);}catch(error){say(error.message,true);}};\n $('new-workspace').onclick=async()=>{await saveChain;if(dirty){say('Download or successfully save this workspace before starting another.',true);return;}workspace=fresh();lastSavedContent=null;active=null;captures.clear();summaries.clear();windows.clear();$('workspace-name').value=workspace.name;render();renderEditor();say('New workspace.');};\n $('download-workspace').onclick=async()=>{try{await saveChain;const r=await json({action:'snapshot',workspace:portable()});blobDownload(new Blob([JSON.stringify(r.snapshot,null,2)+'\\n'],{type:'application/json'}),'toolkit-workspace.json');dirty=false;say('Portable workspace downloaded with prepared source reviews and saved settings.');}catch(error){say(error.message,true);}};\n $('import-workspace').onclick=async()=>{try{if(running||preparing)return;const file=$('workspace-file').files[0];if(!file||file.size>4000000)throw Error('Choose a workspace JSON file up to 4 MB.');await saveChain;if(dirty)throw Error('Save or download this workspace before opening another.');await openSnapshot(JSON.parse(await file.text()));changed();}catch(error){say(error.message,true);}};\n $('export-group').onchange=render;\n for(const format of ['csv','json'])$('export-'+format).onclick=async()=>{try{const r=await api('/api/workspace',{action:'export',workspace:portable(),schema_key:$('export-group').value,format});blobDownload(await r.blob(),'workspace-approved.'+format);say('Approved '+format.toUpperCase()+' exported with source identity.');}catch(error){say(error.message,true);}};\n window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});\n render();renderEditor();savedList().catch(e=>{$('save-state').textContent='Storage could not be loaded: '+e.message;});\n})();\n";
+
 // src/interpretation/pipeline.js
 var PACKET_VERSION = "passages-v1";
 var RESPONSE_VERSION = "candidates-v1";
@@ -721,225 +737,88 @@ async function exportInterpretation(packet, entry, events = [], { approvedOnly =
   return { json: json2, csv };
 }
 
-// src/interpretation/ranking-rules.js
-var RANKING_VERSION = "semantic-ranking-v1";
+// src/public-network.js
+var InputError = class extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+};
+function publicURL(input) {
+  if (!input || input.length > 2048) throw new InputError("Enter a public HTTPS URL (up to 2048 characters).");
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new InputError("Enter a valid public HTTPS URL.");
+  }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || host.length > 253 || host.endsWith(".") || !host.includes(".") || !/^[a-z0-9.-]+$/.test(host) || host.split(".").some((label) => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) || /^[0-9.]+$/.test(host) || /(?:^|\.)(localhost|local|internal|test|invalid|example|onion|home|lan)$/.test(host)) {
+    throw new InputError("Use a public HTTPS hostname without credentials, IP addresses, or custom ports.");
+  }
+  url.hash = "";
+  return url;
+}
+function publicAddress(ip) {
+  if (ip.includes(":")) {
+    return /^[23][0-9a-f]{3}:/i.test(ip) && !/^200[12]:|^3fff:/i.test(ip);
+  }
+  const octets = ip.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b, c] = octets;
+  return !(a === 0 || a === 10 || a === 127 || a >= 224 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 168 || b === 0 || b === 88 && c === 99) || a === 198 && (b === 18 || b === 19 || b === 51 && c === 100) || a === 203 && b === 0 && c === 113);
+}
+
+// src/interpretation/workspace-core.js
 var fail = (message) => {
-  throw new ContractError("ranking_limit", message);
+  throw new ContractError("workspace", message);
 };
-function rankShape(headers3) {
-  const period = headers3.findIndex((h) => /^(?:year|date|period|season)$/i.test(h.trim()));
-  const ranks = headers3.map((h, i) => {
-    const m = h.trim().match(/^(?:#\s*|rank\s+)(\d{1,3})$/i);
-    return m ? { index: i, rank: Number(m[1]), label: h.trim() } : null;
-  }).filter(Boolean);
-  if (period >= 0 && ranks.length === headers3.length - 1 && ranks.every((r) => r.rank > 0) && new Set(ranks.map((r) => r.rank)).size === ranks.length) return { period, ranks, wide: true, periodLabel: headers3[period].trim() };
-  const rank = headers3.findIndex((h) => /^(?:rank|position|place)$/i.test(h.trim()));
-  const item = headers3.findIndex((h) => /^(?:item|title|name|article|topic|entry)$/i.test(h.trim()));
-  if (rank >= 0 && item >= 0 && headers3.length === (period < 0 ? 2 : 3)) return { period, rank, item, wide: false, periodLabel: period >= 0 ? headers3[period].trim() : null };
-  return null;
+var safeText = (s, max) => typeof s === "string" && s.trim() && s.length <= max;
+var WORKSPACE_FORMAT = "toolkit-workspace-v1";
+function validateRecipe(r) {
+  if (!r || r.version !== "table-recipe-v1" || !safeText(r.id, 64) || !safeText(r.name, 100) || !safeText(r.host, 253) || !Array.isArray(r.headers) || r.headers.length < 2 || r.headers.length > 100 || r.headers.some((h) => !safeText(h, 2048)) || !Array.isArray(r.columns) || r.columns.length < 2 || r.columns.length > 8 || new Set(r.columns).size !== r.columns.length || r.columns.some((i) => !Number.isInteger(i) || i < 0 || i >= r.headers.length) || !Number.isInteger(r.first_row) || !Number.isInteger(r.last_row) || r.first_row < 1 || r.last_row < r.first_row || r.last_row - r.first_row >= 50 || r.title !== null && !safeText(r.title, 2048)) fail("Saved table settings are invalid.");
+  return r;
 }
-function rankingPlan(text) {
-  if (typeof text !== "string" || text.length > LIMITS.text) return null;
-  const lines = [];
-  let start = 0;
-  for (const raw of text.split("\n")) {
-    if (raw.trim()) lines.push({ quote: raw.trim(), start: start + raw.length - raw.trimStart().length });
-    start += raw.length + 1;
-  }
-  let header, shape, delimiter, headerIndex;
-  for (let i = 0; i < Math.min(5, lines.length); i++) {
-    const value = lines[i].quote;
-    if (value.startsWith("Table context: ")) continue;
-    const split = value.includes("	") ? "	" : value.includes("|") ? "|" : ",";
-    if (split === "," && value.includes('"')) continue;
-    let cells = value.split(split).map((v) => v.trim());
-    if (split === "|") {
-      if (!cells[0]) cells.shift();
-      if (!cells.at(-1)) cells.pop();
-    }
-    const found = rankShape(cells);
-    if (found) {
-      header = { ...lines[i], cells };
-      shape = found;
-      delimiter = split;
-      headerIndex = i;
-      break;
-    }
-  }
-  if (!shape) return null;
-  const rows = [], unrecognized = [];
-  for (const line of lines.slice(headerIndex + 1)) {
-    if (delimiter === "|" && /^\|?[\s:|-]+\|?$/.test(line.quote)) continue;
-    if (delimiter === "," && line.quote.includes('"')) {
-      unrecognized.push(line);
-      continue;
-    }
-    let cells = line.quote.split(delimiter).map((v) => v.trim());
-    if (delimiter === "|") {
-      if (!cells[0]) cells.shift();
-      if (!cells.at(-1)) cells.pop();
-    }
-    if (cells.every((c, i) => c === header.cells[i])) continue;
-    if (cells.length !== header.cells.length) {
-      unrecognized.push(line);
-      continue;
-    }
-    rows.push({ ...line, cells });
-  }
-  if (!rows.length) return null;
-  const factCount = rows.length * (shape.wide ? shape.ranks.length : 1);
-  if (factCount > LIMITS.records) fail("This ranking produces more than 50 ranked items. Paste fewer source rows or fetch a bounded ranking selection.");
-  const context = lines.slice(0, headerIndex).find((l) => l.quote.startsWith("Table context: "));
-  const caption = context?.quote.slice("Table context: ".length) || null;
-  const metricMatch = caption?.match(/\b(most\s+(?:viewed|popular|visited|read|watched|downloaded)|best[- ]selling|highest[- ]rated|top[- ]ranked)\b(?:\s+(.+?))?(?=\s+(?:of|on|in|by|for)\b|\[\d|$)/i);
-  const metric = metricMatch?.[1] || null, category = metricMatch?.[2]?.trim() || null;
-  const periodKey = shape.periodLabel ? shape.periodLabel.toLowerCase() : "period";
-  const fields = [...shape.period >= 0 ? [{ name: periodKey, type: "string", required: true }] : [], { name: "rank", type: "number", required: true, min: 1, max: 999 }, { name: "item", type: "string", required: true }, ...metric ? [{ name: "metric", type: "string", required: true }] : [], ...category ? [{ name: "category", type: "string", required: true }] : []];
-  return { header, shape, rows, context, caption, metric, category, periodKey, schema: { fields }, factCount, unrecognized };
+function matchRecipe(recipe, tables, url) {
+  validateRecipe(recipe);
+  if (new URL(publicURL(url)).hostname !== recipe.host) return { status: "no_match", reason: "The saved settings belong to a different hostname." };
+  const matches = tables.filter((t) => t.source_columns === recipe.headers.length && t.columns.length === recipe.headers.length && t.columns.every((c, i) => c.index === i && c.label === recipe.headers[i]) && (recipe.title === null || t.title === recipe.title));
+  if (matches.length !== 1) return { status: matches.length ? "ambiguous" : "no_match", reason: matches.length ? "More than one table has these headings. Choose a table manually." : "The source headings or caption changed. Choose a table manually." };
+  return { status: "matched", table: matches[0], options: { columns: recipe.columns, first_row: recipe.first_row, last_row: recipe.last_row } };
 }
-function sourceSpan(packet, line) {
-  const quote = line.quote.trim(), start = line.start + line.quote.length - line.quote.trimStart().length;
-  const p = packet.passages.find((p2) => start >= p2.start && start + quote.length <= p2.end);
-  if (!p || quote.length > LIMITS.quote) fail("Ranking evidence is outside a retained passage or exceeds the evidence limit.");
-  let occurrence = 0, at = p.text.indexOf(quote);
-  while (at >= 0 && p.start + at < start) {
-    occurrence++;
-    at = p.text.indexOf(quote, at + 1);
+function workspaceShape(w) {
+  if (!w || w.format !== WORKSPACE_FORMAT || !/^[-a-zA-Z0-9]{8,64}$/.test(w.id) || !safeText(w.name, 100) || !Array.isArray(w.recipes) || w.recipes.length > 20 || !Array.isArray(w.entries) || w.entries.length > 10 || !Array.isArray(w.history) || w.history.length > 200 || w.history.some((h) => !/^[a-f0-9]{64}$/.test(h))) fail("Workspace supports ten sources, twenty saved settings and 200 saved revisions.");
+  if (w.modified_at !== void 0 && (typeof w.modified_at !== "string" || !Number.isFinite(Date.parse(w.modified_at)))) fail("Workspace modification time is invalid.");
+  if (new Set(w.recipes.map((r) => r.id)).size !== w.recipes.length) fail("Saved setting IDs must be distinct.");
+  w.recipes.forEach(validateRecipe);
+  const ids = /* @__PURE__ */ new Set();
+  for (const entry of w.entries) {
+    if (!entry || !safeText(entry.id, 64) || ids.has(entry.id) || !["queued", "fetching", "select", "ready", "failed"].includes(entry.status) || typeof entry.message !== "string" || entry.message.length > 1e3) fail("Workspace source entries are invalid.");
+    ids.add(entry.id);
+    publicURL(entry.url);
+    if (entry.job) publicURL(entry.job.packet.source.url);
   }
-  return { passage_id: p.id, quote, occurrence };
+  if (new TextEncoder().encode(canonical(w)).byteLength > 35e5) fail("Workspace exceeds 3.5 MB. Keep fewer source snapshots or export separate workspaces.");
+  return w;
 }
-function extractRanking(packet) {
-  const plan = rankingPlan(packet.source.text);
-  if (!plan || canonical(plan.schema) !== canonical(packet.schema)) fail("Ranking columns do not match the explicit source header.");
-  const header = sourceSpan(packet, plan.header), context = plan.context ? sourceSpan(packet, plan.context) : null, records = [];
-  for (const row of plan.rows) {
-    const rowSpan = sourceSpan(packet, row);
-    const positions = plan.shape.wide ? plan.shape.ranks : [{ index: plan.shape.item, rank: /^[1-9]\d{0,2}$/.test(row.cells[plan.shape.rank]) ? Number(row.cells[plan.shape.rank]) : null }];
-    for (const position of positions) {
-      const field = (value, evidence) => ({ value: value || value === 0 ? value : null, evidence: value || value === 0 ? evidence : [] });
-      const fields = { ...plan.shape.period >= 0 ? { [plan.periodKey]: field(row.cells[plan.shape.period], [rowSpan, header]) } : {}, rank: field(position.rank, [header, rowSpan]), item: field(row.cells[position.index], [rowSpan, header]), ...plan.metric ? { metric: field(plan.metric, [context]) } : {}, ...plan.category ? { category: field(plan.category, [context]) } : {} };
-      records.push({ id: "row-" + (records.length + 1), fields });
-    }
-  }
-  return { version: "candidates-v1", records, outcomes: packet.passages.map((p) => {
-    const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
-    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Explicit source rank positions, item names and period/caption context retained. No numeric popularity score was inferred." : "Text outside the supported ranking remains retained and unprocessed." };
-  }) };
+async function makeWorkspaceSnapshot(w) {
+  workspaceShape(w);
+  const workspace = structuredClone(w);
+  const id = await digest(workspace);
+  return { format: "toolkit-workspace-snapshot-v1", id, workspace };
 }
-function rankingMeaning(packet) {
-  const p = rankingPlan(packet.source.text);
-  return {
-    kind: "ranking",
-    title: "Ranked items",
-    context: p.caption,
-    metric: p.metric,
-    category: p.category,
-    source_rows: p.rows.length,
-    record_count: p.factCount,
-    explanation: p.metric ? "Ranks come from the explicit headers; the ranking measure and category come from the quoted caption. Item names remain text." : "Ranks come from explicit headers. No ranking measure was supplied in the snapshot; popularity, views or scores were not inferred.",
-    context_evidence: p.context ? sourceSpan(packet, p.context) : null,
-    unsupported_items: p.unrecognized.length
-  };
+async function verifyWorkspaceSnapshot(s) {
+  if (!s || s.format !== "toolkit-workspace-snapshot-v1" || s.id !== await digest(s.workspace)) fail("Saved workspace checksum differs.");
+  workspaceShape(s.workspace);
+  return s;
 }
-
-// src/interpretation/table-selection.js
-var fail2 = (message) => {
-  throw new ContractError("table_selection", message);
+var quoteWorkspaceCSV = (value) => {
+  let s = String(value ?? "");
+  if (/^[\s\u0000-\u001f]*[=+@-]/.test(s)) s = "'" + s;
+  return '"' + s.replaceAll('"', '""') + '"';
 };
-function descriptiveTableName(title, headers3) {
-  const actual = String(title || "").slice(0, 180);
-  if (!/^(?:Accessible table|Table) \d+$/i.test(actual)) return (/^item$/i.test(headers3[0]) && /^count$/i.test(headers3[1]) ? actual + " \u2014 item counts" : actual).slice(0, 180);
-  const lead = headers3[0] || "Rows", others = headers3.slice(1, 4).join(", ");
-  return (lead + " comparison" + (others ? " \u2014 " + others + (headers3.length > 4 ? "\u2026" : "") : "")).slice(0, 180);
-}
-function capturedTableCatalog(datasets) {
-  const groups = /* @__PURE__ */ new Map();
-  for (const d of datasets) {
-    if (!d.grid) continue;
-    if (!groups.has(d.table_key)) groups.set(d.table_key, []);
-    groups.get(d.table_key).push(d);
-  }
-  const catalog = [];
-  for (const [key, parts] of groups) {
-    const columns = [...new Set(parts.flatMap((p) => p.column_indices))].sort((a, b) => a - b), labels = /* @__PURE__ */ new Map(), rows = /* @__PURE__ */ new Map();
-    for (const part of parts) {
-      part.column_indices.forEach((c, i) => {
-        if (labels.has(c) && labels.get(c) !== part.grid.headers[i]) fail2("Captured column headings disagree.");
-        labels.set(c, part.grid.headers[i]);
-      });
-      part.grid.rows.forEach((cells, i) => {
-        const row = part.row_start + i;
-        if (!rows.has(row)) rows.set(row, /* @__PURE__ */ new Map());
-        const target = rows.get(row);
-        part.column_indices.forEach((c, j) => {
-          if (target.has(c) && target.get(c) !== cells[j]) fail2("Overlapping captured cells disagree.");
-          target.set(c, cells[j]);
-        });
-      });
-    }
-    const parent = { version: "captured-table-v1", key, title: parts[0].table_title, name: parts[0].table_name, source_rows: parts[0].total_rows, source_columns: parts[0].total_columns, columns: columns.map((index) => ({ index, label: labels.get(index) })), rows: [...rows].sort((a, b) => a[0] - b[0]).map(([index, cells]) => ({ index, cells: columns.map((c) => cells.has(c) ? cells.get(c) : null) })) };
-    catalog.push(parent);
-  }
-  return catalog;
-}
-function validateParent(p) {
-  if (!p || p.version !== "captured-table-v1" || typeof p.key !== "string" || p.key.length > 100 || typeof p.title !== "string" || p.title.length > 2048 || /[\t\r\n]/.test(p.title) || typeof p.name !== "string" || p.name.length > 180 || !Number.isInteger(p.source_rows) || p.source_rows < 1 || p.source_rows > 5e3 || !Number.isInteger(p.source_columns) || p.source_columns < 2 || p.source_columns > 100 || !Array.isArray(p.columns) || p.columns.length < 2 || p.columns.length > 100 || !Array.isArray(p.rows) || !p.rows.length || p.rows.length > 800 || canonical(p).length > 5e5) fail2("Captured table is outside the supported size or shape.");
-  if (p.columns.some((c, i) => !Number.isInteger(c.index) || c.index < 0 || c.index >= p.source_columns || i && c.index <= p.columns[i - 1].index || typeof c.label !== "string" || c.label.length > 2048)) fail2("Captured source columns must be distinct and ordered.");
-  if (p.rows.some((r, i) => !Number.isInteger(r.index) || r.index < 1 || r.index > p.source_rows || i && r.index <= p.rows[i - 1].index || !Array.isArray(r.cells) || r.cells.length !== p.columns.length || r.cells.some((c) => c !== null && (typeof c !== "string" || c.length > 2048 || /[\t\n\r]/.test(c))))) fail2("Captured source rows must retain their original positions and cells.");
-}
-async function selectCapturedTable(parent, options) {
-  validateParent(parent);
-  if (!options || Object.keys(options).some((k) => !["columns", "first_row", "last_row"].includes(k)) || !Array.isArray(options.columns) || options.columns.length < 2 || options.columns.length > 8 || new Set(options.columns).size !== options.columns.length || options.columns.some((c) => !Number.isInteger(c) || !parent.columns.some((p) => p.index === c))) fail2("Choose 2\u20138 distinct captured columns.");
-  if (!Number.isInteger(options.first_row) || !Number.isInteger(options.last_row) || options.first_row < 1 || options.last_row < options.first_row || options.last_row > parent.source_rows) fail2("Choose a valid source row range.");
-  const selected = parent.rows.filter((r) => r.index >= options.first_row && r.index <= options.last_row);
-  if (selected.length !== options.last_row - options.first_row + 1) fail2("That row range includes rows that were not captured. Choose a smaller captured range.");
-  if (selected.length > 50) fail2("Choose no more than 50 source rows per review.");
-  const positions = options.columns.map((c) => parent.columns.findIndex((p) => p.index === c)), headers3 = positions.map((i) => parent.columns[i].label), rows = selected.map((r) => positions.map((i) => {
-    if (r.cells[i] === null) fail2("A selected cell was not captured. Choose available rows and columns.");
-    return r.cells[i];
-  }));
-  const line = (cells) => cells.join("	"), ranked = rankShape(headers3), context = ranked && parent.title.length <= 500 ? "Table context: " + parent.title + "\n\n" : "";
-  if (headers3.some((h) => /[\t\n\r]/.test(h)) || [headers3, ...rows].some((r) => line(r).length > LIMITS.quote)) fail2("The selected header or row exceeds the evidence size limit.");
-  const text = context + [headers3, ...rows].map(line).join("\n");
-  if (text.length > LIMITS.text) fail2("Selected text exceeds 16,000 characters. Choose fewer rows or columns.");
-  const ranking = rankingPlan(text);
-  const selection = { version: "table-slice-v1", parent, parent_hash: await digest(parent), columns: [...options.columns], first_row: options.first_row, last_row: options.last_row };
-  const label = (parent.name + " \xB7 selected rows " + options.first_row + "\u2013" + options.last_row + " of " + parent.source_rows + " \xB7 columns " + options.columns.map((c) => c + 1).join(", ")).slice(0, 1e3);
-  return { kind: "table", label, text, snapshot_hash: await digest(text), row_count: rows.length, column_count: headers3.length, record_count: ranking?.factCount || rows.length, table_key: parent.key, table_selection: selection, table_preview: { headers: headers3, rows: rows.slice(0, 3) }, total_columns: parent.source_columns };
-}
-async function validateTableSelection(selection, text) {
-  if (!selection || selection.version !== "table-slice-v1" || Object.keys(selection).some((k) => !["version", "parent", "parent_hash", "columns", "first_row", "last_row"].includes(k))) fail2("Invalid saved table selection.");
-  const result = await selectCapturedTable(selection.parent, { columns: selection.columns, first_row: selection.first_row, last_row: selection.last_row });
-  if (selection.parent_hash !== result.table_selection.parent_hash || text !== result.text) fail2("Selected content does not match the retained captured table and row/column choices.");
-  return result;
-}
-
-// src/interpretation/feedback-snapshots.js
-var SNAPSHOT_FORMAT = "toolkit-feedback-snapshot-v1";
-async function makeFeedbackSnapshot(job, example) {
-  const history = [];
-  for (const revision of job.revisions || []) {
-    for (const event of revision.prior_events) history.push(await digest(event));
-    const { prior_events, ...change } = revision;
-    history.push(await digest(change));
-  }
-  for (const event of job.events) history.push(await digest(event));
-  const data = { format: SNAPSHOT_FORMAT, session: job.packet.hash, history, example, ...example ? {} : { job } };
-  return { ...data, id: await digest(data) };
-}
-
-// src/interpretation/feedback.js
-var FEEDBACK_FORMAT = "toolkit-feedback-case-v1";
-async function feedbackCase(job, validation, original) {
-  const reviewed = validation.records.filter((r) => r.review_status === "approved" || r.review_status === "rejected");
-  if (!reviewed.length) throw new ContractError("feedback_needs_review", "Approve or reject at least one record before collecting feedback. Corrections remain proposals until reviewed.");
-  const values = (r) => Object.fromEntries(Object.entries(r.fields).map(([name, f]) => [name, f.value]));
-  const expectations = { approved: reviewed.filter((r) => r.review_status === "approved").map((r) => ({ record_id: r.id, values: values(r) })), rejected: reviewed.filter((r) => r.review_status === "rejected").map((r) => ({ record_id: r.id, values: values(r) })), unreviewed_count: validation.records.length - reviewed.length, coverage: "partial-review; unreviewed or absent records are not ground truth" };
-  const baseline = { candidate_values: original.records.map(values) };
-  const payload = { format: FEEDBACK_FORMAT, job, expectations, baseline };
-  const result = { ...payload, id: await digest(payload) };
-  if (new TextEncoder().encode(canonical(result)).byteLength > 95e4) throw new ContractError("feedback_limit", "This feedback case exceeds the portable case limit. Use a smaller source selection.");
-  return result;
+async function schemaKey(job) {
+  return digest(job.packet.schema);
 }
 
 // src/interpretation/text-rules.js
@@ -1111,8 +990,300 @@ function extractProseRules(packet, version = PROSE_VERSION) {
   return { version: "candidates-v1", records, outcomes };
 }
 
+// src/interpretation/quantity-rules.js
+var QUANTITY_VERSION = "quantitative-prose-v1";
+var QUANTITY_SCHEMA = { fields: PROSE_SCHEMA.fields.map((f) => f.name === "value" ? { ...f, number_format: "en-US-grouped", min: -Number.MAX_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER } : { ...f }) };
+var amount = "[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?";
+var flag = /\b(?:not|never|no|correction|corrected|revised|instead|however|previously|disputed|forecast|projected|estimated)\b/i;
+var mask = (text) => text.replace(/https?:\/\/[^\s)"<>]+/g, (s) => " ".repeat(s.length));
+function hasRichQuantities(text) {
+  return typeof text === "string" && text.length <= 16e3 && (/\$\s*[+-]?\d/.test(mask(text)) || /\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\s+(?:workers|employees|users|articles|pages|people|households|companies|students|patients)\b/i.test(mask(text)));
+}
+function extractQuantities(packet) {
+  if (canonical(packet.schema) !== canonical(QUANTITY_SCHEMA)) throw new ContractError("quantity_schema", "Quantitative prose columns do not match their schema.");
+  const records = [], seen = /* @__PURE__ */ new Set();
+  const add = (p, quote, measure2, value, unit, qualifier = null, uncertain = false) => {
+    measure2 = measure2.trim().replace(/[\s,;:.]+$/, "");
+    if (!measure2 || !/[\p{L}]/u.test(measure2)) return;
+    if (quote.length > LIMITS.quote) throw new ContractError("quote_limit", "A quantitative statement exceeds the evidence limit.");
+    const local = p.text.indexOf(quote);
+    if (local < 0) throw new ContractError("quantity_evidence", "Quantitative quote is not in its passage.");
+    const key = canonical([p.id, quote, measure2, value, unit]);
+    if (seen.has(key)) return;
+    seen.add(key);
+    if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than fifty quantitative records. Use a smaller section; nothing was truncated.");
+    const evidence = [{ passage_id: p.id, quote, occurrence: 0 }], field = (v) => ({ value: v, evidence: v === null ? [] : evidence });
+    const r = { id: "row-" + (records.length + 1), fields: { measure: field(measure2), value: field(value), unit: field(unit), qualifier: field(qualifier) } };
+    if (uncertain) r.issues = ["This quantitative statement contains correction, uncertainty or negation. Correct the candidate and revalidate before approval."];
+    records.push(r);
+  };
+  const old = extractProseRules({ ...packet, schema: PROSE_SCHEMA }, "prose-facts-v2");
+  for (const r of old.records) {
+    r.id = "row-" + (records.length + 1);
+    records.push(r);
+  }
+  for (const p of packet.passages) {
+    const searchable = mask(p.text), sentences2 = [...searchable.matchAll(/[^.!?\n]*(?:\.(?!\s|$)[^.!?\n]*)*(?:[.!?](?=\s|$)|$)/g)].filter((m) => m[0].trim());
+    for (const sentence of sentences2) {
+      const raw = p.text.slice(sentence.index, sentence.index + sentence[0].length).trim(), s = sentence[0].trim(), uncertain = flag.test(s);
+      const basis = s.match(/\b(hourly|annually|annual|per hour|per year)\b/i)?.[0] || null;
+      let end = 0;
+      for (const m2 of s.matchAll(new RegExp("\\(\\s*\\$\\s*(" + amount + ")\\s*\\)", "g"))) {
+        let label = s.slice(end, m2.index).trim();
+        end = m2.index + m2[0].length;
+        const intro = [...label.matchAll(/\b(?:included|include|including|followed by)\s+/gi)].at(-1);
+        if (intro) label = label.slice(intro.index + intro[0].length);
+        else if (label.includes(":")) label = label.slice(label.lastIndexOf(":") + 1);
+        label = label.replace(/^[\s,;]+/, "").replace(/^(?:and|or)\s+/i, "").trim();
+        if (label.length > 180 || /[\d.!?]/.test(label)) continue;
+        const start = s.lastIndexOf(label, m2.index), quote = basis ? raw : raw.slice(start, m2.index + m2[0].length);
+        add(p, quote, label, Number(m2[1].replaceAll(",", "")), "$", basis, uncertain);
+      }
+      let m = s.match(new RegExp("^(.{1,180}?)\\s+(?:was|were|is|are|reached|totaled|costs?|earned|reported revenue of|had revenue of)\\s+(?:(about|approximately|roughly|over|at least)\\s+)?\\$\\s*(" + amount + ")(?:\\s+(?:per hour|per year|hourly|annually))?[.!?]?$", "i"));
+      if (m) add(p, raw, m[1], Number(m[3].replaceAll(",", "")), "$", m[2] || basis, uncertain);
+      const wage = s.match(new RegExp("^(.{1,180}?)\\s+had\\s+(?:an?|the)\\s+(?:average\\s+)?(?:\\(mean\\)\\s+)?hourly wage of\\s+\\$\\s*(" + amount + ")(?=\\s|[,.!?]|$)", "i"));
+      if (wage) {
+        add(p, raw, wage[1], Number(wage[2].replaceAll(",", "")), "$", s.match(/hourly/i)[0], uncertain);
+        const other = s.match(new RegExp("compared (?:to|with) (?:the )?(nationwide average) of\\s+\\$\\s*(" + amount + ")", "i"));
+        if (other) add(p, raw, other[1], Number(other[2].replaceAll(",", "")), "$", s.match(/hourly/i)[0], uncertain);
+      }
+      for (const count of s.matchAll(/(?<![\w.,-])((?:\d{1,3})(?:,\d{3})+(?:\.\d+)?)\s+(workers|employees|users|articles|pages|people|households|companies|students|patients)\b/gi)) {
+        const subject = s.match(new RegExp("^(.{1,150}?)\\s+(?:has|had|employs|employed|reported)\\s+" + count[1].replaceAll(",", "[,]") + "\\s+" + count[2] + "[.!?]?$", "i"))?.[1];
+        add(p, raw, subject || count[2], Number(count[1].replaceAll(",", "")), count[2], null, uncertain);
+      }
+    }
+  }
+  for (const r of records) if (Number.isInteger(r.fields.value.value) && !Number.isSafeInteger(r.fields.value.value)) r.issues = [...r.issues || [], "This integer exceeds safe numeric precision. Retain its exact source text; do not approve a rounded numeric value."];
+  return { version: "candidates-v1", records, outcomes: packet.passages.map((p) => {
+    const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
+    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Explicit quantities recognized, including supported dollar amounts and grouped counts. Coverage may be incomplete." : "No supported quantitative relationship recognized. Text is retained; numbers alone are not interpreted." };
+  }) };
+}
+
+// src/interpretation/ranking-rules.js
+var RANKING_VERSION = "semantic-ranking-v1";
+var fail2 = (message) => {
+  throw new ContractError("ranking_limit", message);
+};
+function rankShape(headers3) {
+  const period = headers3.findIndex((h) => /^(?:year|date|period|season)$/i.test(h.trim()));
+  const ranks = headers3.map((h, i) => {
+    const m = h.trim().match(/^(?:#\s*|rank\s+)(\d{1,3})$/i);
+    return m ? { index: i, rank: Number(m[1]), label: h.trim() } : null;
+  }).filter(Boolean);
+  if (period >= 0 && ranks.length === headers3.length - 1 && ranks.every((r) => r.rank > 0) && new Set(ranks.map((r) => r.rank)).size === ranks.length) return { period, ranks, wide: true, periodLabel: headers3[period].trim() };
+  const rank = headers3.findIndex((h) => /^(?:rank|position|place)$/i.test(h.trim()));
+  const item = headers3.findIndex((h) => /^(?:item|title|name|article|topic|entry)$/i.test(h.trim()));
+  if (rank >= 0 && item >= 0 && headers3.length === (period < 0 ? 2 : 3)) return { period, rank, item, wide: false, periodLabel: period >= 0 ? headers3[period].trim() : null };
+  return null;
+}
+function rankingPlan(text) {
+  if (typeof text !== "string" || text.length > LIMITS.text) return null;
+  const lines = [];
+  let start = 0;
+  for (const raw of text.split("\n")) {
+    if (raw.trim()) lines.push({ quote: raw.trim(), start: start + raw.length - raw.trimStart().length });
+    start += raw.length + 1;
+  }
+  let header, shape, delimiter, headerIndex;
+  for (let i = 0; i < Math.min(5, lines.length); i++) {
+    const value = lines[i].quote;
+    if (value.startsWith("Table context: ")) continue;
+    const split = value.includes("	") ? "	" : value.includes("|") ? "|" : ",";
+    if (split === "," && value.includes('"')) continue;
+    let cells = value.split(split).map((v) => v.trim());
+    if (split === "|") {
+      if (!cells[0]) cells.shift();
+      if (!cells.at(-1)) cells.pop();
+    }
+    const found = rankShape(cells);
+    if (found) {
+      header = { ...lines[i], cells };
+      shape = found;
+      delimiter = split;
+      headerIndex = i;
+      break;
+    }
+  }
+  if (!shape) return null;
+  const rows = [], unrecognized = [];
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (delimiter === "|" && /^\|?[\s:|-]+\|?$/.test(line.quote)) continue;
+    if (delimiter === "," && line.quote.includes('"')) {
+      unrecognized.push(line);
+      continue;
+    }
+    let cells = line.quote.split(delimiter).map((v) => v.trim());
+    if (delimiter === "|") {
+      if (!cells[0]) cells.shift();
+      if (!cells.at(-1)) cells.pop();
+    }
+    if (cells.every((c, i) => c === header.cells[i])) continue;
+    if (cells.length !== header.cells.length) {
+      unrecognized.push(line);
+      continue;
+    }
+    rows.push({ ...line, cells });
+  }
+  if (!rows.length) return null;
+  const factCount = rows.length * (shape.wide ? shape.ranks.length : 1);
+  if (factCount > LIMITS.records) fail2("This ranking produces more than 50 ranked items. Paste fewer source rows or fetch a bounded ranking selection.");
+  const context = lines.slice(0, headerIndex).find((l) => l.quote.startsWith("Table context: "));
+  const caption = context?.quote.slice("Table context: ".length) || null;
+  const metricMatch = caption?.match(/\b(most\s+(?:viewed|popular|visited|read|watched|downloaded)|best[- ]selling|highest[- ]rated|top[- ]ranked)\b(?:\s+(.+?))?(?=\s+(?:of|on|in|by|for)\b|\[\d|$)/i);
+  const metric = metricMatch?.[1] || null, category = metricMatch?.[2]?.trim() || null;
+  const periodKey = shape.periodLabel ? shape.periodLabel.toLowerCase() : "period";
+  const fields = [...shape.period >= 0 ? [{ name: periodKey, type: "string", required: true }] : [], { name: "rank", type: "number", required: true, min: 1, max: 999 }, { name: "item", type: "string", required: true }, ...metric ? [{ name: "metric", type: "string", required: true }] : [], ...category ? [{ name: "category", type: "string", required: true }] : []];
+  return { header, shape, rows, context, caption, metric, category, periodKey, schema: { fields }, factCount, unrecognized };
+}
+function sourceSpan(packet, line) {
+  const quote = line.quote.trim(), start = line.start + line.quote.length - line.quote.trimStart().length;
+  const p = packet.passages.find((p2) => start >= p2.start && start + quote.length <= p2.end);
+  if (!p || quote.length > LIMITS.quote) fail2("Ranking evidence is outside a retained passage or exceeds the evidence limit.");
+  let occurrence = 0, at = p.text.indexOf(quote);
+  while (at >= 0 && p.start + at < start) {
+    occurrence++;
+    at = p.text.indexOf(quote, at + 1);
+  }
+  return { passage_id: p.id, quote, occurrence };
+}
+function extractRanking(packet) {
+  const plan = rankingPlan(packet.source.text);
+  if (!plan || canonical(plan.schema) !== canonical(packet.schema)) fail2("Ranking columns do not match the explicit source header.");
+  const header = sourceSpan(packet, plan.header), context = plan.context ? sourceSpan(packet, plan.context) : null, records = [];
+  for (const row of plan.rows) {
+    const rowSpan = sourceSpan(packet, row);
+    const positions = plan.shape.wide ? plan.shape.ranks : [{ index: plan.shape.item, rank: /^[1-9]\d{0,2}$/.test(row.cells[plan.shape.rank]) ? Number(row.cells[plan.shape.rank]) : null }];
+    for (const position of positions) {
+      const field = (value, evidence) => ({ value: value || value === 0 ? value : null, evidence: value || value === 0 ? evidence : [] });
+      const fields = { ...plan.shape.period >= 0 ? { [plan.periodKey]: field(row.cells[plan.shape.period], [rowSpan, header]) } : {}, rank: field(position.rank, [header, rowSpan]), item: field(row.cells[position.index], [rowSpan, header]), ...plan.metric ? { metric: field(plan.metric, [context]) } : {}, ...plan.category ? { category: field(plan.category, [context]) } : {} };
+      records.push({ id: "row-" + (records.length + 1), fields });
+    }
+  }
+  return { version: "candidates-v1", records, outcomes: packet.passages.map((p) => {
+    const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
+    return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Explicit source rank positions, item names and period/caption context retained. No numeric popularity score was inferred." : "Text outside the supported ranking remains retained and unprocessed." };
+  }) };
+}
+function rankingMeaning(packet) {
+  const p = rankingPlan(packet.source.text);
+  return {
+    kind: "ranking",
+    title: "Ranked items",
+    context: p.caption,
+    metric: p.metric,
+    category: p.category,
+    source_rows: p.rows.length,
+    record_count: p.factCount,
+    explanation: p.metric ? "Ranks come from the explicit headers; the ranking measure and category come from the quoted caption. Item names remain text." : "Ranks come from explicit headers. No ranking measure was supplied in the snapshot; popularity, views or scores were not inferred.",
+    context_evidence: p.context ? sourceSpan(packet, p.context) : null,
+    unsupported_items: p.unrecognized.length
+  };
+}
+
+// src/interpretation/table-selection.js
+var fail3 = (message) => {
+  throw new ContractError("table_selection", message);
+};
+function descriptiveTableName(title, headers3) {
+  const actual = String(title || "").slice(0, 180);
+  if (!/^(?:Accessible table|Table) \d+$/i.test(actual)) return (/^item$/i.test(headers3[0]) && /^count$/i.test(headers3[1]) ? actual + " \u2014 item counts" : actual).slice(0, 180);
+  const lead = headers3[0] || "Rows", others = headers3.slice(1, 4).join(", ");
+  return (lead + " comparison" + (others ? " \u2014 " + others + (headers3.length > 4 ? "\u2026" : "") : "")).slice(0, 180);
+}
+function capturedTableCatalog(datasets) {
+  const groups2 = /* @__PURE__ */ new Map();
+  for (const d of datasets) {
+    if (!d.grid) continue;
+    if (!groups2.has(d.table_key)) groups2.set(d.table_key, []);
+    groups2.get(d.table_key).push(d);
+  }
+  const catalog = [];
+  for (const [key, parts] of groups2) {
+    const columns = [...new Set(parts.flatMap((p) => p.column_indices))].sort((a, b) => a - b), labels = /* @__PURE__ */ new Map(), rows = /* @__PURE__ */ new Map();
+    for (const part of parts) {
+      part.column_indices.forEach((c, i) => {
+        if (labels.has(c) && labels.get(c) !== part.grid.headers[i]) fail3("Captured column headings disagree.");
+        labels.set(c, part.grid.headers[i]);
+      });
+      part.grid.rows.forEach((cells, i) => {
+        const row = part.row_start + i;
+        if (!rows.has(row)) rows.set(row, /* @__PURE__ */ new Map());
+        const target = rows.get(row);
+        part.column_indices.forEach((c, j) => {
+          if (target.has(c) && target.get(c) !== cells[j]) fail3("Overlapping captured cells disagree.");
+          target.set(c, cells[j]);
+        });
+      });
+    }
+    const parent = { version: "captured-table-v1", key, title: parts[0].table_title, name: parts[0].table_name, source_rows: parts[0].total_rows, source_columns: parts[0].total_columns, columns: columns.map((index) => ({ index, label: labels.get(index) })), rows: [...rows].sort((a, b) => a[0] - b[0]).map(([index, cells]) => ({ index, cells: columns.map((c) => cells.has(c) ? cells.get(c) : null) })) };
+    catalog.push(parent);
+  }
+  return catalog;
+}
+function validateParent(p) {
+  if (!p || p.version !== "captured-table-v1" || typeof p.key !== "string" || p.key.length > 100 || typeof p.title !== "string" || p.title.length > 2048 || /[\t\r\n]/.test(p.title) || typeof p.name !== "string" || p.name.length > 180 || !Number.isInteger(p.source_rows) || p.source_rows < 1 || p.source_rows > 5e3 || !Number.isInteger(p.source_columns) || p.source_columns < 2 || p.source_columns > 100 || !Array.isArray(p.columns) || p.columns.length < 2 || p.columns.length > 100 || !Array.isArray(p.rows) || !p.rows.length || p.rows.length > 800 || canonical(p).length > 5e5) fail3("Captured table is outside the supported size or shape.");
+  if (p.columns.some((c, i) => !Number.isInteger(c.index) || c.index < 0 || c.index >= p.source_columns || i && c.index <= p.columns[i - 1].index || typeof c.label !== "string" || c.label.length > 2048)) fail3("Captured source columns must be distinct and ordered.");
+  if (p.rows.some((r, i) => !Number.isInteger(r.index) || r.index < 1 || r.index > p.source_rows || i && r.index <= p.rows[i - 1].index || !Array.isArray(r.cells) || r.cells.length !== p.columns.length || r.cells.some((c) => c !== null && (typeof c !== "string" || c.length > 2048 || /[\t\n\r]/.test(c))))) fail3("Captured source rows must retain their original positions and cells.");
+}
+async function selectCapturedTable(parent, options) {
+  validateParent(parent);
+  if (!options || Object.keys(options).some((k) => !["columns", "first_row", "last_row"].includes(k)) || !Array.isArray(options.columns) || options.columns.length < 2 || options.columns.length > 8 || new Set(options.columns).size !== options.columns.length || options.columns.some((c) => !Number.isInteger(c) || !parent.columns.some((p) => p.index === c))) fail3("Choose 2\u20138 distinct captured columns.");
+  if (!Number.isInteger(options.first_row) || !Number.isInteger(options.last_row) || options.first_row < 1 || options.last_row < options.first_row || options.last_row > parent.source_rows) fail3("Choose a valid source row range.");
+  const selected = parent.rows.filter((r) => r.index >= options.first_row && r.index <= options.last_row);
+  if (selected.length !== options.last_row - options.first_row + 1) fail3("That row range includes rows that were not captured. Choose a smaller captured range.");
+  if (selected.length > 50) fail3("Choose no more than 50 source rows per review.");
+  const positions = options.columns.map((c) => parent.columns.findIndex((p) => p.index === c)), headers3 = positions.map((i) => parent.columns[i].label), rows = selected.map((r) => positions.map((i) => {
+    if (r.cells[i] === null) fail3("A selected cell was not captured. Choose available rows and columns.");
+    return r.cells[i];
+  }));
+  const line = (cells) => cells.join("	"), ranked = rankShape(headers3), context = ranked && parent.title.length <= 500 ? "Table context: " + parent.title + "\n\n" : "";
+  if (headers3.some((h) => /[\t\n\r]/.test(h)) || [headers3, ...rows].some((r) => line(r).length > LIMITS.quote)) fail3("The selected header or row exceeds the evidence size limit.");
+  const text = context + [headers3, ...rows].map(line).join("\n");
+  if (text.length > LIMITS.text) fail3("Selected text exceeds 16,000 characters. Choose fewer rows or columns.");
+  const ranking = rankingPlan(text);
+  const selection = { version: "table-slice-v1", parent, parent_hash: await digest(parent), columns: [...options.columns], first_row: options.first_row, last_row: options.last_row };
+  const label = (parent.name + " \xB7 selected rows " + options.first_row + "\u2013" + options.last_row + " of " + parent.source_rows + " \xB7 columns " + options.columns.map((c) => c + 1).join(", ")).slice(0, 1e3);
+  return { kind: "table", label, text, snapshot_hash: await digest(text), row_count: rows.length, column_count: headers3.length, record_count: ranking?.factCount || rows.length, table_key: parent.key, table_selection: selection, table_preview: { headers: headers3, rows: rows.slice(0, 3) }, total_columns: parent.source_columns };
+}
+async function validateTableSelection(selection, text) {
+  if (!selection || selection.version !== "table-slice-v1" || Object.keys(selection).some((k) => !["version", "parent", "parent_hash", "columns", "first_row", "last_row"].includes(k))) fail3("Invalid saved table selection.");
+  const result = await selectCapturedTable(selection.parent, { columns: selection.columns, first_row: selection.first_row, last_row: selection.last_row });
+  if (selection.parent_hash !== result.table_selection.parent_hash || text !== result.text) fail3("Selected content does not match the retained captured table and row/column choices.");
+  return result;
+}
+
+// src/interpretation/feedback-snapshots.js
+var SNAPSHOT_FORMAT = "toolkit-feedback-snapshot-v1";
+async function makeFeedbackSnapshot(job, example) {
+  const history = [];
+  for (const revision of job.revisions || []) {
+    for (const event of revision.prior_events) history.push(await digest(event));
+    const { prior_events, ...change } = revision;
+    history.push(await digest(change));
+  }
+  for (const event of job.events) history.push(await digest(event));
+  const data = { format: SNAPSHOT_FORMAT, session: job.packet.hash, history, example, ...example ? {} : { job } };
+  return { ...data, id: await digest(data) };
+}
+
+// src/interpretation/feedback.js
+var FEEDBACK_FORMAT = "toolkit-feedback-case-v1";
+async function feedbackCase(job, validation, original) {
+  const reviewed = validation.records.filter((r) => r.review_status === "approved" || r.review_status === "rejected");
+  if (!reviewed.length) throw new ContractError("feedback_needs_review", "Approve or reject at least one record before collecting feedback. Corrections remain proposals until reviewed.");
+  const values = (r) => Object.fromEntries(Object.entries(r.fields).map(([name, f]) => [name, f.value]));
+  const expectations = { approved: reviewed.filter((r) => r.review_status === "approved").map((r) => ({ record_id: r.id, values: values(r) })), rejected: reviewed.filter((r) => r.review_status === "rejected").map((r) => ({ record_id: r.id, values: values(r) })), unreviewed_count: validation.records.length - reviewed.length, coverage: "partial-review; unreviewed or absent records are not ground truth" };
+  const baseline = { candidate_values: original.records.map(values) };
+  const payload = { format: FEEDBACK_FORMAT, job, expectations, baseline };
+  const result = { ...payload, id: await digest(payload) };
+  if (new TextEncoder().encode(canonical(result)).byteLength > 95e4) throw new ContractError("feedback_limit", "This feedback case exceeds the portable case limit. Use a smaller source selection.");
+  return result;
+}
+
 // src/interpretation/text-facts.js
 var TEXT_FACTS_VERSION = "text-relations-v1";
+var TEXT_FACTS_V2 = "text-relations-v2";
 var TEXT_FACTS_SCHEMA = { fields: [
   { name: "subject", type: "string", required: true },
   { name: "relationship", type: "string", required: false },
@@ -1122,6 +1293,7 @@ var TEXT_FACTS_SCHEMA = { fields: [
   { name: "qualifier", type: "string", required: false },
   { name: "time_context", type: "string", required: false }
 ] };
+var TEXT_FACTS_V2_SCHEMA = { fields: TEXT_FACTS_SCHEMA.fields.map((f) => f.name === "numeric_value" ? { ...f, number_format: "en-US-grouped", min: -Number.MAX_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER } : { ...f }) };
 var measure = "most (?:popular|viewed|visited|read|watched|downloaded)|best[- ]selling|highest[- ]rated|top[- ]ranked";
 function relation(raw) {
   const text = raw.trim().replace(/[.!?]$/, "").trim();
@@ -1143,14 +1315,15 @@ function accepted(raw) {
 function hasTextRelations(text) {
   return typeof text === "string" && text.length <= 16e3 && sentences(text.replace(/https?:\/\/[^\s)"<>]+/g, (s) => " ".repeat(s.length))).some((m) => accepted(m[0]));
 }
-function assertTextFactConsistency(response) {
+function assertTextFactConsistency(response, version = TEXT_FACTS_VERSION) {
   for (const r of response.records) {
     const n = r.fields.numeric_value?.value, answer = r.fields.answer?.value;
-    if (n !== null && n !== void 0 && (!/^[+-]?\d+(?:\.\d+)?$/.test(answer) || Number(answer) !== n)) throw new ContractError("fact_value_mismatch", "The literal answer and numeric value disagree. Correct both fields or retain the answer as text.");
+    if (n !== null && n !== void 0 && (!(version === TEXT_FACTS_V2 ? /^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/ : /^[+-]?\d+(?:\.\d+)?$/).test(answer) || Number(version === TEXT_FACTS_V2 ? answer.replaceAll(",", "") : answer) !== n)) throw new ContractError("fact_value_mismatch", "The literal answer and numeric value disagree. Correct both fields or retain the answer as text.");
   }
 }
-function extractTextFacts(packet) {
-  if (canonical(packet.schema) !== canonical(TEXT_FACTS_SCHEMA)) throw new ContractError("text_fact_schema", "Text relationship columns do not match their schema.");
+function extractTextFacts(packet, version = TEXT_FACTS_VERSION) {
+  const richer = version === TEXT_FACTS_V2;
+  if (canonical(packet.schema) !== canonical(richer ? TEXT_FACTS_V2_SCHEMA : TEXT_FACTS_SCHEMA)) throw new ContractError("text_fact_schema", "Text relationship columns do not match their schema.");
   const records = [];
   const push = (fields) => {
     if (records.length >= LIMITS.records) throw new ContractError("record_limit", "More than 50 recognized facts. Use a smaller source section; nothing was truncated.");
@@ -1175,12 +1348,12 @@ function extractTextFacts(packet) {
       push({ subject: field(value.subject), relationship: field(value.relationship), answer: field(value.answer), numeric_value: field(null), unit: field(null), qualifier: field(null), time_context: field(value.time_context) });
     }
   }
-  const numeric2 = extractProseRules({ ...packet, schema: PROSE_SCHEMA });
+  const numeric2 = richer ? extractQuantities({ ...packet, schema: QUANTITY_SCHEMA }) : extractProseRules({ ...packet, schema: PROSE_SCHEMA }, "prose-facts-v2");
   for (const r of numeric2.records) {
     const f = r.fields, value = f.value.value;
     let literal2;
     for (const e of f.value.evidence) {
-      literal2 = [...e.quote.matchAll(/[+-]?\d+(?:\.\d+)?/g)].find((m) => Number(m[0]) === value)?.[0];
+      literal2 = [...e.quote.matchAll(richer ? /[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g : /[+-]?\d+(?:\.\d+)?/g)].find((m) => Number(richer ? m[0].replaceAll(",", "") : m[0]) === value)?.[0];
       if (literal2) break;
     }
     if (!literal2) throw new ContractError("fact_literal", "Numeric fact has no supported literal representation.");
@@ -1192,7 +1365,7 @@ function extractTextFacts(packet) {
     const ids = records.filter((r) => Object.values(r.fields).some((f) => f.evidence.some((e) => e.passage_id === p.id))).map((r) => r.id);
     return { passage_id: p.id, status: ids.length ? "records" : "no_result", record_ids: ids, reason: ids.length ? "Recognized explicit text relationships and/or quantitative facts. Noun answers remain text; unrecognized relationships may still be present." : "No supported noun relationship or quantitative fact recognized. Text is retained, not fully interpreted." };
   }) };
-  assertTextFactConsistency(response);
+  assertTextFactConsistency(response, version);
   return response;
 }
 function textFactMeaning() {
@@ -1202,7 +1375,7 @@ function textFactMeaning() {
 // src/interpretation/column-mapping.js
 var MAPPING_VERSION = "mapped-table-v2";
 var LEGACY_MAPPING_VERSION = "mapped-table-v1";
-var fail3 = (message) => {
+var fail4 = (message) => {
   throw new ContractError("column_mapping", message);
 };
 var literal = /^([+-]?)\$?([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(%)?$/;
@@ -1263,8 +1436,8 @@ function detectColumns(text, version = MAPPING_VERSION, explicitHeader = false) 
     rows.push({ ...line, cells });
   }
   if (!rows.length) return null;
-  if (rows.length > LIMITS.records) fail3("More than 50 mapped rows. Paste a smaller table; no rows were truncated.");
-  if (header.quote.length > LIMITS.quote) fail3("The header exceeds the evidence limit.");
+  if (rows.length > LIMITS.records) fail4("More than 50 mapped rows. Paste a smaller table; no rows were truncated.");
+  if (header.quote.length > LIMITS.quote) fail4("The header exceeds the evidence limit.");
   const used = /* @__PURE__ */ new Set();
   const columns = labels.map((label, index) => {
     const values = rows.map((r) => r.cells[index]).filter(Boolean), numbers = values.map((v) => numeric(v, version));
@@ -1296,7 +1469,7 @@ function detectColumns(text, version = MAPPING_VERSION, explicitHeader = false) 
 }
 function mappedSchema(plan, overrides) {
   const columns = overrides === void 0 ? plan.columns.map(({ name, kind }) => ({ name, kind })) : overrides;
-  if (!Array.isArray(columns) || columns.length !== plan.columns.length || columns.some((c) => !c || Object.keys(c).some((k) => !["name", "kind"].includes(k)) || typeof c.name !== "string" || !kinds.has(c.kind))) fail3("Choose one valid mapping for every source column.");
+  if (!Array.isArray(columns) || columns.length !== plan.columns.length || columns.some((c) => !c || Object.keys(c).some((k) => !["name", "kind"].includes(k)) || typeof c.name !== "string" || !kinds.has(c.kind))) fail4("Choose one valid mapping for every source column.");
   const schema = { fields: columns.map((c) => ({
     name: c.name,
     type: c.kind === "text" ? "string" : "number",
@@ -1309,9 +1482,9 @@ function mappedSchema(plan, overrides) {
 function mappingFor(job) {
   if (![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) return null;
   const plan = detectColumns(job.packet.source.text, job.parser_version, job.retrieval?.content_kind === "table");
-  if (!plan) fail3("No supported delimited table remains in this source.");
+  if (!plan) fail4("No supported delimited table remains in this source.");
   const mapping = mappedSchema(plan, job.mapping);
-  if (canonical(mapping.schema) !== canonical(job.packet.schema)) fail3("Saved columns differ from the recorded mapping.");
+  if (canonical(mapping.schema) !== canonical(job.packet.schema)) fail4("Saved columns differ from the recorded mapping.");
   return { plan, ...mapping };
 }
 function extractMappedTable(job) {
@@ -1319,7 +1492,7 @@ function extractMappedTable(job) {
   const locate = (line) => {
     const quote = line.quote.trim(), start = line.start + line.quote.length - line.quote.trimStart().length;
     const passage = packet.passages.find((p) => start >= p.start && start + quote.length <= p.end);
-    if (!passage) fail3("A mapped row crosses a source boundary.");
+    if (!passage) fail4("A mapped row crosses a source boundary.");
     let occurrence = 0, found = passage.text.indexOf(quote);
     while (found >= 0 && found + passage.start < start) {
       occurrence++;
@@ -1494,7 +1667,7 @@ function needsPageIntake(source) {
   const text = source.text.replace(/\r\n?/g, "\n");
   return text.length > LIMITS.text || paragraphs(text).length > LIMITS.passages || pageHeaders(text).length > 1 || pageHeaders(text).some((h) => h.kind === "employment");
 }
-function planPage(source, proseVersion = PROSE_VERSION, { semantic = false } = {}) {
+function planPage(source, proseVersion = PROSE_VERSION, { semantic = false, enhanced = false } = {}) {
   if (!source || Object.keys(source).some((k) => !["text", "url"].includes(k)) || typeof source.text !== "string" || !source.text.trim() || source.text.length > PAGE_LIMIT)
     throw new ContractError("page_limit", "Paste nonempty page text up to 64,000 characters. Nothing is silently truncated.");
   const text = source.text.replace(/\r\n?/g, "\n");
@@ -1547,8 +1720,8 @@ function planPage(source, proseVersion = PROSE_VERSION, { semantic = false } = {
   let batch = [], size = 0, part = 0;
   const flush = () => {
     if (batch.length) {
-      const nounFacts = semantic && hasTextRelations(batch.map((p) => p.text).join("\n\n"));
-      add("Other page text \xB7 part " + ++part, batch, nounFacts ? TEXT_FACTS_SCHEMA : PROSE_SCHEMA, nounFacts ? TEXT_FACTS_VERSION : proseVersion, "prose");
+      const sectionText = batch.map((p) => p.text).join("\n\n"), nounFacts = semantic && hasTextRelations(sectionText), rich = enhanced && !nounFacts && hasRichQuantities(sectionText), richerText = enhanced && nounFacts && hasRichQuantities(sectionText);
+      add("Other page text \xB7 part " + ++part, batch, nounFacts ? richerText ? TEXT_FACTS_V2_SCHEMA : TEXT_FACTS_SCHEMA : rich ? QUANTITY_SCHEMA : PROSE_SCHEMA, nounFacts ? richerText ? TEXT_FACTS_V2 : TEXT_FACTS_VERSION : rich ? QUANTITY_VERSION : proseVersion, "prose");
       batch = [];
       size = 0;
     }
@@ -1713,7 +1886,7 @@ var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta
 .review-reason{font-size:13px;background:#f2f6fa;padding:10px 12px;border-radius:7px}.review-reason[data-blocked=true]{background:#fff6e6;color:#79520e}.selected-value{font-weight:600;font-size:16px;overflow-wrap:anywhere;max-height:90px;overflow:auto}.review-navigation button{padding:6px 9px;font-size:12px}#review-field{width:100%;font-size:13px}#evidence>blockquote{max-height:145px}#evidence details blockquote{max-height:145px}
 .part-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:4px 12px}.part-columns input{width:auto}#retrieved-grid{max-height:210px}#table-part-panel input[type=number]{width:105px}#part-columns{max-height:220px;overflow:auto}
 </style><script src="/interpretation-client.js" defer><\/script></head><body><main>
-<header class="top"><div><a class="eyebrow" href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><p class="hint">Paste a page. Review what matters. Export your data.</p></div><span class="badge">Local review workspace</span></header>
+<header class="top"><div><a class="eyebrow" href="/">\u2190 Web Table Toolkit</a><h1>Interpretation Lab</h1><p class="hint">Paste a page. Review what matters. Export your data.</p></div><div class="bar"><a class="hint" href="/workspace">Batch workspace</a><span class="badge">Local review workspace</span></div></header><p id="workspace-link-state" class="hint" hidden></p>
 <details class="card" id="input-panel" open><summary>1. Add source text</summary><form id="custom-input"><label for="source-url">Source URL \xB7 reference unless you click Fetch page</label><div class="bar"><input id="source-url" type="url" placeholder="https://example.org/article" style="flex:1;min-width:180px"><button id="fetch-source" type="button" class="secondary">Fetch page</button></div><p class="hint">Tries ordinary HTML first. The local server can try JavaScript rendering when indicated. Pasting below never fetches a URL.</p><label for="source-text">Or paste a passage or full page</label><textarea id="source-text" required placeholder="Paste your page here. Columns are suggested automatically."></textarea><p class="hint">Up to 64,000 characters in automatic mode. New text starts a new review.</p><details><summary>Source and extraction options</summary><label for="text-mode">Extraction mode</label><select id="text-mode"><option value="auto">Automatically detect tables and facts</option><option value="pair">Manual name/number column names</option></select><fieldset id="manual-columns" hidden disabled><legend>Manual columns</legend><label for="name-column">Text column name</label><input id="name-column" value="entity_name" required maxlength="40" pattern="[a-z][a-z0-9_]*"><label for="number-column">Numeric column name</label><input id="number-column" value="score" required maxlength="40" pattern="[a-z][a-z0-9_]*"><p class="hint">Use lowercase names and underscores. This mode accepts simple name/number pairs.</p></fieldset></details><button id="extract" type="submit">Preview suggested records</button></form><details><summary>Try an example</summary><div class="bar"><label for="example">Example</label><select id="example"><option value="scores-and-correction">Scores and a correction</option><option value="missing-evidence">Missing supporting evidence</option><option value="ambiguous-association">Wrong name\u2013score association</option></select><button id="load" type="button" class="secondary">Load example</button></div></details></details>
 <details class="card session-tools"><summary>Save or open a review</summary><div class="bar"><button id="save-session" type="button">Save review session</button><form id="restore-form" class="bar"><label for="session-file">Saved session JSON</label><input id="session-file" type="file" accept=".json,application/json" required><button id="restore-session" type="submit" class="secondary">Open saved session</button></form></div><p class="hint">Continue on another computer with a saved session. Files include full source and review history. Imported reviewers are self-declared. Reloading without saving clears your review.</p></details>
 <section id="page-sections" class="card" hidden><h2 id="batch-summary"></h2><div class="bar"><button id="previous-batch" type="button" class="secondary">Previous batch</button><button id="next-batch" type="button" class="secondary">Next batch</button></div><div class="bar"><label for="dataset">Page section</label><select id="dataset"></select><button id="open-section" type="button" class="secondary">Open selected section</button></div><p class="hint">Switching starts a new review. Save this section's review before switching; approvals do not carry between batches.</p><details><summary>Section scope and retained page</summary><p id="page-scope" class="hint"></p><pre id="full-page" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details></section>
@@ -1974,6 +2147,7 @@ var lab_client_default = `"use strict";
   }
   function displayValue(row, field) {
     const value = row.fields[field.name].value;
+    if(field.name==='value'&&state.view.job.parser_version==='quantitative-prose-v1'&&row.fields.unit.value==='$'&&typeof value==='number')return '$'+new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:20}).format(value);
     if (value === null || value === undefined) return "\u2014";
     const mappedKind = state.view.column_mapping?.editable ? state.view.column_mapping.columns.find(c => c.name === field.name)?.kind : null;
     if (typeof value === "number" && (mappedKind === "dollars" || /^(?:hourly|annual)_wage(?:_.*)?_dollars$/.test(field.name)))
@@ -1983,7 +2157,7 @@ var lab_client_default = `"use strict";
     return value;
   }
   function renderTable() {
-    const columns = state.view.job.packet.schema.fields.filter(f => state.view.job.parser_version !== "text-relations-v1" || f.required || state.view.validation.records.some(r => r.fields[f.name].value !== null));
+    const columns = state.view.job.packet.schema.fields.filter(f => !["text-relations-v1","text-relations-v2"].includes(state.view.job.parser_version) || f.required || state.view.validation.records.some(r => r.fields[f.name].value !== null));
     const head = document.createElement("tr");
     for (const value of [
       ...(queue().structured ? ["Select"] : []),
@@ -2119,6 +2293,8 @@ var lab_client_default = `"use strict";
   }
   function render() {
     if (!state.view) return;
+    $("workspace-link-state").hidden=!workspaceToken;
+    if(workspaceToken)$("workspace-link-state").textContent=!window.opener||window.opener.closed?"The workspace window is closed. Drive review saving still works; reopen the workspace for combined exports.":workspacePacket===state.view.job.packet.hash?"Linked to the batch workspace. Reviewed changes return there while both tabs stay open.":"This review is separate from the linked source. Open a source from the workspace to link a review again.";
     if (state.lastPacket !== state.view.job.packet.hash) {
       state.checked.clear(); $("record-filter").value = "all";
       $("input-panel").open = false; $("batch-confirm").checked = false;
@@ -2204,6 +2380,13 @@ var lab_client_default = `"use strict";
     $("workspace").hidden = false;
     controls();
   }
+  const workspaceToken=new URLSearchParams(location.search).get('workspace');
+  let workspacePacket=null;
+  function notifyWorkspace(){if(workspacePacket&&state.view?.job.packet.hash===workspacePacket&&window.opener)window.opener.postMessage({channel:'toolkit-workspace-v1',token:workspaceToken,action:'updated',job:state.view.job},location.origin);}
+  window.addEventListener('message',event=>{
+    if(!workspaceToken||event.origin!==location.origin||event.source!==window.opener||event.data?.channel!=='toolkit-workspace-v1'||event.data.token!==workspaceToken||event.data.action!=='open')return;
+    perform(async()=>{const response=await request('/api/interpretation/action',{action:'restore',session:{format:'toolkit-review-session-v1',job:event.data.job}});state.view=await response.json();workspacePacket=state.view.job.packet.hash;$('source-text').value=state.view.job.document?.source.text||state.view.job.packet.source.text;$('source-url').value=state.view.job.packet.source.url||'';$('text-mode').value='auto';state.rowId=null;state.field=null;clearRetrieved();clearDecision();render();editCandidate();say('Review linked to the batch workspace. Keep both tabs open; reviewed changes will return there.');});
+  });
   async function perform(task) {
     if (state.busy) return;
     state.busy = true;
@@ -2277,6 +2460,7 @@ var lab_client_default = `"use strict";
     event.preventDefault();
     if (!state.view?.column_mapping?.editable) return;
     perform(async () => {
+      const previousWorkspacePacket=workspacePacket===state.view.job.packet.hash?workspacePacket:null;
       const source={text:state.view.job.packet.source.text,url:state.view.job.packet.source.url};
       const mapping=state.view.column_mapping.columns.map((c,i) => ({
         name:document.querySelector('#mapping-columns input[data-index="'+i+'"]').value.trim(),
@@ -2284,6 +2468,7 @@ var lab_client_default = `"use strict";
       }));
       const response=await request("/api/interpretation/start",{example_id:"custom-text",source,mode:"auto",mapping,...(state.view.job.retrieval?{retrieval:state.view.job.retrieval}:{})});
       state.view=await response.json();state.rowId=null;state.field=null;state.checked.clear();
+      if(previousWorkspacePacket&&window.opener){workspacePacket=state.view.job.packet.hash;window.opener.postMessage({channel:"toolkit-workspace-v1",token:workspaceToken,action:"replaced",previous_packet:previousWorkspacePacket,job:state.view.job},location.origin);}
       clearDecision();render();editCandidate();
       say("Column mapping applied to a new review. No previous approval was carried over. " + state.view.extraction.message);
     });
@@ -2396,7 +2581,7 @@ var lab_client_default = `"use strict";
       state.rowId = state.editingId || state.view.validation.records.at(-1)?.id;
       state.field = state.view.job.packet.schema.fields[0].name;
       clearDecision(); render(); editCandidate();
-      await autoSaveFeedback(state.view.job);
+      await autoSaveFeedback(state.view.job);notifyWorkspace();
       say("Candidate revision saved and evidence revalidated. All current approvals reset; earlier decisions retained in revision history. Review the revised candidates before exporting.");
     });
   };
@@ -2416,7 +2601,7 @@ var lab_client_default = `"use strict";
         record_ids: ids, reviewer: $("batch-reviewer").value.trim(), note: $("batch-note").value.trim(), confirmed_mapping: $("batch-confirm").checked });
       state.view = await response.json(); state.checked.clear(); $("batch-confirm").checked = false; $("batch-note").value = "";
       clearDecision(); render();
-      await autoSaveFeedback(state.view.job);
+      await autoSaveFeedback(state.view.job);notifyWorkspace();
       say("Approved " + ids.length + " table rows in one human batch review. Each decision is recorded in the review history.");
     });
   };
@@ -2470,7 +2655,7 @@ var lab_client_default = `"use strict";
       state.view = await response.json();
       clearDecision();
       render();
-      await autoSaveFeedback(state.view.job);
+      await autoSaveFeedback(state.view.job);notifyWorkspace();
       say(
         "Appended " +
           labels[decision].toLowerCase() +
@@ -2641,6 +2826,7 @@ var lab_client_default = `"use strict";
   $("approved-json").onclick = () => perform(() => download("json", false));
   $("diagnostic-json").onclick = () => perform(() => download("json", true));
   controls();
+  if(workspaceToken&&window.opener)window.opener.postMessage({channel:'toolkit-workspace-v1',token:workspaceToken,action:'ready'},location.origin);
   storageReady=loadStorage().catch(error=>storageMessage("Feedback storage could not be loaded: "+error.message+" Keep a portable backup and retry."));
 })();
 `;
@@ -2710,7 +2896,7 @@ var reply = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: { ...headers, "Content-Type": "application/json; charset=utf-8" }
 });
-var fail4 = (code, message, status = 400) => {
+var fail5 = (code, message, status = 400) => {
   const error2 = new ContractError(code, message);
   error2.status = status;
   throw error2;
@@ -2721,7 +2907,7 @@ async function readBody(request) {
   if (!/^application\/json(?:;|$)/i.test(
     request.headers.get("content-type") || ""
   ))
-    fail4("json_required", "Send a JSON request.", 415);
+    fail5("json_required", "Send a JSON request.", 415);
   let oversized = Number(request.headers.get("content-length")) > 1048576;
   const reader = request.body?.getReader(), chunks = [];
   let bytes = 0;
@@ -2737,19 +2923,19 @@ async function readBody(request) {
         }
         if (bytes > 2097152) {
           await reader.cancel();
-          fail4("request_limit", "The lab request exceeds 1 MiB.", 413);
+          fail5("request_limit", "The lab request exceeds 1 MiB.", 413);
         }
         if (!oversized) chunks.push(value);
       }
     } finally {
       reader.releaseLock();
     }
-  if (oversized) fail4("request_limit", "The lab request exceeds 1 MiB. Export the current diagnostic report before starting a smaller session.", 413);
+  if (oversized) fail5("request_limit", "The lab request exceeds 1 MiB. Export the current diagnostic report before starting a smaller session.", 413);
   let body;
   try {
     body = JSON.parse(await new Blob(chunks).text());
   } catch {
-    fail4("invalid_json", "The lab request is not valid JSON.");
+    fail5("invalid_json", "The lab request is not valid JSON.");
   }
   return body;
 }
@@ -2758,10 +2944,10 @@ async function entryFor(packet, response) {
 }
 function applyCorrection(packet, response, change) {
   if (!only(change, ["record_id", "fields", "reviewer", "note", "at", "prior_events"]) || typeof change.reviewer !== "string" || !change.reviewer.trim() || change.reviewer.length > 80 || typeof change.note !== "string" || !change.note.trim() || change.note.length > 1e3 || typeof change.at !== "string" || !Number.isFinite(Date.parse(change.at)) || !Array.isArray(change.prior_events) || change.prior_events.length > 64 || !plain2(change.fields))
-    fail4("invalid_correction", "A correction requires a reviewer, note, timestamp and requested fields.");
+    fail5("invalid_correction", "A correction requires a reviewer, note, timestamp and requested fields.");
   const next = structuredClone(response);
   const index = next.records.findIndex((r) => r.id === change.record_id);
-  if (change.record_id !== null && index < 0) fail4("unknown_record", "Select an existing record to correct.");
+  if (change.record_id !== null && index < 0) fail5("unknown_record", "Select an existing record to correct.");
   const candidate = { id: index < 0 ? "manual-" + (next.records.length + 1) : change.record_id, fields: change.fields };
   if (index < 0) next.records.push(candidate);
   else next.records[index] = candidate;
@@ -2780,24 +2966,25 @@ function originalResponse(job) {
   if (job.example_id !== "custom-text") return examples[job.example_id].scripted_response;
   if ([MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) return extractMappedTable(job);
   if (job.parser_version === RANKING_VERSION) return extractRanking(job.packet);
-  if (job.parser_version === TEXT_FACTS_VERSION) return extractTextFacts(job.packet);
+  if (job.parser_version === QUANTITY_VERSION) return extractQuantities(job.packet);
+  if ([TEXT_FACTS_VERSION, TEXT_FACTS_V2].includes(job.parser_version)) return extractTextFacts(job.packet, job.parser_version);
   if (job.parser_version === "name-number-v1") return extractTextRules(job.packet);
   if (job.parser_version === PAGE_TABLE_VERSION) return extractPageTable(job.packet);
   if ([WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)) return extractWageTable(job.packet, job.parser_version);
   if ([PROSE_VERSION, LEGACY_PROSE_VERSION].includes(job.parser_version)) return extractProseRules(job.packet, job.parser_version);
-  fail4("parser_version", "Unsupported text parser version.");
+  fail5("parser_version", "Unsupported text parser version.");
 }
 async function documentInfo(job) {
   if (!job.document) return null;
   if (job.example_id !== "custom-text" || !only(job.document, ["source", "dataset_id"]))
-    fail4("invalid_document", "Invalid full-page source or selection.");
-  const plan = planPage(job.document.source, job.parser_version === LEGACY_PROSE_VERSION ? LEGACY_PROSE_VERSION : PROSE_VERSION, { semantic: job.parser_version === TEXT_FACTS_VERSION });
+    fail5("invalid_document", "Invalid full-page source or selection.");
+  const plan = planPage(job.document.source, job.parser_version === LEGACY_PROSE_VERSION ? LEGACY_PROSE_VERSION : PROSE_VERSION, { semantic: [TEXT_FACTS_VERSION, TEXT_FACTS_V2].includes(job.parser_version), enhanced: [QUANTITY_VERSION, TEXT_FACTS_V2].includes(job.parser_version) });
   const selected = plan.datasets.find((d) => d.id === job.document.dataset_id);
   if (!selected || job.parser_version !== selected.parser_version)
-    fail4("invalid_document", "The selected section or parser does not match the retained page.");
+    fail5("invalid_document", "The selected section or parser does not match the retained page.");
   const rebuilt = await createPacket({ source: { text: selected.text, url: job.document.source.url ?? null }, schema: selected.schema }, job.packet.source.received_at);
   if (canonical(rebuilt) !== canonical(job.packet))
-    fail4("document_mismatch", "The selected packet does not match its original full-page source.");
+    fail5("document_mismatch", "The selected packet does not match its original full-page source.");
   return { plan, selected, hash: await digest(plan.text), original_hash: await digest(job.document.source.text) };
 }
 function publicDocument(info, job) {
@@ -2829,14 +3016,14 @@ function publicDocument(info, job) {
 }
 async function checkJob(job) {
   if (!only(job, ["example_id", "packet", "cache_entry", "events", "revisions", "parser_version", "document", "mapping", "retrieval"]) || !Array.isArray(job.events) || job.events.length > 64 || job.revisions !== void 0 && (!Array.isArray(job.revisions) || job.revisions.length > 8))
-    fail4("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
-  if (job.mapping !== void 0 && ![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail4("column_mapping", "Recorded column mappings require a mapped table session.");
+    fail5("invalid_lab_job", "Invalid session. Maximum 64 review events and 8 candidate revisions.");
+  if (job.mapping !== void 0 && ![MAPPING_VERSION, LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail5("column_mapping", "Recorded column mappings require a mapped table session.");
   if (job.retrieval !== void 0) {
     const r = job.retrieval;
-    if (!only(r, ["method", "source", "retrieved_at", "snapshot_hash", "label", "content_kind", "table_selection"]) || !["static-html", "local-chromium"].includes(r.method) || r.content_kind !== void 0 && !["table", "prose"].includes(r.content_kind) || r.source !== job.packet.source.url || r.snapshot_hash !== job.packet.source.text_hash || typeof r.label !== "string" || r.label.length > 1e3 || typeof r.retrieved_at !== "string" || !Number.isFinite(Date.parse(r.retrieved_at))) fail4("retrieval_metadata", "Retrieval description does not match the retained text snapshot.");
+    if (!only(r, ["method", "source", "retrieved_at", "snapshot_hash", "label", "content_kind", "table_selection"]) || !["static-html", "local-chromium"].includes(r.method) || r.content_kind !== void 0 && !["table", "prose"].includes(r.content_kind) || r.source !== job.packet.source.url || r.snapshot_hash !== job.packet.source.text_hash || typeof r.label !== "string" || r.label.length > 1e3 || typeof r.retrieved_at !== "string" || !Number.isFinite(Date.parse(r.retrieved_at))) fail5("retrieval_metadata", "Retrieval description does not match the retained text snapshot.");
   }
   if (job.retrieval && job.retrieval.table_selection !== void 0) {
-    if (job.retrieval.content_kind !== "table") fail4("table_selection", "Selections require table content.");
+    if (job.retrieval.content_kind !== "table") fail5("table_selection", "Selections require table content.");
     await validateTableSelection(job.retrieval.table_selection, job.packet.source.text);
   }
   await revalidate(job.packet, job.cache_entry);
@@ -2845,10 +3032,10 @@ async function checkJob(job) {
   if (job.example_id === "custom-text") {
     response = originalResponse(job);
   } else {
-    if (!Object.hasOwn(examples, job.example_id)) fail4("invalid_lab_job", "Unknown example.");
+    if (!Object.hasOwn(examples, job.example_id)) fail5("invalid_lab_job", "Unknown example.");
     const fixture = examples[job.example_id];
     if (job.packet.source.text !== fixture.source.text || job.packet.source.url !== fixture.source.url || canonical(job.packet.schema) !== canonical(fixture.schema))
-      fail4("example_mismatch", "The fictional example source or columns changed. Start again.");
+      fail5("example_mismatch", "The fictional example source or columns changed. Start again.");
     response = fixture.scripted_response;
   }
   for (const change of job.revisions || []) {
@@ -2857,9 +3044,9 @@ async function checkJob(job) {
     response = applyCorrection(job.packet, response, change);
     await revalidate(job.packet, await entryFor(job.packet, response));
   }
-  if (job.parser_version === TEXT_FACTS_VERSION) assertTextFactConsistency(response);
+  if ([TEXT_FACTS_VERSION, TEXT_FACTS_V2].includes(job.parser_version)) assertTextFactConsistency(response, job.parser_version);
   if (canonical(job.cache_entry.raw_response) !== canonical(response))
-    fail4("example_mismatch", "Candidate data differs from its rule output and recorded corrections.");
+    fail5("example_mismatch", "Candidate data differs from its rule output and recorded corrections.");
   return exportInterpretation(job.packet, job.cache_entry, job.events, { approvedOnly: false });
 }
 async function view(job, result) {
@@ -2867,7 +3054,7 @@ async function view(job, result) {
   if (info) result.json.validation = documentEvidence(result.json.validation, info.selected, info.plan.text, info.hash);
   const records = result.json.validation.records;
   const mapped = mappingFor(job);
-  const meaning = job.parser_version === RANKING_VERSION ? rankingMeaning(job.packet) : job.parser_version === TEXT_FACTS_VERSION ? textFactMeaning() : null;
+  const meaning = job.parser_version === QUANTITY_VERSION ? { kind: "quantities", title: "Recognized quantities", explanation: "Supported dollar amounts and grouped counts retain their literal units and evidence. Monetary scale, currencies beyond the literal dollar sign, and unstated time bases are not inferred. Every association still needs review." } : job.parser_version === RANKING_VERSION ? rankingMeaning(job.packet) : [TEXT_FACTS_VERSION, TEXT_FACTS_V2].includes(job.parser_version) ? textFactMeaning() : null;
   const unmatched = result.json.validation.outcomes.filter((o) => o.status === "no_result");
   const tableLike = /(?:percent of total employment|mean hourly wage|major occupational group)/i.test(job.packet.source.text) || job.packet.passages.some((p) => /^.+?\s+\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?\s+\$?\d+(?:\.\d+)?$/.test(p.text.trim()));
   return {
@@ -2949,19 +3136,19 @@ async function labFetch(request) {
   try {
     const body = await readBody(request);
     if (url.pathname === "/api/interpretation/select") {
-      if (!only(body, ["parent", "options"])) fail4("table_selection", "Choose a captured table and row/column options.");
+      if (!only(body, ["parent", "options"])) fail5("table_selection", "Choose a captured table and row/column options.");
       return reply(await selectCapturedTable(body.parent, body.options));
     }
     if (url.pathname === "/api/interpretation/start") {
       let packet, response, parserVersion, document, mapping;
       if (body?.example_id === "custom-text") {
         if (!only(body, ["example_id", "source", "schema", "mode", "dataset_id", "mapping", "retrieval"]) || body.mode !== void 0 && !["auto", "pair"].includes(body.mode))
-          fail4("invalid_input", "Choose automatic suggestions or manual pair columns.");
-        if (body.mapping !== void 0 && (body.mode !== "auto" || body.dataset_id !== void 0)) fail4("column_mapping", "Column mapping requires automatic mode on one pasted table.");
+          fail5("invalid_input", "Choose automatic suggestions or manual pair columns.");
+        if (body.mapping !== void 0 && (body.mode !== "auto" || body.dataset_id !== void 0)) fail5("column_mapping", "Column mapping requires automatic mode on one pasted table.");
         if (body.mode === "auto" && body.schema !== void 0)
-          fail4("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
+          fail5("invalid_input", "Automatic suggestions choose their own columns. Use manual mode to supply columns.");
         const columns = body.mode === "auto" ? detectColumns(body.source?.text?.replace(/\r\n?/g, "\n"), MAPPING_VERSION, body.retrieval?.content_kind === "table") : null;
-        if (body.mapping !== void 0 && !columns) fail4("column_mapping", "No supported delimited header found.");
+        if (body.mapping !== void 0 && !columns) fail5("column_mapping", "No supported delimited header found.");
         const ranking = body.mode === "auto" ? rankingPlan(body.source?.text?.replace(/\r\n?/g, "\n")) : null;
         if (ranking && body.mapping === void 0 && body.dataset_id === void 0) {
           packet = await createPacket({ source: body.source, schema: ranking.schema });
@@ -2972,17 +3159,19 @@ async function labFetch(request) {
           packet = await createPacket({ source: body.source, schema: mapped.schema });
           parserVersion = MAPPING_VERSION;
         } else if (body.mode === "auto" && (needsPageIntake(body.source) || body.dataset_id !== void 0)) {
-          const plan = planPage(body.source, PROSE_VERSION, { semantic: true });
+          const plan = planPage(body.source, PROSE_VERSION, { semantic: true, enhanced: true });
           const selected = body.dataset_id === void 0 ? plan.datasets[0] : plan.datasets.find((d) => d.id === body.dataset_id);
-          if (!selected) fail4("invalid_selection", "Choose a listed full-page section.");
+          if (!selected) fail5("invalid_selection", "Choose a listed full-page section.");
           document = { source: body.source, dataset_id: selected.id };
           packet = await createPacket({ source: { text: selected.text, url: body.source.url ?? null }, schema: selected.schema });
           parserVersion = selected.parser_version;
         } else {
-          if (body.dataset_id !== void 0) fail4("invalid_selection", "Section selection requires automatic mode.");
+          if (body.dataset_id !== void 0) fail5("invalid_selection", "Section selection requires automatic mode.");
           const textFacts = body.mode === "auto" && hasTextRelations(body.source?.text);
-          packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? textFacts ? TEXT_FACTS_SCHEMA : PROSE_SCHEMA : body.schema });
-          parserVersion = body.mode === "auto" ? textFacts ? TEXT_FACTS_VERSION : PROSE_VERSION : "name-number-v1";
+          const richerText = textFacts && hasRichQuantities(body.source?.text);
+          const rich = body.mode === "auto" && !textFacts && hasRichQuantities(body.source?.text);
+          packet = await createPacket({ source: body.source, schema: body.mode === "auto" ? textFacts ? richerText ? TEXT_FACTS_V2_SCHEMA : TEXT_FACTS_SCHEMA : rich ? QUANTITY_SCHEMA : PROSE_SCHEMA : body.schema });
+          parserVersion = body.mode === "auto" ? textFacts ? richerText ? TEXT_FACTS_V2 : TEXT_FACTS_VERSION : rich ? QUANTITY_VERSION : PROSE_VERSION : "name-number-v1";
           if (body.mode === "auto" && wageHeader(packet)) {
             packet = await createPacket({ source: body.source, schema: WAGE_SCHEMA }, packet.source.received_at);
             parserVersion = WAGE_VERSION;
@@ -2991,7 +3180,7 @@ async function labFetch(request) {
         response = originalResponse({ example_id: "custom-text", parser_version: parserVersion, packet, ...mapping ? { mapping } : {}, ...body.retrieval ? { retrieval: body.retrieval } : {} });
       } else {
         if (!only(body, ["example_id"]) || !Object.hasOwn(examples, body.example_id))
-          fail4("unknown_example", "Choose an example or paste your own text.");
+          fail5("unknown_example", "Choose an example or paste your own text.");
         const fixture = examples[body.example_id];
         packet = await createPacket(fixture);
         response = fixture.scripted_response;
@@ -3000,7 +3189,7 @@ async function labFetch(request) {
         packet,
         await scriptedInterpreter(response)
       );
-      if (body.retrieval && document && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail4("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
+      if (body.retrieval && document && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail5("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
       const job = {
         example_id: body.example_id,
         packet,
@@ -3017,10 +3206,10 @@ async function labFetch(request) {
     if (url.pathname !== "/api/interpretation/action")
       return reply({ error: "Not found", code: "not_found" }, 404);
     if (!only(body, ["action", "job", "decision", "format", "diagnostic", "correction", "session", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !["revalidate", "review", "export", "correct", "save", "restore", "review_batch", "feedback"].includes(body.action))
-      fail4("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
+      fail5("invalid_action", "Choose revalidate, review, correct, export, save or restore.");
     if (body.action === "restore") {
       if (!only(body, ["action", "session"]) || !only(body.session, ["format", "job"]) || body.session.format !== "toolkit-review-session-v1")
-        fail4("invalid_session", "Choose a toolkit review session JSON file, not a CSV or data export.");
+        fail5("invalid_session", "Choose a toolkit review session JSON file, not a CSV or data export.");
       return reply(await view(body.session.job, await checkJob(body.session.job)));
     }
     const result = await checkJob(body.job);
@@ -3028,11 +3217,11 @@ async function labFetch(request) {
     if (body.action === "review_batch") {
       const queue = reviewQueue(body.job, result.json.validation);
       if (!only(body, ["action", "job", "record_ids", "reviewer", "note", "confirmed_mapping"]) || !Array.isArray(body.record_ids) || !body.record_ids.length || body.record_ids.length > 50 || new Set(body.record_ids).size !== body.record_ids.length || body.record_ids.some((id) => !queue.eligible_ids.includes(id)) || body.confirmed_mapping !== true)
-        fail4("batch_not_eligible", "Select pending, unchanged table rows with clean checks and explicitly confirm the column mapping. Prose and exceptions need individual review.");
+        fail5("batch_not_eligible", "Select pending, unchanged table rows with clean checks and explicitly confirm the column mapping. Prose and exceptions need individual review.");
       if (body.record_ids.length > queue.remaining_review_events)
-        fail4("review_limit", "This batch exceeds the session review limit. Save the session and reduce the selection.", 413);
+        fail5("review_limit", "This batch exceeds the session review limit. Save the session and reduce the selection.", 413);
       if (typeof body.reviewer !== "string" || !body.reviewer.trim() || body.reviewer.length > 80 || typeof body.note !== "string" || !body.note.trim() || body.note.length > 900)
-        fail4("invalid_review", "Enter a reviewer name and a batch review note (up to 900 characters).");
+        fail5("invalid_review", "Enter a reviewer name and a batch review note (up to 900 characters).");
       const events = await appendReviewBatch(
         body.job.packet,
         body.job.cache_entry,
@@ -3051,7 +3240,7 @@ async function labFetch(request) {
     if (body.action === "save") {
       const session = JSON.stringify({ format: "toolkit-review-session-v1", job: body.job });
       if (new TextEncoder().encode(session).byteLength > 1e6)
-        fail4("session_limit", "This review session exceeds the portable file limit. Export diagnostic JSON instead.", 413);
+        fail5("session_limit", "This review session exceeds the portable file limit. Export diagnostic JSON instead.", 413);
       return new Response(session + "\n", { headers: {
         ...headers,
         "Content-Type": "application/json; charset=utf-8",
@@ -3059,8 +3248,8 @@ async function labFetch(request) {
       } });
     }
     if (body.action === "correct") {
-      if ((body.job.revisions || []).length >= 8) fail4("revision_limit", "Maximum 8 revisions. Download diagnostic JSON before starting a new session.");
-      if (!only(body.correction, ["record_id", "fields", "reviewer", "note"])) fail4("invalid_correction", "Unexpected correction fields.");
+      if ((body.job.revisions || []).length >= 8) fail5("revision_limit", "Maximum 8 revisions. Download diagnostic JSON before starting a new session.");
+      if (!only(body.correction, ["record_id", "fields", "reviewer", "note"])) fail5("invalid_correction", "Unexpected correction fields.");
       const change = { ...body.correction, at: (/* @__PURE__ */ new Date()).toISOString(), prior_events: body.job.events };
       const response = applyCorrection(body.job.packet, body.job.cache_entry.raw_response, change);
       const job = {
@@ -3073,7 +3262,7 @@ async function labFetch(request) {
     }
     if (body.action === "review") {
       if (body.job.events.length >= 64)
-        fail4(
+        fail5(
           "review_limit",
           "This demo is limited to 64 review events. Download a diagnostic report, then load a new example.",
           413
@@ -3089,7 +3278,7 @@ async function labFetch(request) {
     }
     if (body.action === "revalidate") return reply(await view(body.job, result));
     if (!["csv", "json"].includes(body.format) || body.diagnostic !== void 0 && typeof body.diagnostic !== "boolean")
-      fail4(
+      fail5(
         "invalid_export",
         "Choose CSV or JSON and a boolean diagnostic flag."
       );
@@ -3108,7 +3297,7 @@ async function labFetch(request) {
     exported.json.original_candidates = originalResponse(body.job);
     if (body.job.retrieval) exported.json.source_retrieval = { ...body.job.retrieval, notice: "Descriptive session metadata, not authenticated source provenance. Snapshot hash is revalidated." };
     if (body.job.parser_version === RANKING_VERSION) exported.json.interpretation_context = rankingMeaning(body.job.packet);
-    if (body.job.parser_version === TEXT_FACTS_VERSION) exported.json.interpretation_context = textFactMeaning();
+    if ([TEXT_FACTS_VERSION, TEXT_FACTS_V2].includes(body.job.parser_version)) exported.json.interpretation_context = textFactMeaning();
     exported.json.method = body.job.parser_version || "fictional-scripted-example";
     exported.json.notice = "Limited rules or scripted examples, with optional human corrections. No AI inference. Original automated findings are retained separately from human review.";
     const prefix = body.diagnostic ? "interpretation-diagnostic" : "interpretation-approved";
@@ -3139,15 +3328,135 @@ async function validatedFeedbackSnapshot(job) {
   const example = reviewed ? await feedbackCase(job, result.json.validation, originalResponse(job)) : null;
   return makeFeedbackSnapshot(job, example);
 }
+async function validatedWorkspaceJob(job) {
+  const result = await checkJob(job);
+  return view(job, result);
+}
+
+// src/interpretation/workspace-api.js
+var reply2 = (value, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+async function workspaceAPI(request, env) {
+  const url = new URL(request.url), origin = request.headers.get("origin");
+  if (origin && origin !== url.origin || request.headers.get("sec-fetch-site") === "cross-site") return reply2({ error: "Workspace requests must come from the same origin." }, 403);
+  if (request.method !== "POST" || !request.headers.get("content-type")?.startsWith("application/json")) return reply2({ error: "Use JSON POST." }, 405);
+  try {
+    const reader = request.body?.getReader();
+    if (!reader) throw Error("JSON body required.");
+    const chunks = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 4e6) {
+        await reader.cancel();
+        return reply2({ error: "Workspace request exceeds 4 MB." }, 413);
+      }
+      chunks.push(value);
+    }
+    const buffer = new Uint8Array(size);
+    let at = 0;
+    for (const c of chunks) {
+      buffer.set(c, at);
+      at += c.length;
+    }
+    const body = JSON.parse(new TextDecoder().decode(buffer));
+    if (body.action === "urls") {
+      if (!Array.isArray(body.urls) || !body.urls.length || body.urls.length > 10) throw Error("Add one to ten public HTTPS URLs.");
+      return reply2({ urls: [...new Set(body.urls.map((value) => {
+        const u = publicURL(value);
+        u.hash = "";
+        return u.href;
+      }))] });
+    }
+    if (body.action === "replace_job") {
+      const old = await validatedWorkspaceJob(body.current), next = await validatedWorkspaceJob(body.job);
+      if (!next.job.mapping || next.job.events.length || (next.job.revisions || []).length || old.job.packet.source.text_hash !== next.job.packet.source.text_hash || old.job.packet.source.url !== next.job.packet.source.url) throw Error("Only an explicitly remapped, unreviewed copy of this source can replace its review.");
+      return reply2({ job: next.job, counts: next.counts, schema_key: await schemaKey(next.job), columns: next.job.packet.schema.fields.map((f) => f.name) });
+    }
+    if (body.action === "update_job") {
+      const old = await validatedWorkspaceJob(body.current), next = await validatedWorkspaceJob(body.job);
+      if (old.job.packet.hash !== next.job.packet.hash) throw Error("This review belongs to a different source snapshot. Reopen it from the workspace.");
+      const a = (await makeFeedbackSnapshot(old.job, null)).history, b = (await makeFeedbackSnapshot(next.job, null)).history;
+      const prefix = (x, y) => x.length <= y.length && x.every((h, i) => h === y[i]);
+      if (prefix(b, a)) return reply2({ stale: true });
+      if (!prefix(a, b)) throw Error("Conflicting review edits. Keep both histories and reopen the intended version; no update was applied.");
+      return reply2({ job: next.job, counts: next.counts, schema_key: await schemaKey(next.job), columns: next.job.packet.schema.fields.map((f) => f.name) });
+    }
+    if (body.action === "match") return reply2(matchRecipe(body.recipe, body.tables, body.url));
+    if (body.action === "check_job") {
+      const v = await validatedWorkspaceJob(body.job);
+      return reply2({ job: v.job, counts: v.counts, schema_key: await schemaKey(v.job), columns: v.job.packet.schema.fields.map((f) => f.name) });
+    }
+    if (["save", "snapshot", "restore", "export"].includes(body.action)) {
+      const w = body.action === "restore" ? (await verifyWorkspaceSnapshot(body.snapshot)).workspace : workspaceShape(body.workspace);
+      const checked = [];
+      for (const entry of w.entries) if (entry.job) checked.push({ entry, view: await validatedWorkspaceJob(entry.job), key: await schemaKey(entry.job) });
+      if (body.action === "restore") return reply2({ workspace: w, groups: await groups(checked) });
+      if (body.action === "snapshot") return reply2({ snapshot: await makeWorkspaceSnapshot(w) });
+      if (body.action === "save") {
+        const snapshot = await makeWorkspaceSnapshot(w);
+        if (!env?.LOCAL_WORKSPACE) return reply2({ saved: false, snapshot, message: "Drive workspace storage is not connected. Download a portable workspace." });
+        if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return reply2({ error: "Drive workspace storage requires the local launcher." }, 403);
+        const response2 = await env.LOCAL_WORKSPACE.fetch(new Request("http://workspace/save", { method: "POST", body: JSON.stringify({ action: "save", snapshot }) }));
+        const data2 = await response2.json();
+        return reply2({ ...data2, snapshot }, response2.status);
+      }
+      const selected = checked.filter((c) => c.key === body.schema_key && c.entry.status === "ready");
+      if (!selected.length) throw Error("Choose a compatible schema group first.");
+      const fields = selected[0].entry.job.packet.schema.fields, rows = [];
+      const reviewHashes = /* @__PURE__ */ new Map();
+      for (const { entry, view: view2 } of selected) {
+        const reviewHash = await digest(entry.job);
+        reviewHashes.set(entry.id, reviewHash);
+        for (const row of view2.validation.records.filter((r) => r.review_status === "approved")) rows.push({ source_id: entry.id, review_hash: reviewHash, source_url: entry.job.packet.source.url, source_label: entry.job.retrieval?.label || "Pasted source", snapshot_hash: entry.job.packet.source.text_hash, record_id: row.id, review_status: row.review_status, fields: row.fields });
+      }
+      if (body.format === "csv") {
+        const header = ["_toolkit_source_id", "_toolkit_review_hash", "_toolkit_source_url", "_toolkit_source_label", "_toolkit_snapshot_hash", "_toolkit_record_id", "_toolkit_review_status", ...fields.map((f) => f.name)];
+        const csv = [header, ...rows.map((r) => [r.source_id, r.review_hash, r.source_url, r.source_label, r.snapshot_hash, r.record_id, r.review_status, ...fields.map((f) => r.fields[f.name].value)])].map((r) => r.map(quoteWorkspaceCSV).join(",")).join("\r\n") + "\r\n";
+        return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="workspace-approved.csv"', "Cache-Control": "no-store" } });
+      }
+      if (body.format !== "json") throw Error("Choose CSV or JSON.");
+      return reply2({ format: "toolkit-workspace-export-v1", name: w.name, schema: fields, records: rows, sources: selected.map(({ entry }) => ({ source_id: entry.id, review_hash: reviewHashes.get(entry.id), requested_url: entry.url, url: entry.job.packet.source.url, packet: entry.job.packet, retrieval: entry.job.retrieval || null, review_history: entry.job.events, candidate_revision_history: entry.job.revisions || [] })), notice: "Approved records only; source packets retain full source text including unapproved content. Sources are not deduplicated or joined. Review names are self-declared." });
+    }
+    if (!["list", "read"].includes(body.action)) throw Error("Unknown workspace action.");
+    if (!env?.LOCAL_WORKSPACE) return reply2({ enabled: false, heads: [], conflicts: [], message: "Use the local launcher and connect Google Drive in Interpretation Lab." });
+    if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return reply2({ error: "Workspace storage requires a loopback host." }, 403);
+    const response = await env.LOCAL_WORKSPACE.fetch(new Request("http://workspace/" + body.action, { method: "POST", body: JSON.stringify(body) }));
+    const data = await response.json();
+    if (!response.ok) return reply2(data, response.status);
+    if (body.action === "read") {
+      await verifyWorkspaceSnapshot(data.snapshot);
+      for (const e of data.snapshot.workspace.entries) if (e.job) await validatedWorkspaceJob(e.job);
+    }
+    return reply2(data);
+  } catch (error2) {
+    return reply2({ error: error2.message }, 422);
+  }
+}
+async function groups(checked) {
+  const result = [];
+  for (const c of checked.filter((c2) => c2.entry.status === "ready")) {
+    let g = result.find((g2) => g2.key === c.key);
+    if (!g) {
+      g = { key: c.key, columns: c.entry.job.packet.schema.fields.map((f) => f.name), sources: 0, approved: 0, pending: 0 };
+      result.push(g);
+    }
+    g.sources++;
+    g.approved += c.view.counts.approved;
+    g.pending += c.view.counts.pending;
+  }
+  return result;
+}
 
 // src/interpretation/feedback-storage-api.js
-var reply2 = (data, status = 200) => Response.json(data, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+var reply3 = (data, status = 200) => Response.json(data, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 async function feedbackStorage(request, env) {
   const url = new URL(request.url), origin = request.headers.get("origin");
-  if (origin && origin !== url.origin || request.headers.get("sec-fetch-site") === "cross-site") return reply2({ error: "Feedback storage is available only to the same-origin local app." }, 403);
-  if (request.method !== "POST" || !request.headers.get("content-type")?.startsWith("application/json")) return reply2({ error: "Use a same-origin JSON POST." }, 405);
-  if (!env?.LOCAL_FEEDBACK) return reply2({ enabled: false, message: "Automatic feedback storage requires the normal local launcher. Portable downloads still work." });
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return reply2({ error: "Feedback storage requires a loopback host." }, 403);
+  if (origin && origin !== url.origin || request.headers.get("sec-fetch-site") === "cross-site") return reply3({ error: "Feedback storage is available only to the same-origin local app." }, 403);
+  if (request.method !== "POST" || !request.headers.get("content-type")?.startsWith("application/json")) return reply3({ error: "Use a same-origin JSON POST." }, 405);
+  if (!env?.LOCAL_FEEDBACK) return reply3({ enabled: false, message: "Automatic feedback storage requires the normal local launcher. Portable downloads still work." });
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return reply3({ error: "Feedback storage requires a loopback host." }, 403);
   try {
     const reader = request.body?.getReader();
     if (!reader) throw Error("A JSON request body is required.");
@@ -3159,7 +3468,7 @@ async function feedbackStorage(request, env) {
       length += value.byteLength;
       if (length > 1e6) {
         await reader.cancel();
-        return reply2({ error: "Feedback request exceeds 1 MB." }, 413);
+        return reply3({ error: "Feedback request exceeds 1 MB." }, 413);
       }
       chunks.push(value);
     }
@@ -3170,56 +3479,24 @@ async function feedbackStorage(request, env) {
       at += chunk.length;
     }
     const body = JSON.parse(new TextDecoder().decode(bytes));
-    if (!["status", "configure", "list", "read", "save"].includes(body.action)) return reply2({ error: "Unknown feedback storage action." }, 400);
+    if (!["status", "configure", "list", "read", "save"].includes(body.action)) return reply3({ error: "Unknown feedback storage action." }, 400);
     if (body.action === "save") {
       const snapshot = await validatedFeedbackSnapshot(body.job);
       const response2 = await env.LOCAL_FEEDBACK.fetch(new Request("http://feedback/save", { method: "POST", body: JSON.stringify({ action: "save", snapshot }) }));
       const stored = await response2.json();
-      return reply2({ ...stored, ...response2.ok ? { snapshot } : {} }, response2.status);
+      return reply3({ ...stored, ...response2.ok ? { snapshot } : {} }, response2.status);
     }
     const response = await env.LOCAL_FEEDBACK.fetch(new Request("http://feedback/" + body.action, { method: "POST", body: JSON.stringify(body) }));
     const data = await response.json();
-    if (!response.ok) return reply2(data, response.status);
+    if (!response.ok) return reply3(data, response.status);
     if (body.action === "read") {
       const snapshot = data.snapshot, job = snapshot?.example?.job || snapshot?.job;
       if (canonical(await validatedFeedbackSnapshot(job)) !== canonical(snapshot)) throw Error("Stored feedback differs from its validated review history.");
     }
-    return reply2(data);
+    return reply3(data);
   } catch (e) {
-    return reply2({ error: e.message || "Feedback storage failed." }, 422);
+    return reply3({ error: e.message || "Feedback storage failed." }, 422);
   }
-}
-
-// src/public-network.js
-var InputError = class extends Error {
-  constructor(message, status = 400) {
-    super(message);
-    this.status = status;
-  }
-};
-function publicURL(input) {
-  if (!input || input.length > 2048) throw new InputError("Enter a public HTTPS URL (up to 2048 characters).");
-  let url;
-  try {
-    url = new URL(input);
-  } catch {
-    throw new InputError("Enter a valid public HTTPS URL.");
-  }
-  const host = url.hostname.toLowerCase();
-  if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || host.length > 253 || host.endsWith(".") || !host.includes(".") || !/^[a-z0-9.-]+$/.test(host) || host.split(".").some((label) => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)) || /^[0-9.]+$/.test(host) || /(?:^|\.)(localhost|local|internal|test|invalid|example|onion|home|lan)$/.test(host)) {
-    throw new InputError("Use a public HTTPS hostname without credentials, IP addresses, or custom ports.");
-  }
-  url.hash = "";
-  return url;
-}
-function publicAddress(ip) {
-  if (ip.includes(":")) {
-    return /^[23][0-9a-f]{3}:/i.test(ip) && !/^200[12]:|^3fff:/i.test(ip);
-  }
-  const octets = ip.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
-  const [a, b, c] = octets;
-  return !(a === 0 || a === 10 || a === 127 || a >= 224 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 168 || b === 0 || b === 88 && c === 99) || a === 198 && (b === 18 || b === 19 || b === 51 && c === 100) || a === 203 && b === 0 && c === 113);
 }
 
 // node_modules/entities/dist/decode-codepoint.js
@@ -3685,7 +3962,7 @@ var error = (code, message) => {
   throw new ContractError(code, message);
 };
 var headers2 = { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
-var reply3 = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: headers2 });
+var reply4 = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: headers2 });
 async function articleBlocks(page) {
   const blocks = [], stack = [];
   let ignored = 0, primary = 0, size = 0;
@@ -3740,12 +4017,12 @@ function tableDatasets(tables, issues) {
         issues.push(title + ": Import requires 2\u2013100 source columns.");
         continue;
       }
-      const groups = t.headers.length <= 8 ? [t.headers.map((_, i) => i)] : Array.from({ length: Math.ceil((t.headers.length - 1) / 7) }, (_, part) => [0, ...Array.from({ length: Math.min(7, t.headers.length - 1 - part * 7) }, (_2, i) => 1 + part * 7 + i)]);
+      const groups2 = t.headers.length <= 8 ? [t.headers.map((_, i) => i)] : Array.from({ length: Math.ceil((t.headers.length - 1) / 7) }, (_, part) => [0, ...Array.from({ length: Math.min(7, t.headers.length - 1 - part * 7) }, (_2, i) => 1 + part * 7 + i)]);
       const normalizeCells = (cells) => cells.map((c) => String(c).replace(/\s+/g, " ").trim());
       const line = (cells) => normalizeCells(cells).join("	");
       const table_name = descriptiveTableName(title, t.headers);
       const local = [];
-      for (const columns of groups) {
+      for (const columns of groups2) {
         const selectedHeaders = columns.map((i) => t.headers[i]), ranked = rankShape(selectedHeaders);
         const context = ranked && title.length <= 500 ? "Table context: " + title + "\n\n" : "";
         const header = line(selectedHeaders);
@@ -3753,7 +4030,7 @@ function tableDatasets(tables, issues) {
         const rowLimit = ranked ? Math.min(24, Math.floor(50 / (ranked.wide ? ranked.ranks.length : 1))) : 24;
         let batch = [], length = context.length + header.length, start = 1;
         const range = columns.slice(1);
-        const columnLabel = groups.length === 1 ? "" : " \xB7 " + (columns.at(-1) < 8 ? "columns 1\u2013" + columns.length : "shared column 1 + columns " + (range[0] + 1) + (range.length > 1 ? "\u2013" + (range.at(-1) + 1) : "")) + " of " + t.headers.length;
+        const columnLabel = groups2.length === 1 ? "" : " \xB7 " + (columns.at(-1) < 8 ? "columns 1\u2013" + columns.length : "shared column 1 + columns " + (range[0] + 1) + (range.length > 1 ? "\u2013" + (range.at(-1) + 1) : "")) + " of " + t.headers.length;
         const flush = () => {
           if (!batch.length) return;
           const text = context + header + "\n" + batch.join("\n");
@@ -3774,7 +4051,7 @@ function tableDatasets(tables, issues) {
         }
         flush();
       }
-      if (groups.length > 1) issues.push(title + ": " + t.headers.length + " source columns are split into " + groups.length + " column groups of up to eight. The shared first column supplies context, not a proven unique join key.");
+      if (groups2.length > 1) issues.push(title + ": " + t.headers.length + " source columns are split into " + groups2.length + " column groups of up to eight. The shared first column supplies context, not a proven unique join key.");
       datasets.push(...local);
     } catch (e) {
       issues.push(title + ": Not imported \u2014 " + e.message);
@@ -3801,9 +4078,9 @@ function proseDatasets(blocks) {
 }
 async function sourceFetch(request, url, env, { fetchPage, analyze }) {
   const checks = [], issues = [];
-  if (request.method !== "POST") return reply3({ error: "POST required" }, 405);
-  if (request.headers.get("origin") && request.headers.get("origin") !== url.origin) return reply3({ error: "Cross-origin fetching is blocked." }, 403);
-  if (!/^application\/json(?:;|$)/i.test(request.headers.get("content-type") || "")) return reply3({ error: "JSON required" }, 415);
+  if (request.method !== "POST") return reply4({ error: "POST required" }, 405);
+  if (request.headers.get("origin") && request.headers.get("origin") !== url.origin) return reply4({ error: "Cross-origin fetching is blocked." }, 403);
+  if (!/^application\/json(?:;|$)/i.test(request.headers.get("content-type") || "")) return reply4({ error: "JSON required" }, 415);
   try {
     const reader = request.body?.getReader();
     let text = "", bytes = 0;
@@ -3815,7 +4092,7 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
         bytes += value.length;
         if (bytes > 4096) {
           await reader.cancel();
-          return reply3({ error: "Fetch request exceeds 4 KiB." }, 413);
+          return reply4({ error: "Fetch request exceeds 4 KiB." }, 413);
         }
         text += decoder.decode(value, { stream: true });
       }
@@ -3827,9 +4104,9 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
     try {
       body = JSON.parse(text);
     } catch {
-      return reply3({ error: "Invalid JSON" }, 400);
+      return reply4({ error: "Invalid JSON" }, 400);
     }
-    if (!body || Array.isArray(body) || Object.keys(body).some((k) => k !== "url") || typeof body.url !== "string") return reply3({ error: "Provide one public HTTPS URL." }, 400);
+    if (!body || Array.isArray(body) || Object.keys(body).some((k) => k !== "url") || typeof body.url !== "string") return reply4({ error: "Provide one public HTTPS URL." }, 400);
     const { source: fetchedSource, page } = await fetchPage(body.url, url.hostname);
     let source = fetchedSource;
     checks.push({ method: "static-html", status: "passed", message: "Public HTTPS page fetched within network and size checks." });
@@ -3849,8 +4126,8 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
         supportedProse = true;
         break;
       }
-      const packet = await createPacket({ source: { text: part.text, url: source }, schema: PROSE_SCHEMA });
-      if (extractProseRules(packet).records.length) {
+      const rich = hasRichQuantities(part.text), packet = await createPacket({ source: { text: part.text, url: source }, schema: rich ? QUANTITY_SCHEMA : PROSE_SCHEMA });
+      if ((rich ? extractQuantities(packet) : extractProseRules(packet)).records.length) {
         supportedProse = true;
         break;
       }
@@ -3859,7 +4136,7 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
     if (jsNeeded) {
       checks.push({ method: "static-html", status: "no_supported_records", message: "No usable table or recognized prose facts; application container and linked scripts indicate possible client rendering." });
       if (!env?.LOCAL_RENDERER) {
-        return reply3({ error: "This page may need JavaScript. Automatic rendering is available through the local npm run dev server with an installed Chrome, Edge or Chromium browser.", code: "renderer_unavailable", source, checks, issues }, 422);
+        return reply4({ error: "This page may need JavaScript. Automatic rendering is available through the local npm run dev server with an installed Chrome, Edge or Chromium browser.", code: "renderer_unavailable", source, checks, issues }, 422);
       }
       try {
         const response = await env.LOCAL_RENDERER.fetch(new Request("https://local-renderer/render", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: source }) }));
@@ -3872,13 +4149,13 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
         checks.push({ method, status: datasets.length ? "passed" : "no_supported_records", message: rendered.diagnostics.message });
         for (const blocked of rendered.diagnostics.blocked_resources || []) issues.push("Blocked resource: " + blocked.reason);
         if (!datasets.length) {
-          return reply3({ error: "Ordinary fetching and JavaScript rendering found no importable tables. Images, canvas, login barriers, pagination and unsupported layouts are not interpreted.", code: "both_methods_no_data", source, checks, issues }, 422);
+          return reply4({ error: "Ordinary fetching and JavaScript rendering found no importable tables. Images, canvas, login barriers, pagination and unsupported layouts are not interpreted.", code: "both_methods_no_data", source, checks, issues }, 422);
         }
       } catch (e) {
-        return reply3({ error: "Ordinary fetching found no supported records. Local JavaScript rendering failed: " + e.message, code: "render_failed", source, checks: [...checks, { method: "local-chromium", status: "failed", message: e.message }], issues }, 422);
+        return reply4({ error: "Ordinary fetching found no supported records. Local JavaScript rendering failed: " + e.message, code: "render_failed", source, checks: [...checks, { method: "local-chromium", status: "failed", message: e.message }], issues }, 422);
       }
     } else datasets.push(...prose);
-    if (!datasets.length) return reply3({ error: issues.length ? "No importable selections: " + issues.join(" ") : analysis.message || "No supported tables or article text found.", code: "no_importable_content", source, checks, issues, discovery: analysis.discovery }, 422);
+    if (!datasets.length) return reply4({ error: issues.length ? "No importable selections: " + issues.join(" ") : analysis.message || "No supported tables or article text found.", code: "no_importable_content", source, checks, issues, discovery: analysis.discovery }, 422);
     let size = 0, omitted = 0, selectedCount = 0;
     datasets = datasets.filter((d) => {
       if (selectedCount >= 32 || size + d.text.length > 128e3) {
@@ -3900,9 +4177,9 @@ async function sourceFetch(request, url, env, { fetchPage, analyze }) {
       d.id = "retrieved-" + (i + 1);
       d.snapshot_hash = await digest(d.text);
     }
-    return reply3({ source, method, retrieved_at, datasets, table_catalog, checks, issues, discovery: analysis.discovery, notice: "Normalized text snapshots, not raw HTML or authenticated source proofs. Choose content to start a new unapproved review; saved reviews retain their source snapshot. Rendering is a timed snapshot and may omit later updates." });
+    return reply4({ source, method, retrieved_at, datasets, table_catalog, checks, issues, discovery: analysis.discovery, notice: "Normalized text snapshots, not raw HTML or authenticated source proofs. Choose content to start a new unapproved review; saved reviews retain their source snapshot. Rendering is a timed snapshot and may omit later updates." });
   } catch (e) {
-    return reply3({ error: e.message, code: e.code || "fetch_stopped", checks: [...checks, { method: "static-html", status: "failed", message: e.message }], issues }, e.status || 422);
+    return reply4({ error: e.message, code: e.code || "fetch_stopped", checks: [...checks, { method: "static-html", status: "failed", message: e.message }], issues }, e.status || 422);
   }
 }
 
@@ -4406,6 +4683,8 @@ async function tablesAPI(request, url) {
 var worker_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (request.method === "GET" && ["/workspace", "/workspace-client.js"].includes(url.pathname)) return new Response(url.pathname === "/workspace" ? WORKSPACE_PAGE : workspace_client_default, { headers: { ...SECURITY, "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'", "Content-Type": url.pathname === "/workspace" ? "text/html; charset=utf-8" : "application/javascript; charset=utf-8" } });
+    if (url.pathname === "/api/workspace") return workspaceAPI(request, env);
     if (url.pathname === "/api/interpretation/storage") return feedbackStorage(request, env);
     if (["/interpretation", "/interpretation-client.js", "/api/interpretation/start", "/api/interpretation/action", "/api/interpretation/select"].includes(url.pathname)) return labFetch(request);
     if (url.pathname === "/api/interpretation/fetch") return sourceFetch(request, url, env, { fetchPage: fetchPublicPage, analyze: analyzePage });
@@ -4459,7 +4738,7 @@ var _a;
 var TABLE_PAGE = String.raw(_a || (_a = __template([`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Table Toolkit</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17283c;font:16px system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 22px}h1{font-size:clamp(30px,5vw,48px);margin:12px 0}p{line-height:1.6}a{color:#18568b}.bar{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}input,select{padding:12px;border:1px solid #8596a8;border-radius:8px;font:inherit;max-width:100%}input{flex:1;min-width:200px}button,.button{padding:12px 18px;border:0;border-radius:8px;background:#173b59;color:white;font:inherit;cursor:pointer;text-decoration:none}button:disabled{opacity:.5;cursor:wait}label{display:block;font-weight:600;margin:12px 0 6px}.hint,footer{font-size:14px;color:#47607a}#status{min-height:28px}#wrap{overflow:auto;background:white;border:1px solid #d7dfe6;border-radius:10px;max-height:65vh}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:12px 16px;border-bottom:1px solid #e7edf2;max-width:420px;overflow-wrap:anywhere;min-width:100px}th{background:#e8eff5;position:sticky;top:0}footer{margin-top:28px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #bc6b10;outline-offset:3px}[hidden]{display:none!important}</style></head>
 <body><main><h1>Web Table Toolkit</h1><p>Turn tables on public webpages into searchable data. Preview a table, then download CSV or JSON.</p>
-<p><a href="/interpretation">Open the offline Interpretation Lab</a></p>
+<p><a href="/workspace">Open batch workspace</a> \xB7 <a href="/interpretation">Open the offline Interpretation Lab</a></p>
 <form id="extract"><label for="url">Public webpage URL</label><div class="bar"><input id="url" type="url" maxlength="2048" required placeholder="https://www.w3schools.com/html/html_tables.asp"><button id="submit" type="submit">Find tables</button></div></form>
 <p class="hint">Public HTTPS pages only. HTML tables, accessible grids, or supported score grids must be present in the page source. Images require OCR, which is not enabled. Maximum 2 MiB, 20 tables, and 5,000 total rows. Complex tables are marked unsupported.</p>
 <p><button id="try" type="button">Try a sample table</button> <a href="/example">Open the validated 118-element example</a></p>
@@ -4501,7 +4780,7 @@ $('json').onclick=()=>{const t=selected();if(t.unsupported)return;download(JSON.
 <\/script></body></html>`], [`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web Table Toolkit</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17283c;font:16px system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:40px 22px}h1{font-size:clamp(30px,5vw,48px);margin:12px 0}p{line-height:1.6}a{color:#18568b}.bar{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}input,select{padding:12px;border:1px solid #8596a8;border-radius:8px;font:inherit;max-width:100%}input{flex:1;min-width:200px}button,.button{padding:12px 18px;border:0;border-radius:8px;background:#173b59;color:white;font:inherit;cursor:pointer;text-decoration:none}button:disabled{opacity:.5;cursor:wait}label{display:block;font-weight:600;margin:12px 0 6px}.hint,footer{font-size:14px;color:#47607a}#status{min-height:28px}#wrap{overflow:auto;background:white;border:1px solid #d7dfe6;border-radius:10px;max-height:65vh}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:12px 16px;border-bottom:1px solid #e7edf2;max-width:420px;overflow-wrap:anywhere;min-width:100px}th{background:#e8eff5;position:sticky;top:0}footer{margin-top:28px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #bc6b10;outline-offset:3px}[hidden]{display:none!important}</style></head>
 <body><main><h1>Web Table Toolkit</h1><p>Turn tables on public webpages into searchable data. Preview a table, then download CSV or JSON.</p>
-<p><a href="/interpretation">Open the offline Interpretation Lab</a></p>
+<p><a href="/workspace">Open batch workspace</a> \xB7 <a href="/interpretation">Open the offline Interpretation Lab</a></p>
 <form id="extract"><label for="url">Public webpage URL</label><div class="bar"><input id="url" type="url" maxlength="2048" required placeholder="https://www.w3schools.com/html/html_tables.asp"><button id="submit" type="submit">Find tables</button></div></form>
 <p class="hint">Public HTTPS pages only. HTML tables, accessible grids, or supported score grids must be present in the page source. Images require OCR, which is not enabled. Maximum 2 MiB, 20 tables, and 5,000 total rows. Complex tables are marked unsupported.</p>
 <p><button id="try" type="button">Try a sample table</button> <a href="/example">Open the validated 118-element example</a></p>

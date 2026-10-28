@@ -1,3 +1,4 @@
+import {hasRichQuantities,QUANTITY_SCHEMA,extractQuantities} from './quantity-rules.js';
 import {descriptiveTableName,capturedTableCatalog} from './table-selection.js';
 import {rankShape,rankingPlan} from './ranking-rules.js';
 import {hasTextRelations} from './text-facts.js';
@@ -90,7 +91,7 @@ export async function sourceFetch(request,url,env,{fetchPage,analyze}) {
   let datasets=tableDatasets(analysis.tables,issues),method='static-html';
   let prose=[];try{prose=proseDatasets(await articleBlocks(page));}catch(e){issues.push('Article text not imported: '+e.message);}
   let supportedProse=false;
-  if(!datasets.length)for(const part of prose){if(hasTextRelations(part.text)){supportedProse=true;break;}const packet=await createPacket({source:{text:part.text,url:source},schema:PROSE_SCHEMA});if(extractProseRules(packet).records.length){supportedProse=true;break;}}
+  if(!datasets.length)for(const part of prose){if(hasTextRelations(part.text)){supportedProse=true;break;}const rich=hasRichQuantities(part.text),packet=await createPacket({source:{text:part.text,url:source},schema:rich?QUANTITY_SCHEMA:PROSE_SCHEMA});if((rich?extractQuantities(packet):extractProseRules(packet)).records.length){supportedProse=true;break;}}
   const jsNeeded=!datasets.length&&!supportedProse&&analysis.tables.every(t=>!t.rows.length&&!t.unsupported)&&analysis.signals.app_roots>0&&analysis.signals.linked_scripts>0;
   if(jsNeeded){
    checks.push({method:'static-html',status:'no_supported_records',message:'No usable table or recognized prose facts; application container and linked scripts indicate possible client rendering.'});

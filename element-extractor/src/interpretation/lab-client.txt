@@ -242,6 +242,7 @@
   }
   function displayValue(row, field) {
     const value = row.fields[field.name].value;
+    if(field.name==='value'&&state.view.job.parser_version==='quantitative-prose-v1'&&row.fields.unit.value==='$'&&typeof value==='number')return '$'+new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:20}).format(value);
     if (value === null || value === undefined) return "—";
     const mappedKind = state.view.column_mapping?.editable ? state.view.column_mapping.columns.find(c => c.name === field.name)?.kind : null;
     if (typeof value === "number" && (mappedKind === "dollars" || /^(?:hourly|annual)_wage(?:_.*)?_dollars$/.test(field.name)))
@@ -251,7 +252,7 @@
     return value;
   }
   function renderTable() {
-    const columns = state.view.job.packet.schema.fields.filter(f => state.view.job.parser_version !== "text-relations-v1" || f.required || state.view.validation.records.some(r => r.fields[f.name].value !== null));
+    const columns = state.view.job.packet.schema.fields.filter(f => !["text-relations-v1","text-relations-v2"].includes(state.view.job.parser_version) || f.required || state.view.validation.records.some(r => r.fields[f.name].value !== null));
     const head = document.createElement("tr");
     for (const value of [
       ...(queue().structured ? ["Select"] : []),
@@ -387,6 +388,8 @@
   }
   function render() {
     if (!state.view) return;
+    $("workspace-link-state").hidden=!workspaceToken;
+    if(workspaceToken)$("workspace-link-state").textContent=!window.opener||window.opener.closed?"The workspace window is closed. Drive review saving still works; reopen the workspace for combined exports.":workspacePacket===state.view.job.packet.hash?"Linked to the batch workspace. Reviewed changes return there while both tabs stay open.":"This review is separate from the linked source. Open a source from the workspace to link a review again.";
     if (state.lastPacket !== state.view.job.packet.hash) {
       state.checked.clear(); $("record-filter").value = "all";
       $("input-panel").open = false; $("batch-confirm").checked = false;
@@ -472,6 +475,13 @@
     $("workspace").hidden = false;
     controls();
   }
+  const workspaceToken=new URLSearchParams(location.search).get('workspace');
+  let workspacePacket=null;
+  function notifyWorkspace(){if(workspacePacket&&state.view?.job.packet.hash===workspacePacket&&window.opener)window.opener.postMessage({channel:'toolkit-workspace-v1',token:workspaceToken,action:'updated',job:state.view.job},location.origin);}
+  window.addEventListener('message',event=>{
+    if(!workspaceToken||event.origin!==location.origin||event.source!==window.opener||event.data?.channel!=='toolkit-workspace-v1'||event.data.token!==workspaceToken||event.data.action!=='open')return;
+    perform(async()=>{const response=await request('/api/interpretation/action',{action:'restore',session:{format:'toolkit-review-session-v1',job:event.data.job}});state.view=await response.json();workspacePacket=state.view.job.packet.hash;$('source-text').value=state.view.job.document?.source.text||state.view.job.packet.source.text;$('source-url').value=state.view.job.packet.source.url||'';$('text-mode').value='auto';state.rowId=null;state.field=null;clearRetrieved();clearDecision();render();editCandidate();say('Review linked to the batch workspace. Keep both tabs open; reviewed changes will return there.');});
+  });
   async function perform(task) {
     if (state.busy) return;
     state.busy = true;
@@ -545,6 +555,7 @@
     event.preventDefault();
     if (!state.view?.column_mapping?.editable) return;
     perform(async () => {
+      const previousWorkspacePacket=workspacePacket===state.view.job.packet.hash?workspacePacket:null;
       const source={text:state.view.job.packet.source.text,url:state.view.job.packet.source.url};
       const mapping=state.view.column_mapping.columns.map((c,i) => ({
         name:document.querySelector('#mapping-columns input[data-index="'+i+'"]').value.trim(),
@@ -552,6 +563,7 @@
       }));
       const response=await request("/api/interpretation/start",{example_id:"custom-text",source,mode:"auto",mapping,...(state.view.job.retrieval?{retrieval:state.view.job.retrieval}:{})});
       state.view=await response.json();state.rowId=null;state.field=null;state.checked.clear();
+      if(previousWorkspacePacket&&window.opener){workspacePacket=state.view.job.packet.hash;window.opener.postMessage({channel:"toolkit-workspace-v1",token:workspaceToken,action:"replaced",previous_packet:previousWorkspacePacket,job:state.view.job},location.origin);}
       clearDecision();render();editCandidate();
       say("Column mapping applied to a new review. No previous approval was carried over. " + state.view.extraction.message);
     });
@@ -664,7 +676,7 @@
       state.rowId = state.editingId || state.view.validation.records.at(-1)?.id;
       state.field = state.view.job.packet.schema.fields[0].name;
       clearDecision(); render(); editCandidate();
-      await autoSaveFeedback(state.view.job);
+      await autoSaveFeedback(state.view.job);notifyWorkspace();
       say("Candidate revision saved and evidence revalidated. All current approvals reset; earlier decisions retained in revision history. Review the revised candidates before exporting.");
     });
   };
@@ -684,7 +696,7 @@
         record_ids: ids, reviewer: $("batch-reviewer").value.trim(), note: $("batch-note").value.trim(), confirmed_mapping: $("batch-confirm").checked });
       state.view = await response.json(); state.checked.clear(); $("batch-confirm").checked = false; $("batch-note").value = "";
       clearDecision(); render();
-      await autoSaveFeedback(state.view.job);
+      await autoSaveFeedback(state.view.job);notifyWorkspace();
       say("Approved " + ids.length + " table rows in one human batch review. Each decision is recorded in the review history.");
     });
   };
@@ -738,7 +750,7 @@
       state.view = await response.json();
       clearDecision();
       render();
-      await autoSaveFeedback(state.view.job);
+      await autoSaveFeedback(state.view.job);notifyWorkspace();
       say(
         "Appended " +
           labels[decision].toLowerCase() +
@@ -909,5 +921,6 @@
   $("approved-json").onclick = () => perform(() => download("json", false));
   $("diagnostic-json").onclick = () => perform(() => download("json", true));
   controls();
+  if(workspaceToken&&window.opener)window.opener.postMessage({channel:'toolkit-workspace-v1',token:workspaceToken,action:'ready'},location.origin);
   storageReady=loadStorage().catch(error=>storageMessage("Feedback storage could not be loaded: "+error.message+" Keep a portable backup and retry."));
 })();

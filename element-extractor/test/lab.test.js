@@ -680,7 +680,7 @@ test('new prose grammar preserves the measured subject instead of confusing it w
       assert.equal(list.job.packet.source.text.slice(e.source_start, e.source_end), e.quote);
     }
     assert.equal(list.validation.records[1].fields.value.evidence[0].quote, 'transportation and material moving occupations (9.9 percent)');
-    const { extractProseRules, LEGACY_PROSE_VERSION } = await import('../src/interpretation/prose-rules.js');
+    const { extractProseRules, LEGACY_PROSE_VERSION, PROSE_SCHEMA } = await import('../src/interpretation/prose-rules.js');
     const { runInterpretation, scriptedInterpreter } = await import('../src/interpretation/pipeline.js');
     const job = structuredClone(value.job);
     job.parser_version = LEGACY_PROSE_VERSION;
@@ -688,6 +688,9 @@ test('new prose grammar preserves the measured subject instead of confusing it w
     assert.equal((await action(mf, job, 'revalidate')).status, 200);
     const pageText = await readFile(new URL('./fixtures/bls-full-page.txt', import.meta.url), 'utf8');
     const page = await (await post(mf, '/api/interpretation/start', { example_id: 'custom-text', mode: 'auto', source: { text: pageText }, dataset_id: 'section-4' })).json();
+    // Build the saved legacy packet using its original schema, not the new grouped-quantity schema.
+    const {createPacket}=await import('../src/interpretation/pipeline.js');
+    page.job.packet=await createPacket({source:{text:page.job.packet.source.text,url:page.job.packet.source.url},schema:PROSE_SCHEMA},page.job.packet.source.received_at);
     page.job.parser_version = LEGACY_PROSE_VERSION;
     page.job.cache_entry = (await runInterpretation(page.job.packet, await scriptedInterpreter(extractProseRules(page.job.packet, LEGACY_PROSE_VERSION)))).cache_entry;
     assert.equal((await action(mf, page.job, 'revalidate')).status, 200);

@@ -6,6 +6,10 @@ A standalone Cloudflare Worker for discovering HTML tables and turning pasted pa
 
 For pages that build their tables with JavaScript, the optional [local browser renderer](docs/javascript-rendering.md) provides a separate read-only capture and export workflow using an installed browser.
 
+## Batch workspace
+
+The launcher opens **Your scraping workspace**: queue public URLs, reuse exact table settings, prepare multiple captured parts, review in linked Lab tabs, and combine compatible approved records with source identities. Prepared work and settings can persist in the dedicated Drive folder. See [the workspace guide](docs/batch-workspace.md).
+
 ## Release workflow
 
 - **Public URL:** find supported native/accessible tables, preview/search and export. The original 118-element example and DCI score adapter remain available.

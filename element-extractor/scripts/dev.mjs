@@ -1,3 +1,4 @@
+import {createWorkspaceDirectory} from './workspace-directory.mjs';
 import {createFeedbackDirectory} from './feedback-directory.mjs';
 import {renderPage} from './render-page.mjs';
 import {execFile} from 'node:child_process';
@@ -7,13 +8,14 @@ import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 const run=promisify(execFile);
 const port=Number(process.env.PORT || 8787);
 const feedback=await createFeedbackDirectory();
+const workspace=createWorkspaceDirectory(feedback);
 console.log((await feedback.status()).message);
 let rendering=false;
 // Use curl for outbound HTTP so this managed environment's proxy and CA trust
 // are honored. This bridge is local tooling only; deployment uses native fetch.
 const mf=new Miniflare(convertV4MiniflareOptions({
  modules:true,script:await readFile(new URL('../worker-code.txt',import.meta.url),'utf8'),
- serviceBindings:{LOCAL_FEEDBACK:request=>feedback.fetch(request),LOCAL_RENDERER:async request=>{
+ serviceBindings:{LOCAL_WORKSPACE:request=>workspace.fetch(request),LOCAL_FEEDBACK:request=>feedback.fetch(request),LOCAL_RENDERER:async request=>{
   if(rendering)return Response.json({error:'A local browser job is already running. Try again when it finishes.'},{status:429});
   rendering=true;
   try {const body=await request.json();return Response.json(await renderPage(body.url));}

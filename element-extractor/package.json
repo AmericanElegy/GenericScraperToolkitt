@@ -23,7 +23,9 @@
     "check:source-browser": "npm run build && node scripts/check-source-browser.mjs",
     "test:live-sources": "npm run build && node scripts/check-live-sources.mjs",
     "feedback": "node scripts/feedback.mjs",
-    "check:feedback-browser": "npm run build && node scripts/check-feedback-storage-browser.mjs"
+    "check:feedback-browser": "npm run build && node scripts/check-feedback-storage-browser.mjs",
+    "check:workspace-browser": "npm run build && node scripts/check-workspace-browser.mjs",
+    "test:live-workspace": "npm run build && node scripts/check-workspace-live.mjs"
   },
   "repository": {
     "type": "git",

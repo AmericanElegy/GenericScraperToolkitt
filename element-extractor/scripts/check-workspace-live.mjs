@@ -1,0 +1,26 @@
+// Explicit live smoke check. Acquires public pages but never approves records or calls a model.
+import {spawn} from 'node:child_process';import {createServer} from 'node:net';import {mkdtemp,rm,writeFile,mkdir} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';import {launchBrowser} from './browser-cdp.mjs';
+const urls=process.argv.slice(2);if(!urls.length)urls.push('https://www.w3schools.com/html/html_tables.asp','https://www.dci.org/scores/final-scores/2026-dci-all-age-world-championship-finals/','https://en.wikipedia.org/wiki/Wikipedia:Statistics');
+if(process.platform==='linux')process.env.TOOLKIT_BROWSER_NO_SANDBOX='1';
+const dir=await mkdtemp(join(tmpdir(),'toolkit-workspace-live-')),reserve=createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));
+const child=spawn(process.execPath,['scripts/dev.mjs'],{env:{...process.env,PORT:String(port),TOOLKIT_DRIVE_ROOT:dir,TOOLKIT_CONFIG_DIR:join(dir,'profile')},stdio:'ignore'}),base='http://127.0.0.1:'+port;let browser;
+async function waitFor(fn,attempts=500){for(let i=0;i<attempts;i++){try{if(await fn())return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Live workspace check timed out.');}
+async function post(body){const r=await fetch(base+'/api/workspace',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const value=await r.json();if(!r.ok)throw Error(value.error);return value;}
+try{
+ await waitFor(async()=> (await fetch(base+'/workspace')).ok,100);browser=await launchBrowser({guardNetwork:false});await browser.send('Page.enable');await browser.send('Page.navigate',{url:base+'/workspace'});await waitFor(()=>browser.evaluate('document.getElementById("save-state")?.textContent.includes("Drive connected")'));
+ await browser.evaluate('document.getElementById("workspace-name").value="Live QA — temporary local storage";document.getElementById("workspace-name").dispatchEvent(new Event("change"));document.getElementById("batch-urls").value='+JSON.stringify(urls.join('\n'))+';document.getElementById("add-urls").click()');await waitFor(()=>browser.evaluate('document.querySelectorAll("#sources tr").length==='+urls.length));await browser.evaluate('document.getElementById("run-batch").click()');await waitFor(()=>browser.evaluate('document.getElementById("message").textContent.startsWith("Batch finished")'),1200);
+ for(let i=0;i<urls.length;i++){
+  await browser.evaluate('document.querySelectorAll("#sources tr")['+i+'].querySelector("button").click()');
+  const failed=await browser.evaluate('document.querySelectorAll("#sources tr")['+i+'].textContent.includes("Needs attention")');if(failed)continue;
+  const preferred=urls[i].includes('wikipedia')?'Project(s) comparison':urls[i].includes('w3schools')?'Company comparison':'All Age';
+  await browser.evaluate('(()=>{const select=document.getElementById("source-table"),option=[...select.options].find(o=>o.textContent.includes('+JSON.stringify(preferred)+'))||[...select.options].find(o=>!o.textContent.startsWith("Article text"));if(option){select.value=option.value;select.dispatchEvent(new Event("change"));}document.getElementById("prepare-source").click()})()');
+  await waitFor(()=>browser.evaluate('!document.getElementById("prepare-source").disabled&&document.querySelectorAll("#sources tr")['+i+'].textContent.includes("Prepared")'));
+ }
+ await waitFor(()=>browser.evaluate('document.getElementById("save-state").textContent.includes("saved locally")'));
+ let saved;for(let i=0;i<80;i++){const list=await post({action:'list'});saved=await post({action:'read',id:list.heads[0].id});if(saved.snapshot.workspace.entries.every(e=>e.job||e.status==='failed'))break;await new Promise(r=>setTimeout(r,100));}
+ const results=[];for(const e of saved.snapshot.workspace.entries){if(!e.job){results.push({url:e.url,success:false,message:e.message});continue;}const checked=await post({action:'check_job',job:e.job});results.push({url:e.url,success:checked.counts.candidates>0&&checked.counts.approved===0,label:e.job.retrieval?.label,counts:checked.counts,columns:checked.columns,samples:e.job.cache_entry.raw_response.records.slice(0,3).map(r=>Object.fromEntries(Object.entries(r.fields).map(([k,v])=>[k,v.value])))});}
+ const report={checked_at:new Date().toISOString(),results,source_requests:'One explicit batch fetch per supplied URL; no model calls or human approvals.',persistence:'Validated through a temporary local folder; actual Google Drive synchronization not tested.',notice:'Smoke verification of live import and persistence, not a representative accuracy/coverage measurement.'};
+ const output=process.env.LIVE_WORKSPACE_OUTPUT_DIR||dir;await mkdir(output,{recursive:true});await writeFile(join(output,'live-workspace-results.json'),JSON.stringify(report,null,2)+'\n');
+ const shot=await browser.send('Page.captureScreenshot',{captureBeyondViewport:true});await writeFile(join(output,'live-workspace.png'),Buffer.from(shot.data,'base64'));
+ console.log(JSON.stringify(report));if(results.some(r=>!r.success))process.exitCode=1;
+}finally{await browser?.close();const exit=new Promise(r=>child.once('exit',r));child.kill('SIGTERM');await exit;await rm(dir,{recursive:true,force:true});}

@@ -39,3 +39,6 @@ The PowerShell launcher still requires a Windows run to establish Windows readin
 ## Feedback survives launcher updates
 
 The launcher starts the local feedback companion. It detects a single Windows Google Drive `My Drive` mount or offers one-time folder selection in the app. Files go in **Web Table Toolkit/feedback**, independently of the freshly downloaded code folder. Configuration stays in `%LOCALAPPDATA%\WebTableToolkit\feedback-storage.json`. Use the same synced root on both computers. The app reports local writes only; confirm actual upload status in Google Drive before switching machines. See [Drive feedback setup and recovery](interpretation-lab.md#automatic-google-drive-feedback-saving).
+
+
+The current launcher opens `/workspace` after validating both its page and the Interpretation Lab backend. Use the header link for single-page review. Batch workspace settings and prepared reviews use the same Drive configuration in the separate `workspaces` subdirectory.

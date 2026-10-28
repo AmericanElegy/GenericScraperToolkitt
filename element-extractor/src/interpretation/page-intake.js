@@ -1,4 +1,5 @@
-import {hasTextRelations,TEXT_FACTS_VERSION,TEXT_FACTS_SCHEMA} from './text-facts.js';
+import {QUANTITY_VERSION,QUANTITY_SCHEMA,hasRichQuantities} from './quantity-rules.js';
+import {hasTextRelations,TEXT_FACTS_VERSION,TEXT_FACTS_SCHEMA,TEXT_FACTS_V2,TEXT_FACTS_V2_SCHEMA} from './text-facts.js';
 // Full-page intake retains the complete source and maps bounded selections back to it.
 import { ContractError, canonical, LIMITS } from './pipeline.js';
 import { PROSE_SCHEMA, PROSE_VERSION, LEGACY_PROSE_VERSION } from './prose-rules.js';
@@ -49,7 +50,7 @@ export function needsPageIntake(source) {
   const text = source.text.replace(/\r\n?/g, '\n');
   return text.length > LIMITS.text || paragraphs(text).length > LIMITS.passages || pageHeaders(text).length > 1 || pageHeaders(text).some(h=>h.kind==='employment');
 }
-export function planPage(source, proseVersion = PROSE_VERSION,{semantic=false}={}) {
+export function planPage(source, proseVersion = PROSE_VERSION,{semantic=false,enhanced=false}={}) {
   if (!source || Object.keys(source).some(k => !['text', 'url'].includes(k)) || typeof source.text !== 'string' || !source.text.trim() || source.text.length > PAGE_LIMIT)
     throw new ContractError('page_limit', 'Paste nonempty page text up to 64,000 characters. Nothing is silently truncated.');
   const text = source.text.replace(/\r\n?/g, '\n');
@@ -91,7 +92,7 @@ export function planPage(source, proseVersion = PROSE_VERSION,{semantic=false}={
   for (const r of consumed) { rest.push(...paragraphs(text, at, r.start)); at = r.end; }
   rest.push(...paragraphs(text, at));
   let batch = [], size = 0, part = 0;
-  const flush = () => { if (batch.length) { const nounFacts=semantic&&hasTextRelations(batch.map(p=>p.text).join('\n\n'));add('Other page text · part ' + (++part), batch, nounFacts?TEXT_FACTS_SCHEMA:PROSE_SCHEMA, nounFacts?TEXT_FACTS_VERSION:proseVersion, 'prose'); batch = []; size = 0; } };
+  const flush = () => { if (batch.length) { const sectionText=batch.map(p=>p.text).join('\n\n'),nounFacts=semantic&&hasTextRelations(sectionText),rich=enhanced&&!nounFacts&&hasRichQuantities(sectionText),richerText=enhanced&&nounFacts&&hasRichQuantities(sectionText);add('Other page text · part ' + (++part), batch, nounFacts?richerText?TEXT_FACTS_V2_SCHEMA:TEXT_FACTS_SCHEMA:rich?QUANTITY_SCHEMA:PROSE_SCHEMA, nounFacts?richerText?TEXT_FACTS_V2:TEXT_FACTS_VERSION:rich?QUANTITY_VERSION:proseVersion, 'prose'); batch = []; size = 0; } };
   for (const p of rest) {
     if (p.text.length > 12000) throw new ContractError('section_limit', 'A single page paragraph exceeds 12,000 characters. Add paragraph breaks before parsing.');
     if (batch.length >= 24 || size + p.text.length + 2 > 12000) flush();

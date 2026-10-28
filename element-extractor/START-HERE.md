@@ -4,6 +4,7 @@ Bookmark this page: https://github.com/AmericanElegy/GenericScraperToolkitt/blob
 
 ## Project and downloads
 
+- The updated launcher opens **Your scraping workspace** (`/workspace`). [Batch workflow and recovery](docs/batch-workspace.md); single-page review is still linked as **Interpretation Lab**.
 - [Latest development branch](https://github.com/AmericanElegy/GenericScraperToolkitt/tree/codex/general-table-extraction) — contains the current extraction, review, mapping and local JavaScript-rendering features. These have not been merged into main or deployed automatically.
 - [Download this branch as ZIP](https://github.com/AmericanElegy/GenericScraperToolkitt/archive/refs/heads/codex/general-table-extraction.zip).
 - [Windows launcher source/download](https://github.com/AmericanElegy/GenericScraperToolkitt/blob/codex/general-table-extraction/element-extractor/scripts/Start-Toolkit-Lab.ps1) — use GitHub's **Download raw file** button to save the script.

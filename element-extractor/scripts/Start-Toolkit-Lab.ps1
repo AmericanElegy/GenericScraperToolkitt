@@ -48,6 +48,7 @@ try {
     }
 
     $url = "http://127.0.0.1:$port/interpretation"
+    $workspaceUrl = "http://127.0.0.1:$port/workspace"
     Write-Host "Checking the page and offline backend at $url ..."
     $lastProblem = 'Server did not become ready.'
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
@@ -64,6 +65,9 @@ try {
             $storageBody = @{ action = 'status' } | ConvertTo-Json -Compress
             $feedbackStorage = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/interpretation/storage" -Method Post -ContentType 'application/json' -Body $storageBody -TimeoutSec 3
             if ($feedbackStorage.PSObject.Properties.Name -notcontains 'enabled') { throw 'Feedback storage endpoint is missing.' }
+            $workspacePage = Invoke-WebRequest -Uri $workspaceUrl -UseBasicParsing -TimeoutSec 3
+            if ($workspacePage.StatusCode -ne 200 -or $workspacePage.Content -notmatch '<h1>Your scraping workspace</h1>') { throw 'Workspace page is missing.' }
+
 
             $ready = $true
             break
@@ -73,7 +77,8 @@ try {
     if (-not $ready) { throw "Readiness check failed: $lastProblem" }
     Write-Host "PASS: Interpretation Lab page and offline backend verified."
     Write-Host "Project saved at: $folder"
-    Write-Host "Open: $url"
+    Write-Host "Open batch workspace: $workspaceUrl"
+    Write-Host "Single-page lab: $url"
     Write-Host "To stop this server only: Stop-Process -Id $($server.Id)"
     Write-Host "Server logs: $outLog and $errLog"
     if ($feedbackStorage.enabled) { Write-Host ("Feedback folder: " + $feedbackStorage.directory) }
@@ -81,7 +86,7 @@ try {
     Write-Host 'Feedback autosave: the app detects a single Google Drive My Drive mount, or asks for its folder once.'
     Write-Host 'Feedback files stay in the dedicated Drive folder across launcher updates. Check the Feedback autosave panel.'
     Write-Host 'This server runs locally. Nothing was deployed or enabled in Cloudflare.'
-    Start-Process $url
+    Start-Process $workspaceUrl
 } catch {
     if ($server -and -not $ready) {
         Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
