@@ -348,6 +348,12 @@
       reference.append(text("summary", passageLabel(e.passage_id) + " · source reference"),
         text("p", "Internal ID " + e.passage_id + " · snapshot offsets " + e.source_start + "–" + e.source_end +
           (e.document_start !== undefined ? " · original page offsets " + e.document_start + "–" + e.document_end : ""), "hint"));
+      const context=state.view.evidence_context?.[row.id+":"+state.field]?.[index];
+      if(context&&(context.before||context.after)){
+        const surrounding=document.createElement("details"),excerpt=document.createElement("p"),mark=text("mark",context.quote);
+        surrounding.append(text("summary","Surrounding text · "+context.scope),text("p","Context helps you check subjects and dates. Only the highlighted quotation is validated evidence; nearby text does not establish the relationship.","hint"));
+        excerpt.append(document.createTextNode((context.truncated_before?"…":"")+context.before),mark,document.createTextNode(context.after+(context.truncated_after?"…":"")));excerpt.style.whiteSpace="pre-wrap";surrounding.append(excerpt);if(index===0)evidence.push(surrounding);else additional.append(surrounding);
+      }
       if(index===0)evidence.push(text("blockquote", e.quote), reference);else additional.append(text("blockquote",e.quote),reference);
     }
     if (!field.evidence.length) {
@@ -627,7 +633,7 @@
     const sourceRows=new Set();for(const d of tables)for(let row=0;row<d.row_count;row++)sourceRows.add((d.table_key||d.id)+":"+((d.row_start||1)+row));
     $("retrieved-summary").textContent=tables.length+" table selection"+(tables.length===1?"":"s")+" · "+sourceRows.size+" captured table rows · "+articles.length+" article section"+(articles.length===1?"":"s")+" · retrieved "+new Date(value.retrieved_at).toLocaleString()+"."+((value.issues||[]).length?" "+value.issues.length+" capture notes below.":"");
     $("retrieved-method").textContent=value.method==="local-chromium"?"Retrieved with local JavaScript rendering":"Retrieved with ordinary HTML";
-    $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text("option",d.display_label||d.label);o.value=d.id;return o;}));
+    $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const headings=d.table_preview?.headers;const o=text("option",(d.display_label||d.label)+(headings?" · "+headings.length+" columns: "+headings.join(" / ").slice(0,180):d.kind==="table"?" · table selection":" · article text"));o.value=d.id;return o;}));
     configureTablePart();await openRetrieved();
   });
   $("open-retrieved").onclick=()=>perform(openRetrieved);

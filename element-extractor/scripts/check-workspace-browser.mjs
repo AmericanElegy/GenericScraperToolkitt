@@ -15,6 +15,8 @@ try{
  await waitFor(()=>browser.evaluate('document.querySelectorAll("#sources tr").length===2'));
  await browser.evaluate('document.getElementById("run-batch").click()');await waitFor(()=>browser.evaluate('document.getElementById("message").textContent.startsWith("Batch finished")'));
  assert.equal(maxRequests,1);assert.deepEqual(calls,['/a','/b']);assert.match(await browser.evaluate('document.getElementById("sources").textContent'),/Prepared/);
+ assert.match(await browser.evaluate('document.getElementById("source-table").textContent'),/2 columns: Name \/ Count/);
+ assert.match(await browser.evaluate('document.getElementById("source-preview").textContent'),/first 2 of 2 selected source rows/);
  // Save and apply a strict reusable recipe; changed headings must need a manual selection.
  await browser.evaluate('document.getElementById("recipe-name").value="Shared counts";document.getElementById("save-recipe").click()');await waitFor(()=>browser.evaluate('document.getElementById("message").textContent.startsWith("Settings saved")'));
  await browser.evaluate('document.getElementById("batch-urls").value="https://data.example.org/changed\\nhttps://data.example.org/blocked";document.getElementById("add-urls").click()');await waitFor(()=>browser.evaluate('document.querySelectorAll("#sources tr").length===4'));await browser.evaluate('document.getElementById("run-batch").click()');await waitFor(()=>browser.evaluate('document.getElementById("message").textContent.startsWith("Batch finished")'));
@@ -63,6 +65,10 @@ try{
  await browser.evaluate('document.querySelectorAll("#sources tr")[5].querySelector("button").click();document.getElementById("prepare-source").click()');await waitFor(()=>browser.evaluate('document.getElementById("message").textContent.startsWith("Prepared a fresh")'));
  await browser.send('Runtime.evaluate',{expression:'document.getElementById("review-source").click()',userGesture:true});await waitFor(()=>browser.evaluate('window.reviewWindow?.document.getElementById("counts")?.textContent.includes("2 candidates")'));
  assert.equal(await browser.evaluate('window.reviewWindow.document.querySelector("button[data-record=row-1][data-field=value]").textContent'),'$31.59');
+ assert.match(await browser.evaluate('window.reviewWindow.document.getElementById("evidence").textContent'),/Surrounding text/);
+ assert.match(await browser.evaluate('window.reviewWindow.document.getElementById("evidence").textContent'),/Acme employs 1,234 workers/);
+ assert.equal(await browser.evaluate('[...window.reviewWindow.document.querySelectorAll("#evidence details")].find(d=>d.querySelector("summary")?.textContent.startsWith("Surrounding text")).open'),false);
+
  assert.equal(await browser.evaluate('window.reviewWindow.document.querySelector("button[data-record=row-2][data-field=value]").textContent'),'1,234');
  await browser.evaluate('window.reviewWindow.close()');
  // Remapping a linked review explicitly replaces its workspace snapshot and clears approvals.

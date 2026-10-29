@@ -1,3 +1,4 @@
+import {evidenceContext} from './evidence-context.js';
 import {QUANTITY_VERSION,QUANTITY_SCHEMA,hasRichQuantities,extractQuantities} from './quantity-rules.js';
 import {selectCapturedTable,validateTableSelection} from './table-selection.js';
 import {makeFeedbackSnapshot} from './feedback-snapshots.js';
@@ -273,6 +274,7 @@ async function view(job, result) {
         : records.length + ' candidate records extracted. ' + (unmatched.length ? unmatched.length + (unmatched.length === 1 ? ' passage produced' : ' passages produced') + ' no records; inspect unmatched source text for omissions.' : 'Inspect the column mapping and evidence before approval. Extraction may still be incomplete.') + (mapped?.plan.skipped.length ? ' ' + mapped.plan.skipped.length + ' malformed rows were not mapped; inspect the column preview.' : ''),
     },
     ...(info ? { document: publicDocument(info, job) } : {}),
+    evidence_context: Object.fromEntries(records.flatMap(r=>Object.entries(r.fields).map(([name,f])=>[r.id+":"+name,f.evidence.map(e=>evidenceContext(info?info.plan.text:job.packet.source.text,e,{document:!!info}))]))),
     validation: result.json.validation,
     review_queue: reviewQueue(job, result.json.validation),
     counts: {

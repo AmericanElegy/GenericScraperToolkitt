@@ -38,3 +38,11 @@ An optional live check is available with `npm run test:live-workspace`. Its defa
 ## Finding sources
 
 Use **Find a source** to search URLs and captured table names without changing their order. **Show** narrows the queue to sources needing attention or selection, prepared sources with pending or approved records, or queued sources. **Clear filters** restores the full list. Filters affect only queue visibility: the active editor stays open, batch fetching still processes all queued sources, and compatible exports still include all eligible approved records. The totals always summarize the full workspace. Search and filters are temporary view preferences and are not saved into snapshots.
+
+## Recognizing table choices
+
+Both the workspace and Interpretation Lab include column counts and headings in table choices. Long heading lists are shortened in the menu; the selected preview retains the full captured headings. Workspace samples label source row positions and distinguish selected columns from the full source width. Separate choices can be separate tables, row batches or column groups, rather than revisions. Selection order and review approvals are unchanged.
+
+## Paragraph review context
+
+The selected evidence can include a collapsed **Surrounding text** excerpt with up to 350 characters before and after the exact quotation. When a full retained page has validated original offsets, the excerpt uses those offsets; otherwise it uses the current source snapshot. The highlighted quote remains the evidence. Nearby text is a review aid, not an inferred subject, date, additional claim or approval. Context is rebuilt from the retained source on reopening and does not change exported evidence or parser versions. It cannot recover text never captured from the page.
