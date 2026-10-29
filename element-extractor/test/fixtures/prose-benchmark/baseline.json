@@ -1,0 +1,1773 @@
+{
+  "format": "toolkit-prose-benchmark-report-v1",
+  "answer_key_status": "assistant_draft_not_human_verified",
+  "cases": 35,
+  "expected_claims": 50,
+  "proposed_claims": 36,
+  "strict_matches": 5,
+  "strict_draft_precision": 0.1388888888888889,
+  "strict_draft_recall": 0.1,
+  "notice": "Draft mixed-source benchmark, not independently verified or representative accuracy. Field names are adapted but meanings, dates and units are not inferred or normalized. Wording differences count as mismatches. A match does not override blocking findings or approve a record. Expected claims require human spot-checking. No network, AI calls or automatic learning.",
+  "results": [
+    {
+      "id": "simple-count",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme employs 120 workers.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs 120 workers.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme employs 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "grouped-count",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme employs 1,200 workers.",
+      "parser": "quantitative-prose-v1",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 1200,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs 1,200 workers.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "Acme",
+          "fact": null,
+          "answer": 1200,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme employs 1,200 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "dated-count",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme employed 1,200 people in 2025.",
+      "parser": "quantitative-prose-v1",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 1200,
+          "unit": "people",
+          "time": "2025",
+          "evidence": "Acme employed 1,200 people in 2025.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "people",
+          "fact": null,
+          "answer": 1200,
+          "unit": "people",
+          "time": null,
+          "quotes": [
+            "Acme employed 1,200 people in 2025."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "comparison",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme employed 1,200 people in 2025, up from 1,000 in 2024.",
+      "parser": "quantitative-prose-v1",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 1200,
+          "unit": "people",
+          "time": "2025",
+          "evidence": "Acme employed 1,200 people in 2025, up from 1,000 in 2024.",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 1000,
+          "unit": "people",
+          "time": "2024",
+          "evidence": "Acme employed 1,200 people in 2025, up from 1,000 in 2024.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "people",
+          "fact": null,
+          "answer": 1200,
+          "unit": "people",
+          "time": null,
+          "quotes": [
+            "Acme employed 1,200 people in 2025, up from 1,000 in 2024."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 2,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "pronoun",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme opened a branch in 2025. It employs 120 workers.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme opened a branch in 2025. It employs 120 workers.",
+          "relationship_status": "needs_context"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "It employs 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "ambiguous-pronoun",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme partnered with Beta. It employs 120 workers.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "It employs 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 0,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": [
+        "The pronoun has two possible antecedents."
+      ]
+    },
+    {
+      "id": "revenue",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Revenue was $1,234.50.",
+      "parser": "quantitative-prose-v1",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Revenue",
+          "fact": "amount",
+          "answer": 1234.5,
+          "unit": "$",
+          "time": null,
+          "evidence": "Revenue was $1,234.50.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "Revenue",
+          "fact": null,
+          "answer": 1234.5,
+          "unit": "$",
+          "time": null,
+          "quotes": [
+            "Revenue was $1,234.50."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "scaled-money",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme reported revenue of $1.2 million in 2025.",
+      "parser": "quantitative-prose-v1",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "revenue",
+          "answer": 1200000,
+          "unit": "$",
+          "time": "2025",
+          "evidence": "Acme reported revenue of $1.2 million in 2025.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [],
+      "expected": 1,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "percentage",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Office occupations accounted for 12.6 percent of local employment.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Office occupations",
+          "fact": "share of local employment",
+          "answer": 12.6,
+          "unit": "percent",
+          "time": null,
+          "evidence": "Office occupations accounted for 12.6 percent of local employment.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "Office occupations",
+          "fact": null,
+          "answer": 12.6,
+          "unit": "percent",
+          "time": null,
+          "quotes": [
+            "Office occupations accounted for 12.6 percent of local employment."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "percentage-list",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Office occupations accounted for 12.6 percent of employment, followed by sales (9.8 percent) and food service (9.4 percent).",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Office occupations",
+          "fact": "share of employment",
+          "answer": 12.6,
+          "unit": "percent",
+          "time": null,
+          "evidence": "Office occupations accounted for 12.6 percent of employment, followed by sales (9.8 percent) and food service (9.4 percent).",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "sales",
+          "fact": "share of employment",
+          "answer": 9.8,
+          "unit": "percent",
+          "time": null,
+          "evidence": "Office occupations accounted for 12.6 percent of employment, followed by sales (9.8 percent) and food service (9.4 percent).",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "food service",
+          "fact": "share of employment",
+          "answer": 9.4,
+          "unit": "percent",
+          "time": null,
+          "evidence": "Office occupations accounted for 12.6 percent of employment, followed by sales (9.8 percent) and food service (9.4 percent).",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "Office occupations",
+          "fact": null,
+          "answer": 12.6,
+          "unit": "percent",
+          "time": null,
+          "quotes": [
+            "Office occupations accounted for 12.6 percent of employment"
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-2",
+          "subject": "sales",
+          "fact": null,
+          "answer": 9.8,
+          "unit": "percent",
+          "time": null,
+          "quotes": [
+            "sales (9.8 percent)"
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-3",
+          "subject": "food service",
+          "fact": null,
+          "answer": 9.4,
+          "unit": "percent",
+          "time": null,
+          "quotes": [
+            "food service (9.4 percent)"
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 3,
+      "proposed": 3,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "noun-answer",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "The most viewed article in 2025 was Example One.",
+      "parser": "text-relations-v1",
+      "matched": [
+        {
+          "expected": {
+            "subject": "article",
+            "fact": "most viewed",
+            "answer": "Example One",
+            "unit": null,
+            "time": "2025",
+            "evidence": "The most viewed article in 2025 was Example One.",
+            "relationship_status": "explicit"
+          },
+          "actual": {
+            "id": "row-1",
+            "subject": "article",
+            "fact": "most viewed",
+            "answer": "Example One",
+            "unit": null,
+            "time": "2025",
+            "quotes": [
+              "The most viewed article in 2025 was Example One."
+            ],
+            "issues": [
+              {
+                "code": "association_unverified",
+                "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+              }
+            ],
+            "review_status": "needs_review"
+          }
+        }
+      ],
+      "missed": [],
+      "extra": [],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 1,
+      "unresolved": []
+    },
+    {
+      "id": "capital",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "The capital of France is Paris.",
+      "parser": "text-relations-v1",
+      "matched": [
+        {
+          "expected": {
+            "subject": "France",
+            "fact": "capital",
+            "answer": "Paris",
+            "unit": null,
+            "time": null,
+            "evidence": "The capital of France is Paris.",
+            "relationship_status": "explicit"
+          },
+          "actual": {
+            "id": "row-1",
+            "subject": "France",
+            "fact": "capital",
+            "answer": "Paris",
+            "unit": null,
+            "time": null,
+            "quotes": [
+              "The capital of France is Paris."
+            ],
+            "issues": [
+              {
+                "code": "association_unverified",
+                "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+              }
+            ],
+            "review_status": "needs_review"
+          }
+        }
+      ],
+      "missed": [],
+      "extra": [],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 1,
+      "unresolved": []
+    },
+    {
+      "id": "winner",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "The winner of Example Cup was Team Blue.",
+      "parser": "text-relations-v1",
+      "matched": [
+        {
+          "expected": {
+            "subject": "Example Cup",
+            "fact": "winner",
+            "answer": "Team Blue",
+            "unit": null,
+            "time": null,
+            "evidence": "The winner of Example Cup was Team Blue.",
+            "relationship_status": "explicit"
+          },
+          "actual": {
+            "id": "row-1",
+            "subject": "Example Cup",
+            "fact": "winner",
+            "answer": "Team Blue",
+            "unit": null,
+            "time": null,
+            "quotes": [
+              "The winner of Example Cup was Team Blue."
+            ],
+            "issues": [
+              {
+                "code": "association_unverified",
+                "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+              }
+            ],
+            "review_status": "needs_review"
+          }
+        }
+      ],
+      "missed": [],
+      "extra": [],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 1,
+      "unresolved": []
+    },
+    {
+      "id": "category",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "The category of Example One is History.",
+      "parser": "text-relations-v1",
+      "matched": [
+        {
+          "expected": {
+            "subject": "Example One",
+            "fact": "category",
+            "answer": "History",
+            "unit": null,
+            "time": null,
+            "evidence": "The category of Example One is History.",
+            "relationship_status": "explicit"
+          },
+          "actual": {
+            "id": "row-1",
+            "subject": "Example One",
+            "fact": "category",
+            "answer": "History",
+            "unit": null,
+            "time": null,
+            "quotes": [
+              "The category of Example One is History."
+            ],
+            "issues": [
+              {
+                "code": "association_unverified",
+                "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+              }
+            ],
+            "review_status": "needs_review"
+          }
+        }
+      ],
+      "missed": [],
+      "extra": [],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 1,
+      "unresolved": []
+    },
+    {
+      "id": "mixed",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "The capital of France is Paris. Acme employs 1,200 workers.",
+      "parser": "text-relations-v2",
+      "matched": [
+        {
+          "expected": {
+            "subject": "France",
+            "fact": "capital",
+            "answer": "Paris",
+            "unit": null,
+            "time": null,
+            "evidence": "The capital of France is Paris. Acme employs 1,200 workers.",
+            "relationship_status": "explicit"
+          },
+          "actual": {
+            "id": "row-1",
+            "subject": "France",
+            "fact": "capital",
+            "answer": "Paris",
+            "unit": null,
+            "time": null,
+            "quotes": [
+              "The capital of France is Paris."
+            ],
+            "issues": [
+              {
+                "code": "association_unverified",
+                "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+              }
+            ],
+            "review_status": "needs_review"
+          }
+        }
+      ],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 1200,
+          "unit": "workers",
+          "time": null,
+          "evidence": "The capital of France is Paris. Acme employs 1,200 workers.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-2",
+          "subject": "Acme",
+          "fact": null,
+          "answer": 1200,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme employs 1,200 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 2,
+      "proposed": 2,
+      "strict_matches": 1,
+      "unresolved": []
+    },
+    {
+      "id": "negative",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme does not employ 120 workers.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme does not employ 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            },
+            {
+              "code": "interpreter_flag",
+              "message": "This sentence contains uncertainty, correction, negation, ambiguous context or a percentage outside 0–100. Inspect the context and explicitly correct the candidate before approval."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 0,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "correction",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Correction: Acme employed 120 people, not 150, in 2025.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "people",
+          "time": "2025",
+          "evidence": "Correction: Acme employed 120 people, not 150, in 2025.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "people",
+          "fact": null,
+          "answer": 120,
+          "unit": "people",
+          "time": null,
+          "quotes": [
+            "Correction: Acme employed 120 people, not 150, in 2025."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            },
+            {
+              "code": "interpreter_flag",
+              "message": "This sentence contains uncertainty, correction, negation, ambiguous context or a percentage outside 0–100. Inspect the context and explicitly correct the candidate before approval."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "forecast",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme is projected to employ 150 people in 2027.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "projected employment",
+          "answer": 150,
+          "unit": "people",
+          "time": "2027",
+          "evidence": "Acme is projected to employ 150 people in 2027.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "people",
+          "fact": null,
+          "answer": 150,
+          "unit": "people",
+          "time": null,
+          "quotes": [
+            "Acme is projected to employ 150 people in 2027."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            },
+            {
+              "code": "interpreter_flag",
+              "message": "This sentence contains uncertainty, correction, negation, ambiguous context or a percentage outside 0–100. Inspect the context and explicitly correct the candidate before approval."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "approximate",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Revenue was approximately $1,200.",
+      "parser": "quantitative-prose-v1",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Revenue",
+          "fact": "approximate amount",
+          "answer": 1200,
+          "unit": "$",
+          "time": null,
+          "evidence": "Revenue was approximately $1,200.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "Revenue",
+          "fact": null,
+          "answer": 1200,
+          "unit": "$",
+          "time": null,
+          "quotes": [
+            "Revenue was approximately $1,200."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "range",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme employs between 100 and 120 workers.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment range",
+          "answer": "100–120",
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs between 100 and 120 workers.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme employs between 100 and 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "relative-time",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "In 2025, Acme expanded. The following year, it employed 120 people.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "people",
+          "time": "2026",
+          "evidence": "In 2025, Acme expanded. The following year, it employed 120 people.",
+          "relationship_status": "needs_context"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "people",
+          "fact": null,
+          "answer": 120,
+          "unit": "people",
+          "time": null,
+          "quotes": [
+            "The following year, it employed 120 people."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "heading-context",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme — 2025\n\nThe company employed 120 people.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "people",
+          "time": "2025",
+          "evidence": "Acme — 2025\n\nThe company employed 120 people.",
+          "relationship_status": "needs_context"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "people",
+          "fact": null,
+          "answer": 120,
+          "unit": "people",
+          "time": null,
+          "quotes": [
+            "The company employed 120 people."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 1,
+      "proposed": 1,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "two-subjects",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme employs 120 workers. Beta employs 80 workers.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs 120 workers. Beta employs 80 workers.",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "Beta",
+          "fact": "employment",
+          "answer": 80,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs 120 workers. Beta employs 80 workers.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme employs 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-2",
+          "subject": "workers",
+          "fact": null,
+          "answer": 80,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Beta employs 80 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 2,
+      "proposed": 2,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "same-value",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme employs 120 workers. Beta employs 120 workers.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs 120 workers. Beta employs 120 workers.",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "Beta",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs 120 workers. Beta employs 120 workers.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme employs 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-2",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Beta employs 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 2,
+      "proposed": 2,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "date-not-count",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme was founded in 2025.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "founding year",
+          "answer": 2025,
+          "unit": "year",
+          "time": null,
+          "evidence": "Acme was founded in 2025.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [],
+      "expected": 1,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "url-not-count",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Read https://example.org/2025/120 for more information.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [],
+      "extra": [],
+      "expected": 0,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "no-facts",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "The company is well known for its friendly service.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [],
+      "extra": [],
+      "expected": 0,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "noun-negation",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "The capital of France is not Lyon.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [],
+      "extra": [],
+      "expected": 0,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "wage-list",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Higher paying groups included management ($65.97), legal ($54.16), and computer and mathematical ($51.30).",
+      "parser": "quantitative-prose-v1",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "management",
+          "fact": "reported amount",
+          "answer": 65.97,
+          "unit": "$",
+          "time": null,
+          "evidence": "Higher paying groups included management ($65.97), legal ($54.16), and computer and mathematical ($51.30).",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "legal",
+          "fact": "reported amount",
+          "answer": 54.16,
+          "unit": "$",
+          "time": null,
+          "evidence": "Higher paying groups included management ($65.97), legal ($54.16), and computer and mathematical ($51.30).",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "computer and mathematical",
+          "fact": "reported amount",
+          "answer": 51.3,
+          "unit": "$",
+          "time": null,
+          "evidence": "Higher paying groups included management ($65.97), legal ($54.16), and computer and mathematical ($51.30).",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "management",
+          "fact": null,
+          "answer": 65.97,
+          "unit": "$",
+          "time": null,
+          "quotes": [
+            "management ($65.97)"
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-2",
+          "subject": "legal",
+          "fact": null,
+          "answer": 54.16,
+          "unit": "$",
+          "time": null,
+          "quotes": [
+            "legal ($54.16)"
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-3",
+          "subject": "computer and mathematical",
+          "fact": null,
+          "answer": 51.3,
+          "unit": "$",
+          "time": null,
+          "quotes": [
+            "computer and mathematical ($51.30)"
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 3,
+      "proposed": 3,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "repeated-quote",
+      "origin": {
+        "kind": "synthetic",
+        "notice": "Fictional evaluation example, not a claim about a real organization."
+      },
+      "text": "Acme employs 120 workers.\n\nAcme employs 120 workers.",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs 120 workers.\n\nAcme employs 120 workers.",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "Acme",
+          "fact": "employment",
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "evidence": "Acme employs 120 workers.\n\nAcme employs 120 workers.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme employs 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-2",
+          "subject": "workers",
+          "fact": null,
+          "answer": 120,
+          "unit": "workers",
+          "time": null,
+          "quotes": [
+            "Acme employs 120 workers."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 2,
+      "proposed": 2,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "wikipedia-paragraph-4",
+      "origin": {
+        "kind": "web_snapshot",
+        "url": "https://en.wikipedia.org/wiki/Wikipedia:Statistics",
+        "retrieved_at": "2026-10-29T22:03:34.382231+00:00",
+        "paragraph_index": 4,
+        "text_sha256": "1bb9b4b07753850a93b195520aad8be0783a6d8d66793e521dfb27eb49247ab2",
+        "html_sha256": "e9b039facf42157aaa1ea9a35bebf1e12575875d417a4818af45bb104fdf71a7",
+        "attribution": "Wikipedia contributors, Wikipedia:Statistics; CC BY-SA, see source page history and licensing."
+      },
+      "text": "As of 2026, there are 838 active Wikimedia projects of a total of 1032.[3] Of these active projects, 331 are Wikipedias and 169 are Wiktionaries. The largest projects are Wikimedia Commons (150,079,879 files)[4] and Wikidata (123,816,139 items).[5]",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Wikimedia projects",
+          "fact": "active projects",
+          "answer": 838,
+          "unit": "projects",
+          "time": "2026",
+          "evidence": "As of 2026, there are 838 active Wikimedia projects of a total of 1032.[3] Of these active projects, 331 are Wikipedias and 169 are Wiktionaries. The largest projects are Wikimedia Commons (150,079,879 files)[4] and Wikidata (123,816,139 items).[5]",
+          "relationship_status": "needs_context"
+        },
+        {
+          "subject": "Wikimedia projects",
+          "fact": "total projects",
+          "answer": 1032,
+          "unit": "projects",
+          "time": "2026",
+          "evidence": "As of 2026, there are 838 active Wikimedia projects of a total of 1032.[3] Of these active projects, 331 are Wikipedias and 169 are Wiktionaries. The largest projects are Wikimedia Commons (150,079,879 files)[4] and Wikidata (123,816,139 items).[5]",
+          "relationship_status": "needs_context"
+        },
+        {
+          "subject": "active Wikimedia projects",
+          "fact": "Wikipedias",
+          "answer": 331,
+          "unit": "projects",
+          "time": "2026",
+          "evidence": "As of 2026, there are 838 active Wikimedia projects of a total of 1032.[3] Of these active projects, 331 are Wikipedias and 169 are Wiktionaries. The largest projects are Wikimedia Commons (150,079,879 files)[4] and Wikidata (123,816,139 items).[5]",
+          "relationship_status": "needs_context"
+        },
+        {
+          "subject": "active Wikimedia projects",
+          "fact": "Wiktionaries",
+          "answer": 169,
+          "unit": "projects",
+          "time": "2026",
+          "evidence": "As of 2026, there are 838 active Wikimedia projects of a total of 1032.[3] Of these active projects, 331 are Wikipedias and 169 are Wiktionaries. The largest projects are Wikimedia Commons (150,079,879 files)[4] and Wikidata (123,816,139 items).[5]",
+          "relationship_status": "needs_context"
+        },
+        {
+          "subject": "Wikimedia Commons",
+          "fact": "file count",
+          "answer": 150079879,
+          "unit": "files",
+          "time": "2026",
+          "evidence": "As of 2026, there are 838 active Wikimedia projects of a total of 1032.[3] Of these active projects, 331 are Wikipedias and 169 are Wiktionaries. The largest projects are Wikimedia Commons (150,079,879 files)[4] and Wikidata (123,816,139 items).[5]",
+          "relationship_status": "needs_context"
+        },
+        {
+          "subject": "Wikidata",
+          "fact": "item count",
+          "answer": 123816139,
+          "unit": "items",
+          "time": "2026",
+          "evidence": "As of 2026, there are 838 active Wikimedia projects of a total of 1032.[3] Of these active projects, 331 are Wikipedias and 169 are Wiktionaries. The largest projects are Wikimedia Commons (150,079,879 files)[4] and Wikidata (123,816,139 items).[5]",
+          "relationship_status": "needs_context"
+        }
+      ],
+      "extra": [],
+      "expected": 6,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "wikipedia-paragraph-5",
+      "origin": {
+        "kind": "web_snapshot",
+        "url": "https://en.wikipedia.org/wiki/Wikipedia:Statistics",
+        "retrieved_at": "2026-10-29T22:03:34.382231+00:00",
+        "paragraph_index": 5,
+        "text_sha256": "bde0eda025094eb5ef36ebe4c95f158d1a42c22038426945ae3aec706291ae45",
+        "html_sha256": "e9b039facf42157aaa1ea9a35bebf1e12575875d417a4818af45bb104fdf71a7",
+        "attribution": "Wikipedia contributors, Wikipedia:Statistics; CC BY-SA, see source page history and licensing."
+      },
+      "text": "The largest Wikipedia is the English language edition (7,256,919 articles). It is followed by the Cebuano (6,116,138 articles) and German (3,162,068 articles) editions. The Cebuano Wikipedia uses bots to create most of its articles.",
+      "parser": "quantitative-prose-v1",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "English Wikipedia",
+          "fact": "article count",
+          "answer": 7256919,
+          "unit": "articles",
+          "time": null,
+          "evidence": "The largest Wikipedia is the English language edition (7,256,919 articles). It is followed by the Cebuano (6,116,138 articles) and German (3,162,068 articles) editions. The Cebuano Wikipedia uses bots to create most of its articles.",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "Cebuano Wikipedia",
+          "fact": "article count",
+          "answer": 6116138,
+          "unit": "articles",
+          "time": null,
+          "evidence": "The largest Wikipedia is the English language edition (7,256,919 articles). It is followed by the Cebuano (6,116,138 articles) and German (3,162,068 articles) editions. The Cebuano Wikipedia uses bots to create most of its articles.",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "German Wikipedia",
+          "fact": "article count",
+          "answer": 3162068,
+          "unit": "articles",
+          "time": null,
+          "evidence": "The largest Wikipedia is the English language edition (7,256,919 articles). It is followed by the Cebuano (6,116,138 articles) and German (3,162,068 articles) editions. The Cebuano Wikipedia uses bots to create most of its articles.",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "Wikipedia",
+          "fact": "largest edition",
+          "answer": "English language edition",
+          "unit": null,
+          "time": null,
+          "evidence": "The largest Wikipedia is the English language edition (7,256,919 articles). It is followed by the Cebuano (6,116,138 articles) and German (3,162,068 articles) editions. The Cebuano Wikipedia uses bots to create most of its articles.",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [
+        {
+          "id": "row-1",
+          "subject": "articles",
+          "fact": null,
+          "answer": 7256919,
+          "unit": "articles",
+          "time": null,
+          "quotes": [
+            "The largest Wikipedia is the English language edition (7,256,919 articles)."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-2",
+          "subject": "articles",
+          "fact": null,
+          "answer": 6116138,
+          "unit": "articles",
+          "time": null,
+          "quotes": [
+            "It is followed by the Cebuano (6,116,138 articles) and German (3,162,068 articles) editions."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        },
+        {
+          "id": "row-3",
+          "subject": "articles",
+          "fact": null,
+          "answer": 3162068,
+          "unit": "articles",
+          "time": null,
+          "quotes": [
+            "It is followed by the Cebuano (6,116,138 articles) and German (3,162,068 articles) editions."
+          ],
+          "issues": [
+            {
+              "code": "association_unverified",
+              "message": "Literal evidence and valid types do not establish entity/value association. Human review is required."
+            }
+          ],
+          "review_status": "needs_review"
+        }
+      ],
+      "expected": 4,
+      "proposed": 3,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "wikipedia-paragraph-28",
+      "origin": {
+        "kind": "web_snapshot",
+        "url": "https://en.wikipedia.org/wiki/Wikipedia:Statistics",
+        "retrieved_at": "2026-10-29T22:03:34.382231+00:00",
+        "paragraph_index": 28,
+        "text_sha256": "ff6ec9639797e4108be12408a930057ed803e8571f8ecf79573b68501b73b0d9",
+        "html_sha256": "e9b039facf42157aaa1ea9a35bebf1e12575875d417a4818af45bb104fdf71a7",
+        "attribution": "Wikipedia contributors, Wikipedia:Statistics; CC BY-SA, see source page history and licensing."
+      },
+      "text": "In 2025, people from all over the world made 517 million edits to Wikimedia projects.[29] Wikipedia (in all languages) received 172 million edits[30] and the English Wikipedia 62 million edits.[31]",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "Wikimedia projects",
+          "fact": "edits",
+          "answer": 517000000,
+          "unit": "edits",
+          "time": "2025",
+          "evidence": "In 2025, people from all over the world made 517 million edits to Wikimedia projects.[29] Wikipedia (in all languages) received 172 million edits[30] and the English Wikipedia 62 million edits.[31]",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "Wikipedia (all languages)",
+          "fact": "edits",
+          "answer": 172000000,
+          "unit": "edits",
+          "time": "2025",
+          "evidence": "In 2025, people from all over the world made 517 million edits to Wikimedia projects.[29] Wikipedia (in all languages) received 172 million edits[30] and the English Wikipedia 62 million edits.[31]",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "English Wikipedia",
+          "fact": "edits",
+          "answer": 62000000,
+          "unit": "edits",
+          "time": "2025",
+          "evidence": "In 2025, people from all over the world made 517 million edits to Wikimedia projects.[29] Wikipedia (in all languages) received 172 million edits[30] and the English Wikipedia 62 million edits.[31]",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [],
+      "expected": 3,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "wikipedia-paragraph-57",
+      "origin": {
+        "kind": "web_snapshot",
+        "url": "https://en.wikipedia.org/wiki/Wikipedia:Statistics",
+        "retrieved_at": "2026-10-29T22:03:34.382231+00:00",
+        "paragraph_index": 57,
+        "text_sha256": "9982461580d62b6907bfc199e75ee8a566b8558bee5730c9cf8508438578020e",
+        "html_sha256": "e9b039facf42157aaa1ea9a35bebf1e12575875d417a4818af45bb104fdf71a7",
+        "attribution": "Wikipedia contributors, Wikipedia:Statistics; CC BY-SA, see source page history and licensing."
+      },
+      "text": "As of 2026, the English Wikipedia has around 417,000 encyclopedic biographies about women, while having over 1.6 million about men.[58]",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "English Wikipedia",
+          "fact": "approximate biographies about women",
+          "answer": 417000,
+          "unit": "biographies",
+          "time": "2026",
+          "evidence": "As of 2026, the English Wikipedia has around 417,000 encyclopedic biographies about women, while having over 1.6 million about men.[58]",
+          "relationship_status": "explicit"
+        },
+        {
+          "subject": "English Wikipedia",
+          "fact": "lower bound biographies about men",
+          "answer": 1600000,
+          "unit": "biographies",
+          "time": "2026",
+          "evidence": "As of 2026, the English Wikipedia has around 417,000 encyclopedic biographies about women, while having over 1.6 million about men.[58]",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [],
+      "expected": 2,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    },
+    {
+      "id": "wikipedia-paragraph-59",
+      "origin": {
+        "kind": "web_snapshot",
+        "url": "https://en.wikipedia.org/wiki/Wikipedia:Statistics",
+        "retrieved_at": "2026-10-29T22:03:34.382231+00:00",
+        "paragraph_index": 59,
+        "text_sha256": "32abaa619ac6003af5e3cd3c7d2cd0dce27eb84640bc1f7461ecf734ad969eba",
+        "html_sha256": "e9b039facf42157aaa1ea9a35bebf1e12575875d417a4818af45bb104fdf71a7",
+        "attribution": "Wikipedia contributors, Wikipedia:Statistics; CC BY-SA, see source page history and licensing."
+      },
+      "text": "As of 2026, the most active wikiproject (non-related to Wikipedia maintenance) by number of changes to all its pages in the last 365 days is Women in Red.[60]",
+      "parser": "prose-facts-v2",
+      "matched": [],
+      "missed": [
+        {
+          "subject": "wikiproject excluding maintenance",
+          "fact": "most active by changes in last 365 days",
+          "answer": "Women in Red",
+          "unit": null,
+          "time": "2026",
+          "evidence": "As of 2026, the most active wikiproject (non-related to Wikipedia maintenance) by number of changes to all its pages in the last 365 days is Women in Red.[60]",
+          "relationship_status": "explicit"
+        }
+      ],
+      "extra": [],
+      "expected": 1,
+      "proposed": 0,
+      "strict_matches": 0,
+      "unresolved": []
+    }
+  ]
+}

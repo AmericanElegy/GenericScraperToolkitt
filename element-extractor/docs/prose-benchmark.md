@@ -1,0 +1,11 @@
+# Paragraph evaluation starter
+
+The answer key has 30 fictional cases and five captured paragraphs from Wikipedia:Statistics. All expected answers are assistant drafts awaiting human spot checks. The readable key is [prose-answer-key.md](prose-answer-key.md); the versioned JSON is `test/fixtures/prose-benchmark/starter.json`. Editing a draft does not train or change the scraper.
+
+Run `npm run check:prose-benchmark -- report.json` from the toolkit directory. This rebuilds and runs the actual automatic parser against retained text, offline. The report records every proposed, matched, missing and extra claim. No AI, external source fetching, approval or Drive writes occur. The command exits successfully when evaluation completes, even when the parser misses facts; it is a measurement tool rather than a passing-quality gate.
+
+Comparison uses subject, fact, typed answer, unit and time, plus a literal supporting quotation. Existing column names are adapted without inventing relationships or dates. Exact wording differences count as mismatches, and repeated claims consume separate matches. Therefore the draft precision/recall values measure strict agreement with this draft vocabulary, not general extraction accuracy. Qualifiers such as approximate and projected are retained in the expected fact description; future canonical schema work should make them explicit fields. Unresolved pronouns and negative statements are included as cases where a resolved positive claim is not expected.
+
+The saved baseline is `test/fixtures/prose-benchmark/baseline.json`. Start by spot-checking a few expected answers, then define versioned vocabulary and qualifier fields before changing extraction. Improve comparisons and pronoun/date rules against both synthetic and real cases; retain corrections, unsupported cases and old parser replay tests. Do not tune solely to this small set or treat number detection as semantic correctness.
+
+The page is stored as extracted paragraph snapshots, with retrieval timestamps, paragraph indices, SHA-256 hashes and attribution. The checker never refetches it. Counts are assertions in that captured page, not independently verified current Wikipedia totals. Other pages and held-out cases should be added before making any reliability claim.
