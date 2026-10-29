@@ -34,3 +34,7 @@ Bounds: ten source entries (including extra parts), twenty settings, 3.5 MB of w
 - `npm run release:check` also runs all Workers regressions, the existing extraction/renderer/feedback browser workflows and a deployment dry run. It does not deploy or call a model.
 
 An optional live check is available with `npm run test:live-workspace`. Its default public sources are W3Schools, DCI and Wikipedia. It uses a temporary local folder, prepares unapproved jobs and saves a JSON receipt; it does not test the user’s actual Google Drive synchronization or establish overall extraction accuracy. Set `LIVE_WORKSPACE_OUTPUT_DIR` to retain the report and screenshot.
+
+## Finding sources
+
+Use **Find a source** to search URLs and captured table names without changing their order. **Show** narrows the queue to sources needing attention or selection, prepared sources with pending or approved records, or queued sources. **Clear filters** restores the full list. Filters affect only queue visibility: the active editor stays open, batch fetching still processes all queued sources, and compatible exports still include all eligible approved records. The totals always summarize the full workspace. Search and filters are temporary view preferences and are not saved into snapshots.

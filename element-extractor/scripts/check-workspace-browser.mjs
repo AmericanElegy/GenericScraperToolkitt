@@ -19,6 +19,17 @@ try{
  await browser.evaluate('document.getElementById("recipe-name").value="Shared counts";document.getElementById("save-recipe").click()');await waitFor(()=>browser.evaluate('document.getElementById("message").textContent.startsWith("Settings saved")'));
  await browser.evaluate('document.getElementById("batch-urls").value="https://data.example.org/changed\\nhttps://data.example.org/blocked";document.getElementById("add-urls").click()');await waitFor(()=>browser.evaluate('document.querySelectorAll("#sources tr").length===4'));await browser.evaluate('document.getElementById("run-batch").click()');await waitFor(()=>browser.evaluate('document.getElementById("message").textContent.startsWith("Batch finished")'));
  assert.match(await browser.evaluate('document.querySelectorAll("#sources tr")[2].textContent'),/Choose content/);assert.match(await browser.evaluate('document.querySelectorAll("#sources tr")[3].textContent'),/Needs attention/);assert.equal(calls.filter(p=>p==='/blocked').length,1);
+ // Queue filters change visibility only, retain selected editor, and make empty results clear.
+ await browser.evaluate('document.getElementById("source-filter").value="attention";document.getElementById("source-filter").dispatchEvent(new Event("change"))');
+ assert.equal(await browser.evaluate('document.querySelectorAll("#sources tr").length'),2);
+ await browser.evaluate('document.getElementById("source-search").value="BLOCKED";document.getElementById("source-search").dispatchEvent(new Event("input"))');
+ assert.equal(await browser.evaluate('document.querySelectorAll("#sources tr").length'),1);
+ assert.match(await browser.evaluate('document.getElementById("sources").textContent'),/blocked/);
+ await browser.evaluate('document.getElementById("source-search").value="no-such-source";document.getElementById("source-search").dispatchEvent(new Event("input"))');
+ assert.match(await browser.evaluate('document.getElementById("source-results").textContent'),/No matches/);
+ assert.equal(await browser.evaluate('document.getElementById("editor").hidden'),false);
+ await browser.evaluate('document.getElementById("clear-source-filters").click()');
+ assert.equal(await browser.evaluate('document.querySelectorAll("#sources tr").length'),4);
  // Open the real lab popup and review there; its source-locked message returns to the parent workspace.
  await browser.evaluate('window.originalOpen=window.open;window.open=(...args)=>(window.reviewWindow=window.originalOpen(...args));document.querySelector("#sources tr button").click()');
  await browser.send('Runtime.evaluate',{expression:'document.getElementById("review-source").click()',userGesture:true});
@@ -26,6 +37,14 @@ try{
  await browser.evaluate('(()=>{const d=window.reviewWindow.document;d.getElementById("select-eligible").click();d.getElementById("batch-reviewer").value="Workspace browser test";d.getElementById("batch-note").value="Compared both fictional table rows.";d.getElementById("batch-confirm").checked=true;d.getElementById("batch-confirm").dispatchEvent(new window.reviewWindow.Event("change"));d.getElementById("approve-batch").click();})()');
  await waitFor(()=>browser.evaluate('document.querySelector("#sources tr").textContent.includes("2 approved")'));
  assert.match(await browser.evaluate('document.getElementById("export-summary").textContent'),/2 approved records/);
+ await browser.evaluate('document.getElementById("source-filter").value="approved";document.getElementById("source-filter").dispatchEvent(new Event("change"))');
+ assert.equal(await browser.evaluate('document.querySelectorAll("#sources tr").length'),1);
+ await browser.evaluate('document.getElementById("source-filter").value="pending";document.getElementById("source-filter").dispatchEvent(new Event("change"))');
+ assert.equal(await browser.evaluate('document.querySelectorAll("#sources tr").length'),1);
+ assert.match(await browser.evaluate('document.getElementById("sources").textContent'),/data.example.org\/b/);
+ assert.match(await browser.evaluate('document.getElementById("export-summary").textContent'),/2 approved records/);
+ await browser.evaluate('document.getElementById("clear-source-filters").click()');
+
  await browser.evaluate('document.getElementById("export-csv").click()');await waitFor(async()=> (await readdir(dir)).includes('workspace-approved.csv'));
  const csv=await readFile(join(dir,'workspace-approved.csv'),'utf8');assert.equal(csv.trim().split('\r\n').length,3);assert.match(csv,/data.example.org\/a/);assert.doesNotMatch(csv,/data.example.org\/b/);
  await browser.evaluate('document.getElementById("download-workspace").click()');await waitFor(async()=> (await readdir(dir)).includes('toolkit-workspace.json'));
