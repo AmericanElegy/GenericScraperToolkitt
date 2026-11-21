@@ -7,7 +7,7 @@
     "dev": "node scripts/dev.mjs",
     "deploy": "wrangler deploy",
     "check": "wrangler deploy --dry-run",
-    "dev:wrangler": "wrangler dev",
+    "dev:wrangler": "wrangler dev --env local",
     "test:live": "node scripts/verify-live.mjs",
     "build": "node scripts/build.mjs",
     "pretest": "npm run build",
@@ -35,7 +35,9 @@
     "benchmark:live": "node scripts/check-live-benchmark.mjs",
     "benchmark:capture": "node scripts/capture-benchmark-sources.mjs",
     "benchmark:mixed": "npm run build && node scripts/evaluate-mixed-document.mjs",
-    "benchmark:report": "node scripts/report-extraction-benchmark.mjs"
+    "benchmark:report": "node scripts/report-extraction-benchmark.mjs",
+    "ai:compare": "npm run build && node scripts/compare-ai.mjs",
+    "verify:source": "node scripts/verify-release-source.mjs"
   },
   "repository": {
     "type": "git",
@@ -58,9 +60,13 @@
   "dependencies": {
     "entities": "8.1.0",
     "fflate": "0.8.3",
+    "jose": "6.2.18",
     "mammoth": "1.13.0",
     "papaparse": "5.7.1",
     "pdfjs-dist": "6.5.438",
     "read-excel-file": "9.3.20"
+  },
+  "overrides": {
+    "undici": "7.30.1"
   }
 }

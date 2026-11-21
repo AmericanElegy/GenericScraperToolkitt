@@ -1,3 +1,4 @@
+import {TASK_VERSION,validateTask,taskResponse} from './requested-task.js';
 import {evidenceContext} from './evidence-context.js';
 import {QUANTITY_VERSION,QUANTITY_SCHEMA,hasRichQuantities,extractQuantities} from './quantity-rules.js';
 import {selectCapturedTable,validateTableSelection} from './table-selection.js';
@@ -169,6 +170,7 @@ function applyCorrection(packet, response, change) {
   return next;
 }
 function originalResponse(job) {
+  if(job.parser_version===TASK_VERSION)return taskResponse(job);
   if (job.example_id !== 'custom-text') return examples[job.example_id].scripted_response;
   if ([MAPPING_VERSION,LEGACY_MAPPING_VERSION].includes(job.parser_version)) return extractMappedTable(job);
   if(job.parser_version===RANKING_VERSION)return extractRanking(job.packet);
@@ -210,10 +212,11 @@ function publicDocument(info, job) {
     notice: 'Only the selected section is parsed/reviewed/exported as current records. The full page is retained; other sections are not implicitly approved. Switching sections starts a new review session.' };
 }
 async function checkJob(job) {
-  if (!only(job, ['example_id', 'packet', 'cache_entry', 'events', 'revisions', 'parser_version', 'document', 'mapping', 'retrieval']) ||
+  if (!only(job, ['example_id', 'packet', 'cache_entry', 'events', 'revisions', 'parser_version', 'document', 'mapping', 'retrieval', 'task', 'proposal']) ||
       !Array.isArray(job.events) || job.events.length > 64 ||
       (job.revisions !== undefined && (!Array.isArray(job.revisions) || job.revisions.length > 8)))
     fail('invalid_lab_job', 'Invalid session. Maximum 64 review events and 8 candidate revisions.');
+  if(job.parser_version===TASK_VERSION){validateTask(job.task);taskResponse(job);}else if(job.task!==undefined||job.proposal!==undefined)fail('invalid_task','Task metadata requires a requested-column session.');
   if (job.mapping !== undefined && ![MAPPING_VERSION,LEGACY_MAPPING_VERSION].includes(job.parser_version)) fail('column_mapping', 'Recorded column mappings require a mapped table session.');
   if(job.retrieval!==undefined){
     const r=job.retrieval;
@@ -268,13 +271,13 @@ async function view(job, result) {
       notice: 'Suggested from explicit source columns. No code changes needed. Remapping starts a new unapproved review; save the current session first.',
     } : {
       editable:false, columns:job.packet.schema.fields.map(f => ({name:f.name,kind:f.type === 'string'?'text': /percent/.test(f.name)?'percent':/dollars/.test(f.name)?'dollars':'number',source_label:f.name.replaceAll('_',' '),samples:records.slice(0,3).map(r => r.fields[f.name]?.value)})),
-      skipped_rows:[], notice:'Columns selected by the supported extraction method; inspect their source evidence.',
+      skipped_rows:[], notice:job.task?'Requested output columns. Proposals and manually added records still require evidence and review.':'Columns selected by the supported extraction method; inspect their source evidence.',
     },
     extraction: {
       unmatched_passages: unmatched.length,
       mapping_unresolved: records.length === 0 && tableLike,
       message: records.length === 0
-        ? tableLike ? 'Table-like content detected, but column mapping is unresolved. No records extracted. Keep the complete grouped headings with the rows; manual two-column mode cannot represent this table.' : 'No supported relationships found. No records extracted; source text is retained.'
+        ? job.task?'Requested columns are ready. No candidate records have been supplied for this task. The retained source is not considered extracted.':tableLike ? 'Table-like content detected, but column mapping is unresolved. No records extracted. Keep the complete grouped headings with the rows; manual two-column mode cannot represent this table.' : 'No supported relationships found. No records extracted; source text is retained.'
         : records.length + ' candidate records extracted. ' + (unmatched.length ? unmatched.length + (unmatched.length === 1 ? ' passage produced' : ' passages produced') + ' no records; inspect unmatched source text for omissions.' : 'Inspect the column mapping and evidence before approval. Extraction may still be incomplete.') + (mapped?.plan.skipped.length ? ' ' + mapped.plan.skipped.length + ' malformed rows were not mapped; inspect the column preview.' : ''),
     },
     ...(info ? { document: publicDocument(info, job) } : {}),
@@ -290,7 +293,7 @@ async function view(job, result) {
     interpretation: {
       method: job.parser_version || 'fictional-scripted-example',
       columns: job.packet.schema.fields.map(f => f.name),
-      explanation: meaning?meaning.explanation:mapped ? 'Delimited table: suggested columns from the header and literal cell formats. Identifiers stay text; units are not converted. Malformed rows are listed in the mapping preview. Review the row/header association before approval.' : info
+      explanation: job.task?'Task: '+job.task.description+'. Diagram relevance: '+job.task.diagram_relevance+'. '+(job.proposal?'AI proposals from '+job.proposal.provider+' / '+job.proposal.model+'. Quotations are checked; semantic correctness still requires your review.':'No AI call was made. Add records manually or import a provider proposal.'):meaning?meaning.explanation:mapped ? 'Delimited table: suggested columns from the header and literal cell formats. Identifiers stay text; units are not converted. Malformed rows are listed in the mapping preview. Review the row/header association before approval.' : info
         ? 'Full page retained. Current section: ' + info.selected.label + '. Other sections remain selectable and are not included in current approvals or records. Review row/header evidence and original-page offsets.'
         : [WAGE_VERSION, LEGACY_WAGE_VERSION].includes(job.parser_version)
         ? 'Pasted wage table: the header defines two employment percentages followed by two hourly wages in dollars. National = United States; local = ' + wageHeader(job.packet).local + '. Dollar amounts stay numeric, with currency and hourly basis in the column names. Inspect row and header evidence before approval.'
@@ -299,7 +302,7 @@ async function view(job, result) {
         : 'Limited name/number rules or prewritten examples. All candidates require review.',
     },
     notice:
-      "Rule-based or scripted candidates, with optional human corrections. No AI inference. Session-only, self-declared review; not an authenticated audit service.",
+      job.proposal?'AI proposals, independently checked against retained source evidence. All records require human review; provider metadata is descriptive, not authenticated provenance.':'Rule-based, scripted or manually requested candidates. Session-only, self-declared review; not an authenticated audit service.',
   };
 }
 export async function labFetch(request) {
@@ -355,16 +358,20 @@ export async function labFetch(request) {
     if (url.pathname === "/api/interpretation/start") {
       let packet, response, parserVersion, document, mapping;
       if (body?.example_id === 'custom-text') {
-        if (!only(body, ['example_id', 'source', 'schema', 'mode', 'dataset_id', 'mapping', 'retrieval']) ||
-            (body.mode !== undefined && !['auto', 'pair'].includes(body.mode)))
-          fail('invalid_input', 'Choose automatic suggestions or manual pair columns.');
+        if (!only(body, ['example_id', 'source', 'schema', 'mode', 'dataset_id', 'mapping', 'retrieval', 'task', 'proposal']) ||
+            (body.mode !== undefined && !['auto', 'pair', 'requested'].includes(body.mode)))
+          fail('invalid_input', 'Choose automatic suggestions, manual pair columns or requested columns.');
+        if(body.mode!=='requested'&&(body.task!==undefined||body.proposal!==undefined))fail('invalid_task','Task metadata requires requested-column mode.');
         if (body.mapping !== undefined && (body.mode !== 'auto' || body.dataset_id !== undefined)) fail('column_mapping', 'Column mapping requires automatic mode on one pasted table.');
         if (body.mode === 'auto' && body.schema !== undefined)
           fail('invalid_input', 'Automatic suggestions choose their own columns. Use manual mode to supply columns.');
         const columns = body.mode === 'auto' ? detectColumns(body.source?.text?.replace(/\r\n?/g, '\n'),MAPPING_VERSION,body.retrieval?.content_kind==='table') : null;
         if (body.mapping !== undefined && !columns) fail('column_mapping', 'No supported delimited header found.');
         const ranking=body.mode==='auto'?rankingPlan(body.source?.text?.replace(/\r\n?/g,'\n')):null;
-        if(ranking&&body.mapping===undefined&&body.dataset_id===undefined){
+        if(body.mode==='requested'){
+          validateTask(body.task);if(body.dataset_id!==undefined||body.mapping!==undefined)fail('invalid_task','Start requested columns from one selected source section.');
+          packet=await createPacket({source:body.source,schema:body.schema});parserVersion=TASK_VERSION;
+        }else if(ranking&&body.mapping===undefined&&body.dataset_id===undefined){
           packet=await createPacket({source:body.source,schema:ranking.schema});parserVersion=RANKING_VERSION;
         } else if (columns && body.dataset_id === undefined) {
           const mapped = mappedSchema(columns, body.mapping);
@@ -390,7 +397,7 @@ export async function labFetch(request) {
             parserVersion = WAGE_VERSION;
           }
         }
-        response = originalResponse({ example_id: 'custom-text', parser_version: parserVersion, packet, ...(mapping ? {mapping} : {}), ...(body.retrieval?{retrieval:body.retrieval}:{}) });
+        response = originalResponse({ example_id: 'custom-text', parser_version: parserVersion, packet, ...(mapping ? {mapping} : {}), ...(body.retrieval?{retrieval:body.retrieval}:{}),...(body.mode==='requested'?{task:body.task,...(body.proposal?{proposal:body.proposal}:{})}:{}) });
       } else {
         if (!only(body, ['example_id']) || !Object.hasOwn(examples, body.example_id))
           fail('unknown_example', 'Choose an example or paste your own text.');
@@ -411,6 +418,7 @@ export async function labFetch(request) {
         revisions: [],
         ...(document ? { document } : {}),
         ...(mapping ? {mapping} : {}),
+        ...(body.mode==='requested'?{task:body.task,...(body.proposal?{proposal:body.proposal}:{})}:{}),
         ...(body.retrieval ? {retrieval:document?{...body.retrieval,snapshot_hash:packet.source.text_hash}:body.retrieval} : {}),
         ...(body.example_id === "custom-text" ? { parser_version: parserVersion } : {}),
       };
@@ -510,6 +518,8 @@ export async function labFetch(request) {
     if(body.job.retrieval)exported.json.source_retrieval={...body.job.retrieval,notice:'Descriptive session metadata, not authenticated source provenance. Snapshot hash is revalidated.'};
     if(body.job.parser_version===RANKING_VERSION)exported.json.interpretation_context=rankingMeaning(body.job.packet);
     if([TEXT_FACTS_VERSION,TEXT_FACTS_V2].includes(body.job.parser_version))exported.json.interpretation_context=textFactMeaning();
+    if(body.job.task)exported.json.requested_task=body.job.task;
+    if(body.job.proposal)exported.json.ai_provider={provider:body.job.proposal.provider,model:body.job.proposal.model,source_hash:body.job.proposal.source_hash};
     exported.json.method = body.job.parser_version || 'fictional-scripted-example';
     exported.json.notice = 'Limited rules or scripted examples, with optional human corrections. No AI inference. Original automated findings are retained separately from human review.';
     const prefix = body.diagnostic

@@ -2,7 +2,7 @@
 
 **[Start here: links, downloads and PowerShell launch commands](START-HERE.md).**
 
-The default page is now **Add source → Review/edit table → Download**, with website links, pasted text, Excel `.xlsx`, CSV, PDF and Word `.docx` in one input area. Technical and secondary tools live under Advanced. [Workbench behavior, format limits and verification](docs/operator-workbench.md). The workbench and source-coverage safeguards were deployed to the existing Worker on November 21, 2026. It is a personal operator tool; Cloudflare Access and task-directed AI evaluation are being completed under the [personal workbench plan](docs/personal-workbench-plan.md).
+The default page is now **Add source → Review/edit table → Download**, with website links, pasted text, Excel `.xlsx`, CSV, PDF and Word `.docx` in one input area. Technical and secondary tools live under Advanced. [Workbench behavior, format limits and verification](docs/operator-workbench.md). The workbench and source-coverage safeguards were deployed to the existing Worker on November 21, 2026. It is a personal operator tool; Cloudflare Access restricts the hosted Worker to James. Requested columns and local AI proposal review are available; see the [personal workbench plan](docs/personal-workbench-plan.md).
 
 The original website table explorer is retained at `/tables`; the Interpretation Lab and batch workspace retain their existing routes. The sections below describe those preserved capabilities.
 

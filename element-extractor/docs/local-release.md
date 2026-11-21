@@ -35,7 +35,7 @@ A live-source check (`npm.cmd run test:live`) is separate and requires Wikipedia
 
 ## Exact boundaries
 
-This is a local, trusted-source first release, not an unrestricted commercial service. It uses limited rules and explicitly supported pasted-table headers, not general natural-language understanding. Definitions, arbitrary tables/units, OCR, video transcripts, JavaScript-rendered scraping, anti-bot bypass, accounts, billing, scheduled jobs and paid inference are not implemented. Unsupported content is retained/explained rather than promised as extracted.
+This is a local, trusted-source first release, not an unrestricted commercial service. It uses limited rules and explicitly supported pasted-table headers, not general natural-language understanding. Definitions, arbitrary tables/units, OCR, video transcripts, unrestricted JavaScript-rendered scraping, anti-bot bypass, customer accounts, billing and scheduled jobs are not implemented. Optional paid evaluation runs locally only under an explicit bounded authorization; the hosted Worker has no provider keys or paid generation endpoint. Unsupported content is retained/explained rather than promised as extracted.
 
 Reviewers are self-declared. Evidence and journals are independently revalidated but do not constitute authenticated customer approval or tamper-proof storage. A person controlling a complete client/session file can construct a new self-consistent session. No automatic approval is claimed.
 

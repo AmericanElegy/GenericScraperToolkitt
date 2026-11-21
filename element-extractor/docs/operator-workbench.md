@@ -1,6 +1,6 @@
 # Operator workbench
 
-Use `npm.cmd ci`, then `npm.cmd run dev` from `element-extractor`. Open **http://127.0.0.1:8787/**. The Windows launcher now opens this same workbench on its chosen port. The same workbench is also deployed on the existing Worker. Private access and a separately approved AI evaluation are tracked in [the personal workbench plan](personal-workbench-plan.md). There are no customer accounts or billing features.
+Use `npm.cmd ci`, then `npm.cmd run dev` from `element-extractor`. Open **http://127.0.0.1:8787/**. The Windows launcher now opens this same workbench on its chosen port. The same workbench is also deployed on the existing Worker. Cloudflare Access restricts every hosted route to James. The Worker independently verifies the signed Access token and owner identity. Local loopback use stays available. The bounded AI evaluation is recorded in [the comparison report](ai-evaluation.md). There are no customer accounts or billing features.
 
 ## Add source → Review/edit table → Download
 
@@ -34,6 +34,10 @@ Single-review session files still work, but do not contain the full-source previ
 Limits: 10 MiB input, 32 MiB expanded Office archive / 3,000 parts, 500,000 characters of captured source, 100 PDF pages, 5,000 table data rows and 100 source columns. Excel dimensions beyond these bounds are rejected before parsing. Reviews retain the existing small row/column batches and evidence limits. A table or text block that cannot enter review is explicitly listed; full parsed content remains in captured-source JSON after a successful import. A rejected file replaces neither the existing review nor captured source. Partial PDF page failures are individually listed. No claim of complete visual or semantic extraction is made.
 
 ## Verification
+
+After opening a source, describe the task and edit columns using `name:text:required` or `name:number`, one per line. Record diagram relevance for this task. Excluding diagrams requires a reason and never clears unread-content warnings. **Prepare requested columns** opens an empty review when no interpretation is supplied. Add grounded records manually or open a local AI proposal. All rows remain unapproved until reviewed. See [comparison results](ai-evaluation.md). Save the original full-source backup before importing a proposal containing only selected text.
+
+`npm.cmd run verify:source` requires a clean committed repository. It installs locked dependencies from a tracked-source archive without copying credentials, checks a byte-identical Worker build and runs regression tests. Receipt: `.wrangler/source-verification.json`. Protected hosted benchmark requests report `access_required` rather than treating a login page as a parsing failure.
 
 - `npm.cmd run check:workbench-browser`: real installed Chromium/Edge/Chrome; exercises all six source types, multi-sheet switching, file warnings, exact multiline CSV retention, approved CSV protection, saved-session restore, unsupported files and malformed CSV. Captures desktop/mobile screenshots under ignored `.wrangler/`.
 - `npm.cmd test`: existing extraction, source safeguards, evidence, mapping, review, feedback and batch regressions.

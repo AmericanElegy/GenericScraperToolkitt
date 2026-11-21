@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {readFile,mkdtemp,readdir,rm,writeFile,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -115,5 +116,16 @@ try {
  await upload('old.doc',Buffer.from('invalid').toString('base64'));assert.match(await browser.evaluate('document.getElementById("status").textContent'),/Unsupported file/);
  assert.match(await browser.evaluate('document.getElementById("candidate-rows").textContent'),/12.6/);
  await upload('broken.csv',Buffer.from('Name,Score\nAlpha,1,unexpected').toString('base64'));assert.match(await browser.evaluate('document.getElementById("status").textContent'),/different cell counts/);console.log('PASS unsupported files and malformed CSV preserve previous review');
+ await browser.evaluate(`document.getElementById('task-description').value='Extract the named item and explicit amount';document.getElementById('task-columns').value='item:text:required\\namount:number';document.getElementById('task-diagrams').value='supplementary';document.getElementById('start-task').click()`);
+ await wait('document.getElementById("status").textContent.includes("Requested columns are ready")&&!document.getElementById("load").disabled');
+ assert.match(await browser.evaluate('document.getElementById("counts").textContent'),/0 approved/);
+ const source={text:'Alpha has 5 units.',url:null},evidence=[{passage_id:'p001',quote:source.text,occurrence:0}];
+ const proposal={format:'toolkit-ai-proposal-v1',source,schema:{fields:[{name:'item',type:'string',required:true},{name:'amount',type:'number',required:true}]},task:{description:'Extract the named item and explicit amount',diagram_relevance:'supplementary',relevance_note:'Text-only test'},proposal:{provider:'anthropic',model:'offline-browser-test',source_hash:createHash('sha256').update(source.text).digest('hex'),candidates:{version:'candidates-v1',records:[{id:'row-1',fields:{item:{value:'Alpha',evidence},amount:{value:5,evidence}},issues:[]}],outcomes:[{passage_id:'p001',status:'records',record_ids:['row-1'],reason:'One literal record'}]}}};
+ await browser.evaluate(`{const dt=new DataTransfer();dt.items.add(new File([${JSON.stringify(JSON.stringify(proposal))}],'proposal.json'));document.getElementById('ai-proposal-file').files=dt.files;document.getElementById('open-ai-proposal').click();}`);
+ await wait('document.getElementById("status").textContent.includes("AI proposal opened")&&!document.getElementById("load").disabled');
+ assert.match(await browser.evaluate('document.getElementById("candidate-rows").textContent'),/Alpha/);
+ assert.match(await browser.evaluate('document.getElementById("counts").textContent'),/0 approved/);
+ assert.equal(await browser.evaluate('document.getElementById("task-description").value'),proposal.task.description);
+ console.log('PASS requested columns and independently validated unapproved offline AI proposal');
  assert.deepEqual(errors,[]);console.log('PASS no uncaught browser exceptions');
 }finally{await browser?.close();await mf.dispose();await rm(dir,{recursive:true,force:true});}

@@ -12,7 +12,7 @@ Bookmark this page: https://github.com/AmericanElegy/GenericScraperToolkitt/blob
 - [Interpretation Lab and column mapping guide](docs/interpretation-lab.md).
 - [Local JavaScript renderer guide](docs/javascript-rendering.md).
 - [Local release and verification guide](docs/local-release.md).
-- [Hosted operator workbench](https://genericscrapertoolkit.jamesjustice95.workers.dev/) — deployed workbench, file import, source coverage and portable backups. Private access is being completed under the [personal workbench plan](docs/personal-workbench-plan.md).
+- [Hosted operator workbench](https://genericscrapertoolkit.jamesjustice95.workers.dev/) — deployed workbench, file import, source coverage and portable backups. Cloudflare Access sign-in is required. See the [personal workbench plan](docs/personal-workbench-plan.md).
 
 ## Launch the latest copy on Windows
 

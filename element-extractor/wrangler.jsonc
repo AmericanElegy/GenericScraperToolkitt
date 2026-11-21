@@ -11,5 +11,18 @@
       ],
       "fallthrough": true
     }
-  ]
+  ],
+  "vars": {
+    "ACCESS_REQUIRED": "true",
+    "ACCESS_ISSUER": "https://fantasy-brief-pages.cloudflareaccess.com",
+    "ACCESS_AUD": "93e99b62b26eed230f8f2f1550ac74123fc30a2da1c7590e865d24060fa50eda",
+    "ACCESS_OWNER_HASH": "6fedd846048a50b643a76a174d20c206e06b90ec764f1b2cd0bf8c52028bcfeb"
+  },
+  "env": {
+    "local": {
+      "vars": {
+        "ACCESS_REQUIRED": "false"
+      }
+    }
+  }
 }

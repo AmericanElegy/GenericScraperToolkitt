@@ -21,10 +21,12 @@ James authorized steps 1–5 on November 21, 2026: reproducible release, private
 
 ## Progress
 
-- Planning: complete; $5 evaluation cap and Cloudflare Access selected.
-- Baseline benchmarks: 85 regression tests passed before this phase. Structured references match all 47 rows / 277 cells, including deployed URL intake. Chemistry capture retains all 46 original paragraphs; deterministic interpretation yields no target records.
-- Release housekeeping: in progress.
-- Cloudflare Access: pending dashboard/account check.
-- Task-directed extraction: pending implementation.
-- AI comparison: pending adapters, safeguards and OpenAI credential availability.
-- End-to-end personal readiness: pending final checks.
+- Baseline committed and pushed as `1a0b106`; final implementation remains on the same development branch.
+- Cloudflare Access configured for the existing Worker, production and previews, James's single email only. All routes additionally verify signed Access tokens and owner identity. Unauthenticated page, API and asset requests redirect to Access.
+- Task description, editable columns and diagram relevance are retained in requested reviews and sessions. Preparing columns makes no paid call. Imported provider proposals remain unapproved and independently validated.
+- Both providers evaluated on the three structured tables and two chemistry tasks. See [results and spending](ai-evaluation.md). No further evaluation calls are needed.
+- Final release gate, tracked-source reproduction and deployment write machine receipts under ignored `.wrangler/`; inspect these receipts rather than treating this plan as proof of a deployment.
+
+## Remaining suggestions after this release
+
+Use the tool on several real personal jobs and keep original sources plus portable backups. Expand test cases when a real failure appears, particularly conflicting facts, ambiguous associations and unusual document layouts. Add OCR or visual interpretation only when an actual task needs it. Hosted one-click AI generation and ongoing provider spending require a separate decision; this evaluation does not enable them. No commercial launch, customer management or billing work is needed for personal use.

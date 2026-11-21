@@ -4,11 +4,11 @@ import {scoreTable}from '../src/interpretation/extraction-benchmark.js';
 const manifest=JSON.parse(await readFile('test/fixtures/extraction-benchmark/expected.json','utf8'));
 const base=process.env.BENCHMARK_BASE_URL||'https://genericscrapertoolkit.jamesjustice95.workers.dev';
 await mkdir('.wrangler/benchmarks/live',{recursive:true});const results=[];
-async function post(path,body){const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});return {status:r.status,ok:r.ok,value:await r.json()};}
+async function post(path,body){const r=await fetch(base+path,{method:'POST',redirect:'manual',headers:{'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(45000)});if(r.status===302&&r.headers.get('location')?.includes('cloudflareaccess.com'))return {status:r.status,ok:false,value:{code:'access_required',error:'Cloudflare Access sign-in is required; this is an access barrier, not an extraction failure.'}};return {status:r.status,ok:r.ok,value:await r.json()};}
 for(const c of manifest.cases){
  try{
   const response=await post('/api/interpretation/fetch',{url:c.url});await writeFile('.wrangler/benchmarks/live/'+c.id+'.json',JSON.stringify(response,null,2)+'\n');
-  if(!response.ok){results.push({id:c.id,status:'fetch_failed',http_status:response.status,message:response.value.error,code:response.value.code});continue;}
+  if(!response.ok){results.push({id:c.id,status:response.value.code==='access_required'?'access_required':'fetch_failed',http_status:response.status,message:response.value.error,code:response.value.code});continue;}
   const f=response.value,parts=f.datasets.filter(d=>d.kind==='table'&&(c.id==='bls'?d.text.includes('Major occupational group'):JSON.stringify(d.table_preview?.headers)===JSON.stringify(c.headers)));
   if(!parts.length){results.push({id:c.id,status:'target_not_imported',issues:f.issues});continue;}
   const records=[];

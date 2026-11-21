@@ -72,6 +72,7 @@
     return blockers(row).length > 0;
   }
   function controls() {
+    for(const id of ['task-template','task-description','task-columns','task-diagrams','task-relevance-note','start-task','ai-proposal-file','open-ai-proposal'])if($(id))$(id).disabled=state.busy||!state.view;
     for(const id of ['source-file','import-file','coverage-reviewed','coverage-exclude','coverage-reset','source-part','coverage-note','save-workbench','restore-workbench','workbench-backup'])if($(id))$(id).disabled=state.busy||(id==='coverage-reviewed'&&!!sourceAudit?.coverage.find(p=>p.id===$('source-part')?.value)?.error);
     $("fetch-source").disabled=state.busy;
     const chosen=chosenRetrieved();
@@ -395,6 +396,7 @@
   }
   function render() {
     if (!state.view) return;
+    if($('task-description')&&state.view.job.task){const task=state.view.job.task;$('task-description').value=task.description;$('task-diagrams').value=task.diagram_relevance;$('task-relevance-note').value=task.relevance_note;$('task-columns').value=state.view.job.packet.schema.fields.map(f=>f.name+':'+(f.type==='string'?'text':'number')+(f.required?':required':'')).join('\n');}
     if(state.view.job.retrieval?.file)showFileReport(state.view.job.retrieval.file,state.view.job.retrieval.retrieved_at===state.retrieved?.retrieved_at);
     $("workspace-link-state").hidden=!workspaceToken;
     if(workspaceToken)$("workspace-link-state").textContent=!window.opener||window.opener.closed?"The workspace window is closed. Drive review saving still works; reopen the workspace for combined exports.":workspacePacket===state.view.job.packet.hash?"Linked to the batch workspace. Reviewed changes return there while both tabs stay open.":"This review is separate from the linked source. Open a source from the workspace to link a review again.";
@@ -671,6 +673,26 @@
     if(sourceAudit)renderCoverage();
   }
   if($("import-file")) {
+    $('task-template').onchange=()=>{
+      if($('task-template').value==='materials'){$('task-description').value='List the explicitly named materials in the Materials section. Exclude procedure steps and inferred additions.';$('task-columns').value='material:text:required';}
+      if($('task-template').value==='quantities'){$('task-description').value='Extract explicit amounts and durations, with the named subject, literal units, and any approximation or range. Do not invent missing values.';$('task-columns').value='subject:text:required\namount:number\nunit:text\nqualifier:text';}
+    };
+    function taskInput(){return {description:$('task-description').value.trim(),diagram_relevance:$('task-diagrams').value,relevance_note:$('task-relevance-note').value.trim()};}
+    $('start-task').onclick=()=>perform(async()=>{
+      if(!state.view)throw Error('Open a source selection first.');
+      const fields=$('task-columns').value.split('\n').map(s=>s.trim()).filter(Boolean).map(line=>{const [name,type,required,...extra]=line.split(':').map(s=>s.trim());if(extra.length||!['text','number'].includes(type)||required&&required!=='required')throw Error('Use name:text or name:number, optionally ending in :required.');return {name,type:type==='text'?'string':'number',required:required==='required',...(type==='number'?{number_format:'en-US-grouped'}:{})};});
+      const prior=state.view,response=await request('/api/interpretation/start',{example_id:'custom-text',mode:'requested',source:{text:prior.job.packet.source.text,url:prior.job.packet.source.url},schema:{fields},task:taskInput(),...(prior.job.retrieval?{retrieval:prior.job.retrieval}:{})});
+      const next=await response.json();fileReviews.set(prior.job.packet.hash,prior);state.view=next;state.rowId=null;state.field=null;clearDecision();render();editCandidate();say('Requested columns are ready. No AI call was made; add a source-grounded candidate or open a locally generated proposal.');
+    });
+    $('open-ai-proposal').onclick=()=>perform(async()=>{
+      const file=$('ai-proposal-file').files[0];if(!file||file.size>1048576)throw Error('Choose an AI proposal JSON file up to 1 MiB. Current work is unchanged.');
+      let p;try{p=JSON.parse(await file.text());}catch{throw Error('Invalid proposal JSON.');}
+      if(p.format!=='toolkit-ai-proposal-v1')throw Error('Choose a toolkit AI proposal, not a session or provider raw response.');
+      const response=await request('/api/interpretation/start',{example_id:'custom-text',mode:'requested',source:p.source,schema:p.schema,task:p.task,proposal:p.proposal});const next=await response.json();
+      clearRetrieved();state.view=next;state.rowId=null;state.field=null;$('source-text').value=next.job.packet.source.text;$('source-url').value=next.job.packet.source.url||'';
+      auditSnapshots({source:next.job.packet.source.url,method:'pasted-text',retrieved_at:new Date().toISOString(),datasets:[{id:'proposal-source',label:'AI proposal source',kind:'prose',text:next.job.packet.source.text,snapshot_hash:next.job.packet.source.text_hash}],issues:['AI proposals are unapproved suggestions. Evidence matching does not establish correct relationships or complete extraction.'],inventory:['Selected source text retained in the proposal; original images were not interpreted.']},'AI proposal source','text');
+      clearDecision();render();editCandidate();say('AI proposal opened with independent evidence checks. No API call was made. Inspect each record before approving.');
+    });
     $('source-part').onchange=renderCoverage;
     $('coverage-reviewed').onclick=()=>setCoverage('reviewed');$('coverage-exclude').onclick=()=>setCoverage('excluded');$('coverage-reset').onclick=()=>setCoverage('pending');
     $('save-workbench').onclick=()=>{if(!sourceAudit)return;const blob=new Blob([JSON.stringify({format:'toolkit-workbench-v1',source:sourceAudit,reviews:currentReviews()},null,2)],{type:'application/json'});if(blob.size>20*1024*1024){say('Combined backup exceeds 20 MiB. Save individual review sessions and captured source separately; nothing was omitted.');return;}saveBlob(blob,'toolkit-workbench.json');};
