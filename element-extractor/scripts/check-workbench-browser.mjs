@@ -30,7 +30,8 @@ function pdfFixture() {
  return Buffer.from(text).toString('base64');
 }
 const html='<main><table><caption>48 occupation fixture</caption><tr><th>Name</th><th>Score</th></tr>'+Array.from({length:48},(_,i)=>'<tr><td>'+(i===0?'Website':'Job '+(i+1))+'</td><td>'+i+'</td></tr>').join('')+'</table></main>';
-const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile('worker-code.txt','utf8'),compatibilityDate:'2026-10-01',host:'127.0.0.1',port:0,outboundService:request=>new URL(request.url).hostname==='cloudflare-dns.com'?Response.json({Status:0,Answer:new URL(request.url).searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]}):new Response(html,{headers:{'content-type':'text/html'}})}));
+const blsHtml=await readFile('test/fixtures/bls-office-table.html','utf8');
+const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile('worker-code.txt','utf8'),compatibilityDate:'2026-10-01',host:'127.0.0.1',port:0,outboundService:request=>new URL(request.url).hostname==='cloudflare-dns.com'?Response.json({Status:0,Answer:new URL(request.url).searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]}):new Response(new URL(request.url).pathname==='/bls'?blsHtml:html,{headers:{'content-type':'text/html'}})}));
 const base=(await mf.ready).origin,dir=await mkdtemp(join(tmpdir(),'workbench-test-'));let browser;
 const wait=async expression=>{for(let i=0;i<200;i++){if(await browser.evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('Timed out: '+expression+'; page status: '+await browser.evaluate('document.getElementById("status")?.textContent'));};
 async function upload(name,data) {
@@ -67,6 +68,13 @@ try {
  console.log('PASS whole-table navigation, original row numbers, retained approvals, partial accounting and combined 48-row CSV');
  await browser.evaluate(`document.getElementById('input-panel').open=true;document.getElementById('fetch-source').click()`);await wait('!document.getElementById("load").disabled&&document.getElementById("whole-table-summary").textContent.includes("0 approved")');
  console.log('PASS a new capture does not inherit previous-capture approvals');
+ await browser.evaluate(`document.getElementById('input-panel').open=true;document.getElementById('source-url').value='https://fixture.example.org/bls';document.getElementById('fetch-source').click()`);await wait('!document.getElementById("load").disabled&&document.getElementById("candidate-rows").textContent.includes("Customer service representatives")');
+ assert.match(await browser.evaluate('document.getElementById("whole-table-summary").textContent'),/48 source rows/);
+ await browser.evaluate('document.getElementById("table-next").click()');await wait('!document.getElementById("load").disabled&&document.getElementById("candidate-rows").textContent.includes("Office machine operators")');
+ assert.equal(await browser.evaluate('document.querySelector("#candidate-rows tr td:nth-child(2)").textContent'),'25');
+ assert.equal(await browser.evaluate('document.getElementById("page-sections").hidden'),true);
+ console.log('PASS actual BLS grouped-heading table: source rows 25-48 override internal section numbering');
+
 
 
  await upload('quoted.csv',Buffer.from('Name,Score,Note\r\n"Alpha, Inc",12,"line one\nline two"\r\nBeta,9,=1+1\r\n').toString('base64'));

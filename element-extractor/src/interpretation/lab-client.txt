@@ -17,7 +17,7 @@
   const selected = () =>
     state.view?.validation.records.find((row) => row.id === state.rowId);
   function recordNumber(row) {
-    const scope=state.view?.document?.selected_scope||retrievedTableScope();
+    const scope=retrievedTableScope()||state.view?.document?.selected_scope;
     return scope?.kind === "table_batch" && /^row-\d+$/.test(row.id) ? String(scope.row_start+Number(row.id.slice(4))-1) : row.id.replace(/^row-/, "");
   }
   function activeRetrievedTable(){
@@ -431,7 +431,7 @@
       state.rowId = visibleRows()[0]?.id;
       state.field = state.view.job.packet.schema.fields[0]?.name;
     }
-    $("page-sections").hidden = !state.view.document;
+    $("page-sections").hidden = !state.view.document||!!retrievedTableScope();
     if (state.view.document) {
       const doc = state.view.document;
       $("dataset").replaceChildren(...doc.datasets.map(d => {
