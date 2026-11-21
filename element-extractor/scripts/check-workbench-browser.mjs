@@ -29,10 +29,10 @@ function pdfFixture() {
  const size=objects.length+1,xref=text.length;text+=`xref\n0 ${size}\n0000000000 65535 f \n`+offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
  return Buffer.from(text).toString('base64');
 }
-const html='<main><table><tr><th>Name</th><th>Score</th></tr><tr><td>Website</td><td>42</td></tr></table></main>';
+const html='<main><table><caption>48 occupation fixture</caption><tr><th>Name</th><th>Score</th></tr>'+Array.from({length:48},(_,i)=>'<tr><td>'+(i===0?'Website':'Job '+(i+1))+'</td><td>'+i+'</td></tr>').join('')+'</table></main>';
 const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile('worker-code.txt','utf8'),compatibilityDate:'2026-10-01',host:'127.0.0.1',port:0,outboundService:request=>new URL(request.url).hostname==='cloudflare-dns.com'?Response.json({Status:0,Answer:new URL(request.url).searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]}):new Response(html,{headers:{'content-type':'text/html'}})}));
 const base=(await mf.ready).origin,dir=await mkdtemp(join(tmpdir(),'workbench-test-'));let browser;
-const wait=async expression=>{for(let i=0;i<200;i++){if(await browser.evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('Timed out: '+expression);};
+const wait=async expression=>{for(let i=0;i<200;i++){if(await browser.evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('Timed out: '+expression+'; page status: '+await browser.evaluate('document.getElementById("status")?.textContent'));};
 async function upload(name,data) {
  await wait('!document.getElementById("import-file").disabled');
  await browser.evaluate(`document.getElementById('input-panel').open=true;{const bytes=Uint8Array.from(atob(${JSON.stringify(data)}),c=>c.charCodeAt(0));const dt=new DataTransfer();dt.items.add(new File([bytes],${JSON.stringify(name)}));document.getElementById('source-file').files=dt.files;document.getElementById('import-file').click();}`);
@@ -51,6 +51,24 @@ try {
  await browser.send('Emulation.clearDeviceMetricsOverride');
  await browser.evaluate(`document.getElementById('source-text').value="Name\\tScore\\nPasted\\t9";document.getElementById('extract').click()`);await wait('document.getElementById("candidate-rows").textContent.includes("Pasted")&&!document.getElementById("load").disabled');console.log('PASS pasted text');
  await browser.evaluate(`document.getElementById('input-panel').open=true;document.getElementById('source-url').value='https://fixture.example.org/';document.getElementById('fetch-source').click()`);await wait('document.getElementById("candidate-rows").textContent.includes("Website")&&!document.getElementById("load").disabled');console.log('PASS website link');
+ assert.match(await browser.evaluate('document.getElementById("whole-table-summary").textContent'),/48 source rows.*viewing 1.24.*24 unopened/);
+ const approve=async()=>{await browser.evaluate(`document.getElementById('select-eligible').click();document.getElementById('batch-reviewer').value='Table test';document.getElementById('batch-note').value='Compared fixture source rows';document.getElementById('batch-confirm').checked=true;document.getElementById('batch-confirm').dispatchEvent(new Event('change'));document.getElementById('approve-batch').click()`);await wait('document.getElementById("counts").textContent.includes("24 approved")&&!document.getElementById("load").disabled');};
+ await approve();
+ await browser.evaluate('document.getElementById("table-json").click()');await wait('!document.getElementById("load").disabled');
+ for(let i=0;i<100&&!(await readdir(dir)).includes('table-approved.json');i++)await new Promise(r=>setTimeout(r,50));
+ const partial=JSON.parse(await readFile(join(dir,'table-approved.json'),'utf8'));assert.equal(partial.records.length,24);assert.equal(partial.coverage.unopened,24);assert.equal(partial.coverage.excluded,24);
+ await browser.evaluate('document.getElementById("table-next").click()');await wait('document.getElementById("candidate-rows").textContent.includes("Job 48")&&!document.getElementById("load").disabled');
+ assert.equal(await browser.evaluate('document.querySelector("#candidate-rows tr td:nth-child(2)").textContent'),'25');
+ await approve();await browser.evaluate('document.getElementById("table-previous").click()');await wait('document.getElementById("candidate-rows").textContent.includes("Website")&&!document.getElementById("load").disabled');
+ assert.match(await browser.evaluate('document.getElementById("whole-table-summary").textContent'),/48 approved/);
+ await browser.evaluate('document.getElementById("table-csv").click()');await wait('!document.getElementById("load").disabled');
+ for(let i=0;i<100&&!(await readdir(dir)).includes('table-approved.csv');i++)await new Promise(r=>setTimeout(r,50));
+ const combined=await readFile(join(dir,'table-approved.csv'),'utf8');assert.equal(combined.trim().split('\n').length,49);assert.match(combined,/"48","row-24","approved","Job 48"/);
+ console.log('PASS whole-table navigation, original row numbers, retained approvals, partial accounting and combined 48-row CSV');
+ await browser.evaluate(`document.getElementById('input-panel').open=true;document.getElementById('fetch-source').click()`);await wait('!document.getElementById("load").disabled&&document.getElementById("whole-table-summary").textContent.includes("0 approved")');
+ console.log('PASS a new capture does not inherit previous-capture approvals');
+
+
  await upload('quoted.csv',Buffer.from('Name,Score,Note\r\n"Alpha, Inc",12,"line one\nline two"\r\nBeta,9,=1+1\r\n').toString('base64'));
  assert.match(await browser.evaluate('document.getElementById("candidate-rows").textContent'),/Alpha, Inc/);assert.match(await browser.evaluate('document.getElementById("file-issues").textContent'),/whitespace/);
  await browser.evaluate('document.getElementById("download-capture").click()');
@@ -73,7 +91,7 @@ try {
  for(let i=0;i<100&&!(await readdir(dir)).includes('toolkit-workbench.json');i++)await new Promise(r=>setTimeout(r,50));
  const backup=await readFile(join(dir,'toolkit-workbench.json'),'utf8');
  assert.equal(JSON.parse(backup).source.coverage[0].status,'reviewed');assert.equal(JSON.parse(backup).reviews.length,1);
- await browser.send('Page.reload');await wait('typeof document.getElementById("restore-workbench")?.onclick==="function"');
+ await browser.evaluate('window.__beforeReload=true');await browser.send('Page.reload');await wait('!window.__beforeReload&&typeof document.getElementById("restore-workbench")?.onclick==="function"');
  await browser.evaluate(`{const dt=new DataTransfer();dt.items.add(new File([${JSON.stringify(backup)}],'backup.json'));document.getElementById('workbench-backup').files=dt.files;document.getElementById('restore-workbench').click();}`);
  await wait('document.getElementById("status").textContent.includes("Restored source coverage")&&!document.getElementById("load").disabled');
  assert.match(await browser.evaluate('document.getElementById("counts").textContent'),/2 approved/);assert.match(await browser.evaluate('document.getElementById("coverage-counts").textContent'),/1 checked/);

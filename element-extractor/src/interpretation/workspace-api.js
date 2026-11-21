@@ -1,5 +1,6 @@
 import {workspaceShape,makeWorkspaceSnapshot,verifyWorkspaceSnapshot,schemaKey,quoteWorkspaceCSV,matchRecipe} from './workspace-core.js';
 import {validatedWorkspaceJob} from './lab-api.js';
+import {exportTable} from './table-export.js';
 import {digest} from './pipeline.js';
 import {publicURL} from '../public-network.js';
 import {makeFeedbackSnapshot} from './feedback-snapshots.js';
@@ -16,6 +17,7 @@ export async function workspaceAPI(request,env){
   if(body.action==='update_job'){const old=await validatedWorkspaceJob(body.current),next=await validatedWorkspaceJob(body.job);if(old.job.packet.hash!==next.job.packet.hash)throw Error('This review belongs to a different source snapshot. Reopen it from the workspace.');const a=(await makeFeedbackSnapshot(old.job,null)).history,b=(await makeFeedbackSnapshot(next.job,null)).history;const prefix=(x,y)=>x.length<=y.length&&x.every((h,i)=>h===y[i]);if(prefix(b,a))return reply({stale:true});if(!prefix(a,b))throw Error('Conflicting review edits. Keep both histories and reopen the intended version; no update was applied.');return reply({job:next.job,counts:next.counts,schema_key:await schemaKey(next.job),columns:next.job.packet.schema.fields.map(f=>f.name)});}
   if(body.action==='match')return reply(matchRecipe(body.recipe,body.tables,body.url));
   if(body.action==='check_job'){const v=await validatedWorkspaceJob(body.job);return reply({job:v.job,counts:v.counts,schema_key:await schemaKey(v.job),columns:v.job.packet.schema.fields.map(f=>f.name)});}
+  if(body.action==='table_export')return await exportTable(body,validatedWorkspaceJob);
   if(['save','snapshot','restore','export'].includes(body.action)){
    const w=body.action==='restore'?(await verifyWorkspaceSnapshot(body.snapshot)).workspace:workspaceShape(body.workspace);
    const checked=[];for(const entry of w.entries)if(entry.job)checked.push({entry,view:await validatedWorkspaceJob(entry.job),key:await schemaKey(entry.job)});

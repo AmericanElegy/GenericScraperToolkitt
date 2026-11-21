@@ -32,7 +32,7 @@ export function tableDatasets(tables,issues) {
     const plan=planPage({text:flat});
     if(plan.datasets.some(d=>d.kind!=='prose')){
      let start=1;const total=plan.datasets.reduce((n,d)=>n+(d.row_count||0),0);
-     for(const d of plan.datasets){datasets.push({kind:d.kind==='prose'?'prose':'table',label:title+' · '+d.label,text:d.text,row_count:d.row_count,column_count:d.kind==='prose'?null:d.schema.fields.length,table_key,row_start:start,total_columns:d.schema.fields.length});start+=d.row_count||0;}
+     for(const d of plan.datasets){datasets.push({kind:d.kind==='prose'?'prose':'table',label:title+' · '+d.label,text:d.text,row_count:d.row_count,column_count:d.kind==='prose'?null:d.schema.fields.length,table_key,row_start:start,total_rows:total,total_columns:d.schema.fields.length});start+=d.row_count||0;}
      continue;
     }
    }

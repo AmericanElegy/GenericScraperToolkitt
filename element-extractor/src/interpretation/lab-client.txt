@@ -17,8 +17,28 @@
   const selected = () =>
     state.view?.validation.records.find((row) => row.id === state.rowId);
   function recordNumber(row) {
-    const scope=state.view?.document?.selected_scope;
+    const scope=state.view?.document?.selected_scope||retrievedTableScope();
     return scope?.kind === "table_batch" && /^row-\d+$/.test(row.id) ? String(scope.row_start+Number(row.id.slice(4))-1) : row.id.replace(/^row-/, "");
+  }
+  function activeRetrievedTable(){
+    const r=state.view?.job.retrieval;
+    if(!r||r.retrieved_at!==state.retrieved?.retrieved_at||state.view.job.task)return null;
+    const d=state.retrieved.datasets.find(d=>d.kind==='table'&&d.snapshot_hash===r.snapshot_hash&&(d.display_label||d.label)===r.label);
+    if(!d?.table_key||!d.row_start||d.record_count&&d.record_count!==d.row_count||state.view.validation.records.length!==d.row_count)return null;
+    const parts=state.retrieved.datasets.filter(p=>p.kind==='table'&&p.table_key===d.table_key&&JSON.stringify(p.column_indices)===JSON.stringify(d.column_indices)).sort((a,b)=>a.row_start-b.row_start);
+    if(parts.some(p=>p.record_count&&p.record_count!==p.row_count))return null;
+    return {dataset:d,parts,total:d.total_rows||parts.reduce((n,p)=>n+p.row_count,0),index:parts.indexOf(d)};
+  }
+  function retrievedTableScope(){const t=activeRetrievedTable();return t?{kind:'table_batch',row_start:t.dataset.row_start}:null;}
+  function tableReview(d){const r=state.view?.job.retrieval;return r?.snapshot_hash===d.snapshot_hash&&r.label===(d.display_label||d.label)?state.view:fileReviews.get(d.snapshot_hash+'|'+(d.display_label||d.label));}
+  function renderWholeTable(){
+    if(!$('whole-table'))return;const t=activeRetrievedTable();$('whole-table').hidden=!t;if(!t)return;
+    let approved=0,pending=0,rejected=0,unopened=0;
+    for(const d of t.parts){const v=tableReview(d);if(v){approved+=v.counts.approved;pending+=v.counts.pending;rejected+=v.counts.rejected;}else unopened+=d.row_count;}
+    $('whole-table-title').textContent=t.dataset.table_title||t.dataset.label.split(' · ')[0];
+    $('whole-table-summary').textContent=t.total+' source rows · viewing '+t.dataset.row_start+'–'+(t.dataset.row_start+t.dataset.row_count-1)+' · batch '+(t.index+1)+' of '+t.parts.length+'. Whole table: '+approved+' approved · '+pending+' pending · '+rejected+' rejected · '+unopened+' unopened. Downloads exclude '+(t.total-approved)+' unapproved rows.';
+    $('table-previous').disabled=state.busy||t.index===0;$('table-next').disabled=state.busy||t.index===t.parts.length-1;
+    for(const id of ['table-csv','table-json'])$(id).disabled=state.busy;
   }
   const columnLabels = {
     year: "Year", rank: "Rank", item: "Item", metric: "Ranking measure", category: "Category", subject: "Subject", relationship: "Relationship", answer: "Answer", numeric_value: "Numeric value", time_context: "Period",
@@ -72,6 +92,7 @@
     return blockers(row).length > 0;
   }
   function controls() {
+    renderWholeTable();
     for(const id of ['task-template','task-description','task-columns','task-diagrams','task-relevance-note','start-task','ai-proposal-file','open-ai-proposal'])if($(id))$(id).disabled=state.busy||!state.view;
     for(const id of ['source-file','import-file','coverage-reviewed','coverage-exclude','coverage-reset','source-part','coverage-note','save-workbench','restore-workbench','workbench-backup'])if($(id))$(id).disabled=state.busy||(id==='coverage-reviewed'&&!!sourceAudit?.coverage.find(p=>p.id===$('source-part')?.value)?.error);
     $("fetch-source").disabled=state.busy;
@@ -436,7 +457,7 @@
     }
     $("interpretation-summary").textContent = "Columns: " + state.view.job.packet.schema.fields.map(f => f.name).join(", ") + ". " + (state.view.interpretation?.explanation || "Review the proposed values against the source.");
     const c = state.view.counts;
-    const batch=state.view.document?.selected_scope?.kind === "table_batch";
+    const batch=state.view.document?.selected_scope?.kind === "table_batch"||!!retrievedTableScope();
     const scopeLabel=batch?"current batch":state.view.document?"current section":"current review";
     $("approved-csv").textContent="Export approved CSV"+(batch?" · this batch":"");
     $("approved-json").textContent="Export approved JSON"+(batch?" · this batch":"");
@@ -449,7 +470,7 @@
       c.rejected +
       " rejected · " +
       c.pending +
-      " pending" + (state.view.document ? " · current " + (batch ? "batch" : "section") + " only" : "");
+      " pending" + (state.view.document||batch ? " · current " + (batch ? "batch" : "section") + " only" : "");
     const q = queue();
     $("queue-summary").textContent = !c.candidates ? "No records suggested. Inspect the source or add a record manually." : !c.pending ? "Review complete. Approved records are ready to export." : q.eligible_ids.length + " ready for batch review · " + q.exception_ids.length + " exceptions · " + q.individual_ids.length + " need individual review";
     renderTable();
@@ -628,6 +649,16 @@
   }
   let fileCapture=null;
   const fileReviews=new Map();
+  if($('table-next')){
+    for(const [id,step] of [['table-previous',-1],['table-next',1]])$(id).onclick=()=>perform(async()=>{const t=activeRetrievedTable(),d=t?.parts[t.index+step];if(!d)return;$('retrieved-dataset').value=d.id;state.partSelection=null;state.partDirty=false;configureTablePart();await openRetrieved();});
+    for(const format of ['csv','json'])$('table-'+format).onclick=()=>perform(async()=>{
+      const t=activeRetrievedTable();if(!t)throw Error('Open a captured table first.');
+      const parts=t.parts.map(d=>({row_start:d.row_start,row_count:d.row_count,snapshot_hash:d.snapshot_hash,job:tableReview(d)?.job||null}));
+      const response=await request('/api/workspace',{action:'table_export',parts,total_rows:t.total,format});
+      saveBlob(await response.blob(),'table-approved.'+format);
+      say('Whole-table download: '+response.headers.get('X-Exported-Records')+' approved rows; '+response.headers.get('X-Excluded-Rows')+' pending, rejected or unopened rows excluded.');
+    });
+  }
   let sourceAudit=null;
   function renderCoverage(){
     if(!$("source-part")||!sourceAudit)return;
@@ -754,7 +785,7 @@
     $("retrieved-panel").hidden=false;
     if(!response.ok){state.retrieved=null;state.partSelection=null;state.partDirty=false;$("table-part-panel").hidden=true;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";$("retrieved-source").textContent="";$("retrieved-source").removeAttribute("href");$("retrieved-summary").textContent="No new content was imported.";$("retrieved-preview").textContent="";$("retrieved-current").textContent=state.view?"The existing review below is unchanged.":"";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
     state.retrieved=value;state.partSelection=null;state.partDirty=false;
-    sourceAudit=null;fileCapture=null;showFileReport(null);
+    sourceAudit=null;fileCapture=null;fileReviews.clear();showFileReport(null);
     $("retrieved-source").href=value.source;$("retrieved-source").textContent=value.source;
     const tables=value.datasets.filter(d=>d.kind==="table"),articles=value.datasets.filter(d=>d.kind==="prose");
     const sourceRows=new Set();for(const d of tables)for(let row=0;row<d.row_count;row++)sourceRows.add((d.table_key||d.id)+":"+((d.row_start||1)+row));
