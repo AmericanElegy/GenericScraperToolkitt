@@ -17,7 +17,7 @@ try {
  ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result)}});
  const send=(method,params={})=>new Promise((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});ws.send(JSON.stringify({id:n,method,params}))});
  const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};
- await send('Page.enable');await send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:dir});await send('Page.navigate',{url:'http://127.0.0.1:8790/'});
+ await send('Page.enable');await send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:dir});await send('Page.navigate',{url:'http://127.0.0.1:8790/tables'});
  await waitFor(()=>evaluate('Boolean(document.getElementById("extract"))'));
  await evaluate('document.getElementById("url").value="https://tables.example.org/";document.getElementById("extract").requestSubmit()');
  await waitFor(()=>evaluate('!document.getElementById("results").hidden'));

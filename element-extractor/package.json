@@ -9,7 +9,7 @@
     "check": "wrangler deploy --dry-run",
     "dev:wrangler": "wrangler dev",
     "test:live": "node scripts/verify-live.mjs",
-    "build": "esbuild src/worker.js --bundle --format=esm --platform=browser --loader:.txt=text --outfile=worker-code.txt",
+    "build": "node scripts/build.mjs",
     "pretest": "npm run build",
     "predev": "npm run build",
     "pretest:live": "npm run build",
@@ -26,7 +26,16 @@
     "check:feedback-browser": "npm run build && node scripts/check-feedback-storage-browser.mjs",
     "check:workspace-browser": "npm run build && node scripts/check-workspace-browser.mjs",
     "test:live-workspace": "npm run build && node scripts/check-workspace-live.mjs",
-    "check:prose-benchmark": "npm run build && node scripts/check-prose-benchmark.mjs"
+    "check:prose-benchmark": "npm run build && node scripts/check-prose-benchmark.mjs",
+    "precheck": "npm run build",
+    "predeploy": "npm run build",
+    "check:workbench-browser": "npm run build && node scripts/check-workbench-browser.mjs",
+    "predev:wrangler": "npm run build",
+    "benchmark:offline": "npm run build && node scripts/evaluate-extraction.mjs",
+    "benchmark:live": "node scripts/check-live-benchmark.mjs",
+    "benchmark:capture": "node scripts/capture-benchmark-sources.mjs",
+    "benchmark:mixed": "npm run build && node scripts/evaluate-mixed-document.mjs",
+    "benchmark:report": "node scripts/report-extraction-benchmark.mjs"
   },
   "repository": {
     "type": "git",
@@ -47,6 +56,11 @@
   },
   "private": true,
   "dependencies": {
-    "entities": "8.1.0"
+    "entities": "8.1.0",
+    "fflate": "0.8.3",
+    "mammoth": "1.13.0",
+    "papaparse": "5.7.1",
+    "pdfjs-dist": "6.5.438",
+    "read-excel-file": "9.3.20"
   }
 }

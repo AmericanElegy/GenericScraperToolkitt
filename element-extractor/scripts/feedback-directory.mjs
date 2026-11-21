@@ -18,7 +18,13 @@ export async function discoverDriveRoots(platform=process.platform){
 }
 async function atomicWrite(path,value){
  const temp=path+'.'+randomUUID()+'.tmp';let handle;
- try{handle=await open(temp,'wx',0o600);await handle.writeFile(value);await handle.sync();await handle.close();handle=null;await rename(temp,path);}finally{await handle?.close();await unlink(temp).catch(()=>{});}
+ try{handle=await open(temp,'wx',0o600);await handle.writeFile(value);await handle.sync();await handle.close();handle=null;
+  try{await rename(temp,path);}catch(error){
+   // Windows can reject replacement when another process just wrote the same
+   // immutable snapshot. Only an identical destination counts as success.
+   if(!['EPERM','EEXIST'].includes(error.code)||(await readFile(path,'utf8').catch(()=>null))!==value)throw error;
+  }
+ }finally{await handle?.close();await unlink(temp).catch(()=>{});}
 }
 export async function createFeedbackDirectory(options={}){
  const configFile=options.configFile||join(process.env.TOOLKIT_CONFIG_DIR||join(process.env.LOCALAPPDATA||join(homedir(),'.config'),'WebTableToolkit'),'feedback-storage.json');

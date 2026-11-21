@@ -1,0 +1,16 @@
+import {readFile,writeFile,mkdir}from 'node:fs/promises';
+const root='.wrangler/benchmarks/';
+const read=async path=>JSON.parse(await readFile(root+path,'utf8').catch(()=>'{"unavailable":true}'));
+const offline=await read('evaluation.json'),full=await read('full-page-evaluation.json'),live=await read('live-results.json'),mixed=await read('mixed-document.json'),capture=await read('raw/capture.json');
+let markdown='# Extraction benchmark results\n\nGenerated '+new Date().toISOString()+'. No AI calls or user approvals were created. Missing reports mean not measured, never passed.\n\n## Frozen structured references\n\n| Case | Exact rows | Exact cells | Result |\n| --- | --- | --- | --- |\n';
+for(const r of offline.results||[])markdown+='| '+r.name+' | '+r.exact_rows+'/'+r.expected_rows+' | '+r.correct_cells+'/'+r.expected_cells+' | '+(r.pass?'Pass':'Fail')+' |\n';
+if(offline.unavailable)markdown+='\nNot measured.\n';
+markdown+='\n## Full saved Wikipedia page\n\n'+(full.unavailable?'Not measured.':full.results.find(r=>r.id==='wikipedia')?.pass?'Pass: target project table matched while replaying the complete locally retained page.':'Failed; inspect full-page-evaluation.json.')+'\n\n## Deployed workbench\n\n';
+for(const r of live.results||[])markdown+='- '+r.id+': '+r.status+'.\n';
+if(live.unavailable)markdown+='Not measured.\n';
+markdown+='\n## Local raw-fetch route\n\n';for(const r of capture.results||[])markdown+='- '+r.id+': HTTP '+r.http_status+' ('+r.status+').\n';
+markdown+='\nThese local curl results are separate from the deployed Worker. Failed responses are retained for diagnosis; no access barrier was bypassed.\n\n## Mixed private chemistry document\n\n';
+if(mixed.unavailable)markdown+='Not measured: requires the optional private original.\n';
+else markdown+='Capture: '+(mixed.capture.pass?'passed':'failed')+'; '+mixed.capture.original_text_paragraphs+' original text paragraphs, '+mixed.capture.missing_original_paragraphs+' missing, '+mixed.capture.unread_images+' unread diagrams explicitly accounted for.\n\nInterpretation: '+mixed.interpretation.matched_material_rows+'/'+mixed.interpretation.desired_material_rows+' materials and '+mixed.interpretation.matched_quantity_rows+'/'+mixed.interpretation.desired_quantity_rows+' quantity/time facts matched. '+mixed.interpretation.actual_candidate_rows+' candidate rows. '+(mixed.interpretation.pass?'Passed.':'Known quality gap: capture success is not semantic extraction success.')+'\n';
+markdown+='\n## Scope\n\nThese are four chosen cases, not general accuracy estimates. Frozen expected rows are reference data, not human approvals. Source dates and snapshot hashes are retained in the fixture manifest. The BLS offline case tests copied grouped-header text, while its live case tests deployed URL intake. Wikipedia live values can change; a mismatch must be investigated before updating references. The chemistry original stays local and outside tracked fixtures.\n';
+await mkdir(root,{recursive:true});await writeFile(root+'RESULTS.md',markdown);console.log('Benchmark summary saved locally.');

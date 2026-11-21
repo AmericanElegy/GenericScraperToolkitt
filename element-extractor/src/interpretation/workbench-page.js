@@ -1,0 +1,33 @@
+import {LAB_PAGE} from './lab-page.js';
+
+// Reuse the evidence/review UI so the simpler entry point cannot bypass review.
+let page=LAB_PAGE;
+const take=(start,end)=>{
+  const a=page.indexOf(start),b=page.indexOf(end,a);
+  if(a<0||b<0)throw Error('Workbench page boundary changed: '+start);
+  const result=page.slice(a,b);page=page.slice(0,a)+page.slice(b);return result;
+};
+const sessions=take('<details class="card session-tools">','<section id="page-sections"');
+const extras=take('<section class="card" aria-label="Feedback automatic saving">','<section id="workspace"');
+const downloads=take('<div class="bar between toolbar">','<div class="review-layout">');
+page=page.replace(/<title>.*?<\/title>/,'<title>Operator workbench · Table Toolkit</title>')
+  .replace(/<header class="top">.*?<\/header>/,`<header class="top"><div><p class="eyebrow">Table Toolkit · operator use</p><h1>Your table workbench</h1><p>Add a source, check the table, download your work.</p><nav class="bar" aria-label="Workflow"><a href="#input-panel">Add source</a><span aria-hidden="true">→</span><a href="#workspace">Review/edit table</a><span aria-hidden="true">→</span><a href="#downloads">Download</a></nav></div><span class="badge">Local / preview</span></header>`)
+  .replace('Local / preview','Operator workspace')
+  .replace('1. Add source text','1. Add source')
+  .replace('<form id="custom-input">',`<form id="custom-input"><p>Use a website link, paste text, or choose a file below. Sources are alternatives; opening one starts a new review.</p><label for="source-file">Excel, CSV, PDF, Word or text file</label><div id="file-drop" class="file-drop"><input id="source-file" type="file" accept=".xlsx,.csv,.tsv,.pdf,.docx,.txt"><button id="import-file" type="button">Read file</button><span class="hint">Or drop one file here · up to 10 MiB</span></div><p class="hint">Excel .xlsx includes multiple sheets. Word uses .docx. Scanned PDFs need OCR outside this tool; no paid service is used.</p>`)
+  .replace('Source URL · reference unless you click Fetch page','Website link')
+  .replace('Or paste a passage or full page','Pasted text · also editable after a file import')
+  .replace('Source and extraction options','Advanced · extraction settings')
+  .replace('Preview suggested records','Review pasted text')
+  .replace('Paste text or load an example to begin.','Add a website link, text or a file to begin.')
+  .replace('<p id="status"',`<section id="file-report" class="card" hidden aria-label="Source coverage"><h2>Check source coverage</h2><p id="file-summary"></p><ul id="file-issues" class="coverage"></ul><details><summary>All sheets, pages and document parts</summary><ul id="file-inventory"></ul></details><button id="download-capture" type="button" class="secondary">Download captured source</button><p class="hint">Captured source keeps parsed text and cells, including unsupported selections. Keep the original file too: images, formatting and unreadable content are not included.</p></section><p id="status"`)
+  .replace('2. Review records','2. Review/edit table')
+  .replace('<button id="download-capture"',`<section aria-label="Captured source preview"><h3>Preview and account for the source</h3><p id="coverage-counts" role="status"></p><label for="source-part">Source part · original order where available</label><select id="source-part"></select><p id="source-part-scope" class="hint"></p><div id="source-part-preview" class="scroll" style="max-height:360px;white-space:pre-wrap"></div><p id="source-part-links" class="hint"></p><label for="coverage-note">Coverage note · required for checked or excluded content</label><input id="coverage-note" maxlength="1000" placeholder="What did you check, or why is this excluded?"><div class="bar"><button id="coverage-reviewed" type="button" class="secondary">Mark checked</button><button id="coverage-exclude" type="button" class="secondary">Exclude with reason</button><button id="coverage-reset" type="button" class="secondary">Reset status</button></div><p class="hint">Checked means you examined this captured part. It does not approve records or certify complete extraction. Unreadable content remains unsupported even if you exclude it intentionally.</p></section><button id="save-workbench" type="button">Save source and all reviews</button><button id="download-capture"`)
+  .replace('<details id="mapping-panel" class="card">','<details id="mapping-panel" class="card" open>')
+  .replace('</aside></div>','</aside></div><section id="downloads" class="card"><h2>3. Download</h2><p>CSV and JSON include only approved rows in the current selection. Other sheets, pages, sections and pending rows are excluded. Save the review session under Advanced to keep evidence, corrections and decisions.</p>'+downloads+'</section>')
+  .replace('<footer>',`<details class="card" id="advanced"><summary>Advanced · saved reviews, batch tools and feedback</summary><p><a href="/workspace">Batch workspace</a> · <a href="/tables">Website table explorer</a> · <a href="/interpretation">Interpretation Lab</a> · <a href="/example">Elements example</a></p>${sessions}${extras}</details><footer>`)
+  .replace('<summary>Advanced · saved reviews, batch tools and feedback</summary>',`<summary>Advanced · saved reviews, batch tools and feedback</summary><label for="workbench-backup">Restore source and all reviews</label><input id="workbench-backup" type="file" accept=".json,application/json"><button id="restore-workbench" type="button" class="secondary">Restore workbench backup</button><p class="hint">Backups contain captured source text, coverage decisions and reviews. Keep original files for unread images and formatting. Nothing calls an AI provider.</p>`)
+  .replace('no general AI interpretation, OCR, JavaScript rendering or paid inference','no general AI interpretation, OCR or paid inference. Website links can use the existing local JavaScript renderer when indicated')
+  .replace('<script src="/interpretation-client.js"','<script src="/file-import.js" defer></script><script src="/interpretation-client.js"')
+  .replace('</style>',`.file-drop{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:2px dashed #a2b9ce;border-radius:10px;padding:18px;background:#f3f8fc}.file-drop input{flex:1;min-width:200px}.coverage{border-left:4px solid #b97816;padding:8px 12px 8px 28px;background:#fff8e8}body{font-size:16px}label,.hint,table,summary,td button.value{font-size:14px}#downloads{margin-top:20px}nav a{font-weight:600}#file-report{overflow-wrap:anywhere}</style>`);
+export const WORKBENCH_PAGE=page;

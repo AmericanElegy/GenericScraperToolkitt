@@ -424,7 +424,7 @@ test('pasted grouped wage table distinguishes employment percentages from hourly
 test('browser-flattened caption and wrapped headings retain wage mapping, evidence and explicit no-result diagnostics', async () => {
   const { mf, calls } = await setup();
   try {
-    const text = await readFile(new URL('./fixtures/pasted-wage-caption.txt', import.meta.url), 'utf8');
+    const text = (await readFile(new URL('./fixtures/pasted-wage-caption.txt', import.meta.url), 'utf8')).replace(/\r\n?/g, '\n');
     for (const source of [text, text.replace('group Percent', 'group\nPercent').replace('employment Mean', 'employment\nMean').replace('wage ($) United', 'wage ($)\nUnited')]) {
       const response = await autoText(mf, source);
       assert.equal(response.status, 200);

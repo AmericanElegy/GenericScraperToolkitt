@@ -21,7 +21,7 @@ async function articleBlocks(page) {
   .transform(new Response(page)).arrayBuffer();
  return (blocks.some(b=>b.primary)?blocks.filter(b=>b.primary):blocks).map(b=>b.text);
 }
-function tableDatasets(tables,issues) {
+export function tableDatasets(tables,issues) {
  const datasets=[];
  for(const [index,t] of tables.entries()) {
   const title=t.title||t.caption||'Table '+(index+1),table_key='source-table-'+(index+1);
@@ -67,7 +67,7 @@ function tableDatasets(tables,issues) {
  }
  return datasets;
 }
-function proseDatasets(blocks) {
+export function proseDatasets(blocks) {
  const datasets=[];let batch=[],length=0;
  const flush=()=>{if(batch.length)datasets.push({kind:'prose',label:'Article text · part '+(datasets.length+1),text:batch.join('\n\n'),row_count:null});batch=[];length=0;};
  for(const block of blocks){if(block.length>12000)error('source_limit','One article block exceeds 12,000 characters; use a smaller source.');if(batch.length===24||length+block.length+2>12000)flush();batch.push(block);length+=block.length+2;}flush();return datasets;

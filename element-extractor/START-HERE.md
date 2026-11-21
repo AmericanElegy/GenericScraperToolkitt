@@ -4,15 +4,15 @@ Bookmark this page: https://github.com/AmericanElegy/GenericScraperToolkitt/blob
 
 ## Project and downloads
 
-- The updated launcher opens **Your scraping workspace** (`/workspace`). [Batch workflow and recovery](docs/batch-workspace.md); single-page review is still linked as **Interpretation Lab**.
-- [Latest development branch](https://github.com/AmericanElegy/GenericScraperToolkitt/tree/codex/general-table-extraction) — contains the current extraction, review, mapping and local JavaScript-rendering features. These have not been merged into main or deployed automatically.
+- The updated launcher opens **Your table workbench** (`/`). [Batch workflow and recovery](docs/batch-workspace.md); batch workflows and the original Interpretation Lab remain under Advanced. See [the workbench guide](docs/operator-workbench.md) for file formats and coverage limits.
+- [Latest development branch](https://github.com/AmericanElegy/GenericScraperToolkitt/tree/codex/general-table-extraction) — contains the current extraction, review, mapping and local JavaScript-rendering features. The branch remains separate from main; the operator workbench was manually deployed on November 21, 2026.
 - [Download this branch as ZIP](https://github.com/AmericanElegy/GenericScraperToolkitt/archive/refs/heads/codex/general-table-extraction.zip).
 - [Windows launcher source/download](https://github.com/AmericanElegy/GenericScraperToolkitt/blob/codex/general-table-extraction/element-extractor/scripts/Start-Toolkit-Lab.ps1) — use GitHub's **Download raw file** button to save the script.
 - [Windows launcher instructions](docs/windows-launcher.md).
 - [Interpretation Lab and column mapping guide](docs/interpretation-lab.md).
 - [Local JavaScript renderer guide](docs/javascript-rendering.md).
 - [Local release and verification guide](docs/local-release.md).
-- [Public Cloudflare demo](https://genericscrapertoolkit.jamesjustice95.workers.dev/) — older deployed demo; newer local features are not deployed there.
+- [Hosted operator workbench](https://genericscrapertoolkit.jamesjustice95.workers.dev/) — deployed workbench, file import, source coverage and portable backups. Private access is being completed under the [personal workbench plan](docs/personal-workbench-plan.md).
 
 ## Launch the latest copy on Windows
 
@@ -35,7 +35,7 @@ npm.cmd run dev
 
 Default addresses while that server is running:
 
-- [Web Table Toolkit](http://127.0.0.1:8787/).
+- [Operator workbench](http://127.0.0.1:8787/) — Add source → Review/edit table → Download. Website links, pasted text, Excel, CSV, PDF and Word share one page.
 - [Interpretation Lab](http://127.0.0.1:8787/interpretation) — source URL fetching with targeted local JavaScript fallback, pasted prose/tables, column mapping, evidence, review, portable sessions and approved exports.
 
 The isolated Windows launcher instead prints its own available port.
@@ -60,4 +60,4 @@ From the app folder:
 npm.cmd run release:check
 ```
 
-This runs the regression suite, four real browser workflows and a Cloudflare bundle dry run. It requires Chromium on the test path (`CHROMIUM_PATH` may select an executable); the existing browser check scripts are verified in Linux, not Windows. It performs no deployment. No paid inference, paid browser service or FantasyBrief dependency is enabled.
+This runs the regression suite, the workbench format checks and existing browser workflows and a Cloudflare bundle dry run. It requires Chromium on the test path (`CHROMIUM_PATH` may select an executable); the release gate finds installed Edge/Chrome on Windows, or accepts `CHROMIUM_PATH`. It performs no deployment. No paid inference, paid browser service or FantasyBrief dependency is enabled.

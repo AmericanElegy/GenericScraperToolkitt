@@ -5,3 +5,4 @@ node_modules/
 
 # Local source snapshots, review journals and exports
 .interpretation/
+src/interpretation/file-assets.js

@@ -32,7 +32,7 @@ Nothing is deployed, no paid services are enabled, and FantasyBrief is not used.
 The launcher does not alter an existing checkout or stop an existing server.
 On failure it stops its own new server, retains logs, and exits with status 1.
 
-The app and its browser workflow are verified in the Linux cloud Workers runtime.
+The workbench, existing browser workflows and Cloudflare dry run are verified on Windows with installed Edge/Chrome.
 The PowerShell launcher still requires a Windows run to establish Windows readiness.
 
 
@@ -41,4 +41,4 @@ The PowerShell launcher still requires a Windows run to establish Windows readin
 The launcher starts the local feedback companion. It detects a single Windows Google Drive `My Drive` mount or offers one-time folder selection in the app. Files go in **Web Table Toolkit/feedback**, independently of the freshly downloaded code folder. Configuration stays in `%LOCALAPPDATA%\WebTableToolkit\feedback-storage.json`. Use the same synced root on both computers. The app reports local writes only; confirm actual upload status in Google Drive before switching machines. See [Drive feedback setup and recovery](interpretation-lab.md#automatic-google-drive-feedback-saving).
 
 
-The current launcher opens `/workspace` after validating both its page and the Interpretation Lab backend. Use the header link for single-page review. Batch workspace settings and prepared reviews use the same Drive configuration in the separate `workspaces` subdirectory.
+The current launcher opens the operator workbench at `/` after validating the workbench, batch workspace and Interpretation Lab backend. Use Advanced for batch tools. Batch workspace settings and prepared reviews use the same Drive configuration in the separate `workspaces` subdirectory.

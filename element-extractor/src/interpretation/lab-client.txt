@@ -72,6 +72,7 @@
     return blockers(row).length > 0;
   }
   function controls() {
+    for(const id of ['source-file','import-file','coverage-reviewed','coverage-exclude','coverage-reset','source-part','coverage-note','save-workbench','restore-workbench','workbench-backup'])if($(id))$(id).disabled=state.busy||(id==='coverage-reviewed'&&!!sourceAudit?.coverage.find(p=>p.id===$('source-part')?.value)?.error);
     $("fetch-source").disabled=state.busy;
     const chosen=chosenRetrieved();
     const current=state.view?.job.retrieval;
@@ -394,6 +395,7 @@
   }
   function render() {
     if (!state.view) return;
+    if(state.view.job.retrieval?.file)showFileReport(state.view.job.retrieval.file,state.view.job.retrieval.retrieved_at===state.retrieved?.retrieved_at);
     $("workspace-link-state").hidden=!workspaceToken;
     if(workspaceToken)$("workspace-link-state").textContent=!window.opener||window.opener.closed?"The workspace window is closed. Drive review saving still works; reopen the workspace for combined exports.":workspacePacket===state.view.job.packet.hash?"Linked to the batch workspace. Reviewed changes return there while both tabs stay open.":"This review is separate from the linked source. Open a source from the workspace to link a review again.";
     if (state.lastPacket !== state.view.job.packet.hash) {
@@ -422,7 +424,7 @@
     renderMapping();
     const meaning=state.view.meaning;
     $("meaning-panel").hidden=!meaning;
-    $("candidates-title").textContent="2. Review "+(meaning?.kind==="ranking"?"ranked items":meaning?.kind==="text_relationships"?"recognized facts":"records");
+    $("candidates-title").textContent=($("import-file")?"2. Review/edit ":"2. Review ")+(meaning?.kind==="ranking"?"ranked items":meaning?.kind==="text_relationships"?"recognized facts":"table");
     if(meaning){
       $("meaning-title").textContent=meaning.title;
       $("meaning-explanation").textContent=meaning.explanation;
@@ -607,16 +609,118 @@
     controls();say("Chosen part previewed. Click Open selected part to start its review.");
   });
   $("reset-table-part").onclick=()=>{state.partSelection=null;state.partDirty=false;configureTablePart();controls();};
-  function clearRetrieved() {state.retrieved=null;state.partSelection=null;state.partDirty=false;$("retrieved-panel").hidden=true;$("retrieved-dataset").replaceChildren();}
+  function clearRetrieved() {state.retrieved=null;state.partSelection=null;state.partDirty=false;sourceAudit=null;fileCapture=null;fileReviews.clear();showFileReport(null);$("retrieved-panel").hidden=true;$("retrieved-dataset").replaceChildren();}
   async function openRetrieved() {
     const dataset=chosenRetrieved();
     if(!dataset||state.partDirty)throw Error("Select content and preview your chosen part first.");
-    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.display_label||dataset.label,content_kind:dataset.kind,...(dataset.table_selection?{table_selection:dataset.table_selection}:{})};
-    const response=await request("/api/interpretation/start",{example_id:"custom-text",mode:"auto",source:{text:dataset.text,url:state.retrieved.source},retrieval});
-    state.view=await response.json();state.rowId=null;state.field=null;
-    $("source-text").value=dataset.text;$("source-url").value=state.retrieved.source;$("text-mode").value="auto";
+    const retrieval={method:state.retrieved.method,source:state.retrieved.source,retrieved_at:state.retrieved.retrieved_at,snapshot_hash:dataset.snapshot_hash,label:dataset.display_label||dataset.label,content_kind:dataset.kind,...(dataset.table_selection?{table_selection:dataset.table_selection}:{}),...(state.retrieved.file?{file:{...state.retrieved.file,issues:state.retrieved.issues,inventory:state.retrieved.inventory}}:{})};
+    const key=r=>r.snapshot_hash+'|'+r.label;
+    if(state.view?.job.retrieval?.retrieved_at===state.retrieved.retrieved_at)fileReviews.set(key(state.view.job.retrieval),state.view);
+    const cached=fileReviews.get(key(retrieval));
+    if(cached)state.view=cached;
+    else {const response=await request("/api/interpretation/start",{example_id:"custom-text",mode:"auto",source:{text:dataset.text,url:state.retrieved.source},retrieval});state.view=await response.json();}
+    state.rowId=null;state.field=null;
+    $("source-text").value=dataset.text;$("source-url").value=state.retrieved.source||'';$("text-mode").value="auto";
     clearDecision();render();editCandidate();
-    say("Fetched using "+(state.retrieved.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML")+". "+(dataset.display_label||dataset.label)+". "+state.view.extraction.message);
+    say((state.retrieved.method==='browser-file'?(cached?'File review resumed':'File imported · unapproved suggestions'):"Fetched using "+(state.retrieved.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML"))+". "+(dataset.display_label||dataset.label)+". "+state.view.extraction.message);
+  }
+  let fileCapture=null;
+  const fileReviews=new Map();
+  let sourceAudit=null;
+  function renderCoverage(){
+    if(!$("source-part")||!sourceAudit)return;
+    const select=$("source-part"),chosen=select.value;
+    select.replaceChildren(...sourceAudit.coverage.map(p=>{const o=text('option',p.label+' · '+p.status+(p.error?' · unread/unsupported':''));o.value=p.id;return o;}));
+    if(sourceAudit.coverage.some(p=>p.id===chosen))select.value=chosen;
+    const counts={pending:0,reviewed:0,excluded:0,unsupported:0};for(const p of sourceAudit.coverage)counts[p.status]++;
+    $('coverage-counts').textContent=counts.pending+' pending · '+counts.reviewed+' checked · '+counts.excluded+' intentionally excluded · '+counts.unsupported+' unsupported. '+sourceAudit.coverage.filter(p=>p.error).length+' parts have capture limitations. These counts describe captured parts, not complete original-document coverage.';
+    const part=sourceAudit.coverage.find(p=>p.id===select.value),preview=$('source-part-preview');preview.replaceChildren();
+    for(const id of ['coverage-reviewed','coverage-exclude','coverage-reset'])$(id).disabled=state.busy||!part;
+    if(!part)return;
+    $('coverage-note').value=part.note||'';
+    $('source-part-scope').textContent=(part.error?part.error+' ':'')+(part.kind==='image'?'Image placeholder; inspect the original file.':'Captured '+part.kind+'; compare with the original.');
+    if(part.rows){const table=document.createElement('table');for(const row of part.rows.slice(0,100)){const tr=document.createElement('tr');for(const cell of row)tr.append(text('td',cell));table.append(tr);}preview.append(table);if(part.rows.length>100)preview.append(text('p','Showing 100 of '+part.rows.length+' source rows. Captured-source download keeps all rows.'));}
+    else preview.append(text('p',part.text||'[No readable text captured]'));
+    $('source-part-links').textContent=part.dataset_ids.length?'Included in review selections: '+part.dataset_ids.map(id=>sourceAudit.datasets.find(d=>d.id===id)?.display_label||sourceAudit.datasets.find(d=>d.id===id)?.label||id).join('; '):'No review selection covers this part. Inspect manually, edit/paste readable text, or intentionally exclude it with a reason. No values have been invented.';
+    $('coverage-reviewed').disabled=state.busy||!!part.error;
+  }
+  function setCoverage(status){
+    if(state.busy)return;
+    const part=sourceAudit?.coverage.find(p=>p.id===$('source-part').value);if(!part)return;
+    const note=$('coverage-note').value.trim();
+    if(status!=='pending'&&!note){say('Enter what you checked or why you excluded this source part.');return;}
+    part.status=status==='pending'&&part.error?'unsupported':status;part.note=status==='pending'?'':note;renderCoverage();
+  }
+  function currentReviews(){const reviews=new Map(fileReviews);if(state.view&&(sourceAudit?.method==='pasted-text'||state.view.job.retrieval?.retrieved_at===sourceAudit?.retrieved_at))reviews.set(state.view.job.retrieval?state.view.job.retrieval.snapshot_hash+'|'+state.view.job.retrieval.label:state.view.job.packet.hash,state.view);return [...reviews.values()].map(v=>({format:'toolkit-review-session-v1',job:v.job}));}
+  function auditSnapshots(value,name,format){
+    if(!$('source-part'))return;
+    const coverage=value.datasets.map((d,i)=>({id:'snapshot-'+i,label:d.display_label||d.label,kind:'text',text:d.text,dataset_ids:[d.id],status:'pending',note:''}));
+    for(const [i,issue]of (value.issues||[]).entries())coverage.push({id:'limitation-'+i,label:'Capture limitation '+(i+1),kind:'limitation',text:issue,error:issue,dataset_ids:[],status:'unsupported',note:''});
+    sourceAudit={...value,file:{name,format},coverage,captured_source:{source:value.source,issues:value.issues||[],inventory:value.inventory||[],content:value.datasets.map(d=>({label:d.label,text:d.text})),coverage}};
+    fileCapture=sourceAudit.captured_source;showFileReport({...sourceAudit.file,issues:sourceAudit.issues||[],inventory:sourceAudit.inventory||[]});
+  }
+  function showFileReport(file,captureMatches=true) {
+    if(!$("file-report"))return;
+    $("file-report").hidden=!file;
+    if(!file)return;
+    $("file-summary").textContent=file.name+' · '+file.format+' · review coverage before downloading.';
+    $("file-issues").replaceChildren(...file.issues.map(i=>text('li',i)));
+    $("file-inventory").replaceChildren(...file.inventory.map(i=>text('li',i)));
+    $("download-capture").disabled=!fileCapture||!captureMatches;
+    $('source-part').closest('section').hidden=!sourceAudit;
+    if(sourceAudit)renderCoverage();
+  }
+  if($("import-file")) {
+    $('source-part').onchange=renderCoverage;
+    $('coverage-reviewed').onclick=()=>setCoverage('reviewed');$('coverage-exclude').onclick=()=>setCoverage('excluded');$('coverage-reset').onclick=()=>setCoverage('pending');
+    $('save-workbench').onclick=()=>{if(!sourceAudit)return;const blob=new Blob([JSON.stringify({format:'toolkit-workbench-v1',source:sourceAudit,reviews:currentReviews()},null,2)],{type:'application/json'});if(blob.size>20*1024*1024){say('Combined backup exceeds 20 MiB. Save individual review sessions and captured source separately; nothing was omitted.');return;}saveBlob(blob,'toolkit-workbench.json');};
+    $('restore-workbench').onclick=()=>perform(async()=>{
+      const file=$('workbench-backup').files[0];if(!file||file.size>20*1024*1024)throw Error('Choose a workbench backup up to 20 MiB. Current work is unchanged.');
+      let backup;try{backup=JSON.parse(await file.text());}catch{throw Error('Invalid backup JSON. Current work is unchanged.');}
+      const s=backup.source;
+      if(backup.format!=='toolkit-workbench-v1'||!s||!['browser-file','static-html','local-chromium','pasted-text'].includes(s.method)||!Array.isArray(s.coverage)||s.coverage.length>10000||!Array.isArray(s.datasets)||!Array.isArray(backup.reviews)||backup.reviews.length>1000||!s.file||typeof s.file.name!=='string'||!Array.isArray(s.issues)||!Array.isArray(s.inventory)||s.coverage.some(p=>!p||typeof p.id!=='string'||typeof p.label!=='string'||typeof p.kind!=='string'||!['pending','reviewed','excluded','unsupported'].includes(p.status)||!Array.isArray(p.dataset_ids)||typeof p.note!=='string'||p.note.length>1000||p.text!==undefined&&typeof p.text!=='string'||p.rows!==undefined&&(!Array.isArray(p.rows)||p.rows.some(r=>!Array.isArray(r)||r.some(c=>typeof c!=='string')))||p.error&&p.status==='reviewed'||['reviewed','excluded'].includes(p.status)&&!p.note.trim()))throw Error('Invalid coverage backup. Current work is unchanged.');
+      if(new Set(s.coverage.map(p=>p.id)).size!==s.coverage.length||new Set(s.datasets.map(d=>d.id)).size!==s.datasets.length||s.coverage.some(p=>p.dataset_ids.some(id=>!s.datasets.some(d=>d.id===id))))throw Error('Coverage references do not match the source. Current work is unchanged.');
+      const restored=[];for(const session of backup.reviews){const response=await request('/api/interpretation/action',{action:'restore',session});const view=await response.json();if(s.method!=='pasted-text'&&view.job.retrieval?.retrieved_at!==s.retrieved_at)throw Error('A review belongs to a different source capture. Current work is unchanged.');restored.push(view);}
+      // Validate every selection before replacing the current source or reviews.
+      for(const d of s.datasets){if(typeof d.text!=='string'||await ToolkitFiles.digest(d.text)!==d.snapshot_hash)throw Error('Backup source snapshot mismatch. Current work is unchanged.');}
+      sourceAudit=s;state.retrieved=s.method==='browser-file'?s:{...s,file:undefined};fileCapture=s.captured_source;fileReviews.clear();for(const v of restored)fileReviews.set(v.job.retrieval?v.job.retrieval.snapshot_hash+'|'+v.job.retrieval.label:v.job.packet.hash,v);
+      if(fileCapture)fileCapture.coverage=s.coverage;
+      state.partSelection=null;state.partDirty=false;
+      $('retrieved-panel').hidden=false;$('retrieved-method').textContent='Restored captured source';$('retrieved-source').textContent=s.file.name;$('retrieved-source').removeAttribute('href');
+      $('retrieved-dataset').replaceChildren(...s.datasets.map(d=>{const o=text('option',d.display_label||d.label);o.value=d.id;return o;}));
+      state.view=null;showFileReport({...s.file,issues:s.issues,inventory:s.inventory});configureTablePart();
+      if(s.method==='pasted-text'){
+        state.retrieved=null;$('retrieved-panel').hidden=true;state.view=restored[0]||await (await request('/api/interpretation/start',{example_id:'custom-text',mode:'auto',source:{text:s.datasets[0].text,url:s.source}})).json();render();editCandidate();
+      }else if(s.datasets.length)await openRetrieved();else{$('workspace').hidden=true;controls();}
+      say('Restored source coverage and '+restored.length+' revalidated reviews. Coverage notes are self-declared; original-file completeness is not certified.');
+    });
+    $("download-capture").onclick=()=>{
+      if(!fileCapture)return;
+      const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(fileCapture,null,2)],{type:'application/json'}));a.href=url;a.download='captured-source.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    };
+    $("import-file").onclick=()=>perform(async()=>{
+      const file=$("source-file").files[0];if(!file)throw Error('Choose a file first.');
+      say('Reading file locally. Your existing review stays available until a selection opens…');
+      const value=await globalThis.ToolkitFiles.importFile(file);
+      sourceAudit=value;fileCapture=value.captured_source;fileReviews.clear();
+      showFileReport({...value.file,issues:value.issues,inventory:value.inventory});
+      state.retrieved=value;state.partSelection=null;state.partDirty=false;
+      $("retrieved-panel").hidden=false;$("retrieved-method").textContent='Imported file · choose a sheet or document section';
+      $("retrieved-source").textContent=file.name;$("retrieved-source").removeAttribute('href');
+      $("retrieved-summary").textContent=value.datasets.length+' review selections. Each has its own approvals and download. Reviews stay while switching selections in this file; save sessions before reading another file or reloading. Check source coverage notes above.';
+      $("retrieval-checks").textContent=value.issues.join('\n');
+      $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text('option',d.display_label||d.label);o.value=d.id;return o;}));
+      configureTablePart();
+      if(value.datasets.length)await openRetrieved();
+      else {controls();say('No supported selections. '+value.issues.join(' ')+(state.view?' Previous review is still open.':''));}
+    });
+    for(const type of ['dragover','drop'])$("file-drop").addEventListener(type,event=>{
+      event.preventDefault();if(state.busy)return;
+      if(type==='drop'){
+        if(event.dataTransfer.files.length!==1){say('Drop one file at a time; no files were imported.');return;}
+        $("source-file").files=event.dataTransfer.files;$("import-file").click();
+      }
+    });
   }
   $("fetch-source").onclick=()=>perform(async()=>{
     if(!$("source-url").value.trim())throw Error("Enter a public HTTPS source URL first.");
@@ -628,12 +732,14 @@
     $("retrieved-panel").hidden=false;
     if(!response.ok){state.retrieved=null;state.partSelection=null;state.partDirty=false;$("table-part-panel").hidden=true;$("retrieved-dataset").replaceChildren();$("retrieved-method").textContent="Page fetch stopped";$("retrieved-source").textContent="";$("retrieved-source").removeAttribute("href");$("retrieved-summary").textContent="No new content was imported.";$("retrieved-preview").textContent="";$("retrieved-current").textContent=state.view?"The existing review below is unchanged.":"";throw Error((value.error||"Page fetch failed.")+(state.view?" Your previous review is unchanged.":""));}
     state.retrieved=value;state.partSelection=null;state.partDirty=false;
+    sourceAudit=null;fileCapture=null;showFileReport(null);
     $("retrieved-source").href=value.source;$("retrieved-source").textContent=value.source;
     const tables=value.datasets.filter(d=>d.kind==="table"),articles=value.datasets.filter(d=>d.kind==="prose");
     const sourceRows=new Set();for(const d of tables)for(let row=0;row<d.row_count;row++)sourceRows.add((d.table_key||d.id)+":"+((d.row_start||1)+row));
     $("retrieved-summary").textContent=tables.length+" table selection"+(tables.length===1?"":"s")+" · "+sourceRows.size+" captured table rows · "+articles.length+" article section"+(articles.length===1?"":"s")+" · retrieved "+new Date(value.retrieved_at).toLocaleString()+"."+((value.issues||[]).length?" "+value.issues.length+" capture notes below.":"");
     $("retrieved-method").textContent=value.method==="local-chromium"?"Retrieved with local JavaScript rendering":"Retrieved with ordinary HTML";
     $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const headings=d.table_preview?.headers;const o=text("option",(d.display_label||d.label)+(headings?" · "+headings.length+" columns: "+headings.join(" / ").slice(0,180):d.kind==="table"?" · table selection":" · article text"));o.value=d.id;return o;}));
+    if($('source-part'))auditSnapshots({...value,inventory:['Website preview contains captured selections, not the complete original page. Navigation, images, dynamic content and omitted selections may be absent.']},value.source,'website');
     configureTablePart();await openRetrieved();
   });
   $("open-retrieved").onclick=()=>perform(openRetrieved);
@@ -653,7 +759,11 @@
         ] } } : {}),
       });
       state.view = await response.json(); state.rowId = null; state.field = null;
-      clearRetrieved();clearDecision(); render(); editCandidate();
+      clearRetrieved();sourceAudit=null;fileCapture=null;showFileReport(null);clearDecision(); render(); editCandidate();
+      if($('source-part')){
+        const content=$('source-text').value.replace(/\r\n?/g,'\n');fileReviews.clear();
+        auditSnapshots({source:$('source-url').value.trim()||null,method:'pasted-text',retrieved_at:new Date().toISOString(),datasets:[{id:'paste-1',label:'Full pasted text',kind:'prose',text:content,snapshot_hash:await ToolkitFiles.digest(content)}],issues:['Pasted text is retained as supplied. Rules may suggest only some facts; absent records do not mean absent source information.'],inventory:['Full pasted text; original formatting and images are unavailable.']},'Pasted text','text');
+      }
       say(state.view.document ? "Full page accepted and divided into sections. " + state.view.extraction.message + " Preview the current section below, or choose another section. No AI calls; other sections are not implicitly parsed or approved." : "Parsed your supplied text. " + state.view.extraction.message + " No AI calls.");
     });
   };
@@ -893,7 +1003,7 @@
       try { session = JSON.parse(await file.text()); } catch { throw Error("This file is not valid session JSON. Your current review was kept."); }
       const response = await request("/api/interpretation/action", { action: "restore", session });
       state.view = await response.json(); state.rowId = null; state.field = null;
-      clearRetrieved();clearDecision(); render(); editCandidate();
+      clearRetrieved();fileCapture=null;showFileReport(null);clearDecision(); render(); editCandidate();
       $("source-text").value = state.view.job.document?.source.text || state.view.job.packet.source.text;
       $("source-url").value = state.view.job.packet.source.url || "";
       $("reviewer").value = "";

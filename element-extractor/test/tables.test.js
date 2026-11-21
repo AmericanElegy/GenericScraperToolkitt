@@ -26,6 +26,6 @@ test('Stage 1 discovery, URL safeguards, redirects and bounded extraction in wor
   html='{}';content='application/json';assert.equal((await post(mf,'https://tables.example.org/')).status,422);content='text/html';status=403;assert.equal((await post(mf,'https://tables.example.org/')).status,422);
   calls=0;assert.equal((await mf.dispatchFetch('https://toolkit.example.org/api/tables')).status,405);assert.equal((await post(mf,'https://tables.example.org/',{headers:{origin:'https://other.org','content-type':'application/json'}})).status,403);assert.equal((await post(mf,'https://tables.example.org/',{headers:{'content-type':'text/plain'}})).status,415);
   for(const body of ['{','null','{}'])assert.equal((await post(mf,'unused',{body})).status,400);assert.equal(calls,0);
-  const page=await (await mf.dispatchFetch('https://toolkit.example.org/')).text();assert.match(page,/Choose a table/);assert.match(page,/textContent=value/);assert.match(page,/\/example/);
+  const page=await (await mf.dispatchFetch('https://toolkit.example.org/tables')).text();assert.match(page,/Choose a table/);assert.match(page,/textContent=value/);assert.match(page,/\/example/);
  }finally{await mf.dispose()}
 });

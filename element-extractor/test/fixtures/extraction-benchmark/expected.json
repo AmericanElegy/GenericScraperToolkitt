@@ -1,0 +1,498 @@
+{
+  "format": "extraction-benchmark-v1",
+  "captured_on": "2026-11-21",
+  "notice": "Reference data is test evidence, not user approval. Expected outputs are frozen; capture/refresh does not rewrite them.",
+  "cases": [
+    {
+      "id": "simple",
+      "name": "Simple company table",
+      "url": "https://www.w3schools.com/html/html_tables.asp",
+      "input": "simple.html",
+      "input_kind": "html",
+      "provenance": "Focused reference transcription from the public example; live curl returned HTTP 403 on capture date.",
+      "headers": [
+        "Company",
+        "Contact",
+        "Country"
+      ],
+      "columns": [
+        "company",
+        "contact",
+        "country"
+      ],
+      "rows": [
+        [
+          "Alfreds Futterkiste",
+          "Maria Anders",
+          "Germany"
+        ],
+        [
+          "Centro comercial Moctezuma",
+          "Francisco Chang",
+          "Mexico"
+        ],
+        [
+          "Ernst Handel",
+          "Roland Mendel",
+          "Austria"
+        ],
+        [
+          "Island Trading",
+          "Helen Bennett",
+          "UK"
+        ],
+        [
+          "Laughing Bacchus Winecellars",
+          "Yoshi Tannamuri",
+          "Canada"
+        ],
+        [
+          "Magazzini Alimentari Riuniti",
+          "Giovanni Rovelli",
+          "Italy"
+        ]
+      ],
+      "input_sha256": "aefbcd89bb254671de447ae48434fbcab3902177aea036244923ac9bb02cd641",
+      "input_hash_mode": "UTF-8 with LF-normalized line endings"
+    },
+    {
+      "id": "wikipedia",
+      "name": "Wikipedia project comparison",
+      "url": "https://en.wikipedia.org/wiki/Wikipedia:Statistics",
+      "input": "wikipedia.html",
+      "input_kind": "html",
+      "provenance": "Exact selected table from locally saved HTTP 200 page; expected cell text independently read with Python HTMLParser.",
+      "raw_sha256": "9e928594a90132be2c6d2834c8909b85c9a6f688bb1ed2991bd6f0b7ec970ee7",
+      "headers": [
+        "Project(s)",
+        "Articles",
+        "All pages",
+        "Edits",
+        "Admins",
+        "Users",
+        "Editors",
+        "Files"
+      ],
+      "columns": [
+        "project_s",
+        "articles",
+        "all_pages",
+        "edits",
+        "admins",
+        "users",
+        "editors",
+        "files"
+      ],
+      "rows": [
+        [
+          "English Wikipedia",
+          7267536,
+          66574350,
+          1382181464,
+          816,
+          55557608,
+          263142,
+          980724
+        ],
+        [
+          "All active Wikipedias",
+          68826699,
+          273244407,
+          3984783957,
+          3406,
+          137570692,
+          583379,
+          2949432
+        ],
+        [
+          "English Wiktionary",
+          10462435,
+          12696100,
+          95772099,
+          76,
+          4517419,
+          4561,
+          20
+        ],
+        [
+          "All active Wiktionaries",
+          52787273,
+          63442361,
+          336596375,
+          514,
+          8033015,
+          9161,
+          2023
+        ],
+        [
+          "English Wikiquote",
+          73704,
+          248895,
+          4037213,
+          17,
+          3367184,
+          1152,
+          0
+        ],
+        [
+          "All active Wikiquotes",
+          391342,
+          1259814,
+          12386707,
+          203,
+          4543594,
+          2603,
+          1344
+        ],
+        [
+          "English Wikibooks",
+          99268,
+          298135,
+          4509137,
+          12,
+          3624117,
+          659,
+          2447
+        ],
+        [
+          "All active Wikibooks",
+          367540,
+          1280985,
+          13251928,
+          181,
+          4951186,
+          1692,
+          39416
+        ],
+        [
+          "English Wikisource",
+          1140637,
+          4923492,
+          16474238,
+          20,
+          3320310,
+          647,
+          16719
+        ],
+        [
+          "All active Wikisources",
+          12024467,
+          32747460,
+          88911269,
+          326,
+          5410521,
+          3736,
+          80266
+        ],
+        [
+          "English Wikivoyage",
+          34908,
+          184227,
+          5432102,
+          32,
+          2442819,
+          1073,
+          1930
+        ],
+        [
+          "All active Wikivoyages",
+          149438,
+          654462,
+          11664228,
+          112,
+          2850094,
+          2077,
+          21377
+        ],
+        [
+          "English Wikiversity",
+          37604,
+          245452,
+          2815787,
+          12,
+          3112513,
+          322,
+          43001
+        ],
+        [
+          "All active Wikiversities",
+          168912,
+          654208,
+          7087236,
+          70,
+          3597846,
+          1056,
+          46585
+        ],
+        [
+          "Wikispecies",
+          968941,
+          2264272,
+          11360279,
+          22,
+          3050529,
+          373,
+          0
+        ],
+        [
+          "Wikimedia Commons",
+          142174514,
+          191507997,
+          1302981698,
+          170,
+          15085874,
+          40607,
+          150507817
+        ],
+        [
+          "Wikidata",
+          124120415,
+          129944438,
+          2572703951,
+          64,
+          8232134,
+          52106,
+          0
+        ],
+        [
+          "All Wikimedia projects",
+          404154838,
+          716929740,
+          8418563139,
+          5465,
+          253903984,
+          703360,
+          153658212
+        ]
+      ],
+      "input_sha256": "30629be1fcf2f33fec0b8a368231dee577745593ca038650cb0b6c26c3de51e3",
+      "input_hash_mode": "UTF-8 with LF-normalized line endings"
+    },
+    {
+      "id": "bls",
+      "name": "BLS Table A, Jacksonville, May 2025",
+      "url": "https://www.bls.gov/regions/southeast/news-release/occupationalemploymentandwages_jacksonville.htm",
+      "input": "bls.txt",
+      "input_kind": "text",
+      "provenance": "Retained copied Table A fixture; live curl returned HTTP 403 on capture date. This tests pasted text, not live grouped HTML discovery.",
+      "columns": [
+        "occupational_group",
+        "employment_percent_national",
+        "employment_percent_local",
+        "hourly_wage_national_dollars",
+        "hourly_wage_local_dollars"
+      ],
+      "rows": [
+        [
+          "Total, all occupations",
+          100.0,
+          100.0,
+          33.54,
+          31.59
+        ],
+        [
+          "Management",
+          7.2,
+          7.4,
+          69.84,
+          65.97
+        ],
+        [
+          "Business and financial operations",
+          6.8,
+          7.6,
+          45.78,
+          43.08
+        ],
+        [
+          "Computer and mathematical",
+          3.4,
+          3.2,
+          57.73,
+          51.3
+        ],
+        [
+          "Architecture and engineering",
+          1.7,
+          1.3,
+          51.36,
+          48.04
+        ],
+        [
+          "Life, physical, and social science",
+          0.9,
+          0.5,
+          45.48,
+          40.84
+        ],
+        [
+          "Community and social service",
+          1.7,
+          1.3,
+          30.49,
+          27.68
+        ],
+        [
+          "Legal",
+          0.8,
+          0.9,
+          67.07,
+          54.16
+        ],
+        [
+          "Educational instruction and library",
+          5.9,
+          4.4,
+          32.47,
+          27.89
+        ],
+        [
+          "Arts, design, entertainment, sports, and media",
+          1.3,
+          1.2,
+          38.36,
+          31.28
+        ],
+        [
+          "Healthcare practitioners and technical",
+          6.3,
+          6.9,
+          52.26,
+          48.97
+        ],
+        [
+          "Healthcare support",
+          5.1,
+          3.6,
+          19.62,
+          20.2
+        ],
+        [
+          "Protective service",
+          2.4,
+          2.5,
+          29.19,
+          26.86
+        ],
+        [
+          "Food preparation and serving related",
+          8.8,
+          9.4,
+          17.86,
+          17.57
+        ],
+        [
+          "Building and grounds cleaning and maintenance",
+          2.9,
+          2.9,
+          19.66,
+          18.71
+        ],
+        [
+          "Personal care and service",
+          2.1,
+          1.9,
+          19.74,
+          18.61
+        ],
+        [
+          "Sales and related",
+          8.6,
+          9.8,
+          26.43,
+          24.92
+        ],
+        [
+          "Office and administrative support",
+          11.4,
+          12.6,
+          24.79,
+          23.89
+        ],
+        [
+          "Farming, fishing, and forestry",
+          0.3,
+          0.1,
+          19.96,
+          21.17
+        ],
+        [
+          "Construction and extraction",
+          4.1,
+          4.8,
+          31.42,
+          26.78
+        ],
+        [
+          "Installation, maintenance, and repair",
+          3.9,
+          4.5,
+          30.44,
+          28.75
+        ],
+        [
+          "Production",
+          5.5,
+          3.2,
+          24.81,
+          23.58
+        ],
+        [
+          "Transportation and material moving",
+          8.8,
+          9.9,
+          23.96,
+          23.43
+        ]
+      ],
+      "input_sha256": "64fdf3b635a2d43d71f378175b52b8a5e92277e7230e1a15c7ec8d56468daea7",
+      "input_hash_mode": "UTF-8 with LF-normalized line endings"
+    }
+  ],
+  "mixed_case": {
+    "id": "chemistry",
+    "name": "Fischer esterification document",
+    "task": "Extract the 12 named materials and four explicit quantity/time facts; diagrams are supplementary for this task, not automatically irrelevant for every task.",
+    "private_fixture_env": "TOOLKIT_DOCX_FIXTURE",
+    "desired_materials": [
+      "reflux apparatus",
+      "simple distillation apparatus",
+      "calcium chloride",
+      "isopentyl (isoamyl) alcohol",
+      "glacial acetic acid",
+      "concentrated sulfuric acid",
+      "5% sodium bicarbonate",
+      "separatory funnel",
+      "25 mL Erlenmeyer flask",
+      "anhydrous sodium sulfate",
+      "goggles and gloves",
+      "scale"
+    ],
+    "desired_facts": [
+      {
+        "subject": "isopentyl (isoamyl) alcohol",
+        "value": 5,
+        "unit": "mL"
+      },
+      {
+        "subject": "glacial acetic acid",
+        "value": 7,
+        "unit": "mL"
+      },
+      {
+        "subject": "concentrated sulfuric acid",
+        "value": 10,
+        "unit": "drops",
+        "qualifier": "about"
+      },
+      {
+        "subject": "heating under reflux",
+        "value": 60,
+        "unit": "minutes"
+      }
+    ],
+    "desired_material_rows": 12,
+    "desired_quantity_rows": 4,
+    "known_limit": "The deterministic engine previously produced zero records. Retention and image accounting do not count as semantic extraction success. The private original is never copied into tracked fixtures."
+  }
+}

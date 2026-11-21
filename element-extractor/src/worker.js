@@ -1,4 +1,6 @@
 import {WORKSPACE_PAGE} from './interpretation/workspace-page.js';
+import {WORKBENCH_PAGE} from './interpretation/workbench-page.js';
+import {fileClient,pdfWorker} from './interpretation/file-assets.js';
 import workspaceClient from './interpretation/workspace-client.txt';
 import {workspaceAPI} from './interpretation/workspace-api.js';
 import {feedbackStorage} from './interpretation/feedback-storage-api.js';
@@ -355,7 +357,9 @@ export default {
     if (url.pathname === '/api/tables') return tablesAPI(request, url);
     if (request.method !== 'GET') return new Response('Method not allowed', {status:405, headers:{Allow:'GET'}});
     if (url.pathname === '/example') return new Response(PAGE, {headers:{...SECURITY, 'Content-Type':'text/html; charset=utf-8'}});
-    if (url.pathname === '/') return new Response(TABLE_PAGE, {headers:{...SECURITY, 'Content-Type':'text/html; charset=utf-8'}});
+    if (['/','/workbench'].includes(url.pathname)) return new Response(WORKBENCH_PAGE, {headers:{...SECURITY, 'Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",'Content-Type':'text/html; charset=utf-8'}});
+    if (['/file-import.js','/pdf.worker.mjs'].includes(url.pathname)) return new Response(url.pathname==='/file-import.js'?fileClient:pdfWorker,{headers:{...SECURITY,'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-cache'}});
+    if (url.pathname === '/tables') return new Response(TABLE_PAGE, {headers:{...SECURITY, 'Content-Type':'text/html; charset=utf-8'}});
     if (!['/api/elements', '/elements.csv'].includes(url.pathname)) return json({error:'Not found'},404);
     try {
       const key = new Request(new URL('/_cache/elements-v1', url.origin));

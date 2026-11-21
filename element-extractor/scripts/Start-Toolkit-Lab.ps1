@@ -42,7 +42,7 @@ try {
     try {
         $env:PORT = [string]$port
         $node = (Get-Command node.exe).Source
-        $server = Start-Process -FilePath $node -ArgumentList 'scripts/dev.mjs' -WorkingDirectory $app -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
+        $server = Start-Process -FilePath $node -ArgumentList 'scripts/dev.mjs' -WorkingDirectory $app -RedirectStandardOutput $outLog -RedirectStandardError $errLog -WindowStyle Hidden -PassThru
     } finally {
         [Environment]::SetEnvironmentVariable('PORT', $oldPort, 'Process')
     }
@@ -67,6 +67,8 @@ try {
             if ($feedbackStorage.PSObject.Properties.Name -notcontains 'enabled') { throw 'Feedback storage endpoint is missing.' }
             $workspacePage = Invoke-WebRequest -Uri $workspaceUrl -UseBasicParsing -TimeoutSec 3
             if ($workspacePage.StatusCode -ne 200 -or $workspacePage.Content -notmatch '<h1>Your scraping workspace</h1>') { throw 'Workspace page is missing.' }
+            $workbenchPage = Invoke-WebRequest -Uri "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 3
+            if ($workbenchPage.StatusCode -ne 200 -or $workbenchPage.Content -notmatch '<h1>Your table workbench</h1>') { throw 'Operator workbench is missing.' }
 
 
             $ready = $true
@@ -75,9 +77,9 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if (-not $ready) { throw "Readiness check failed: $lastProblem" }
-    Write-Host "PASS: Interpretation Lab page and offline backend verified."
+    Write-Host "PASS: Operator workbench, legacy pages and offline backend verified."
     Write-Host "Project saved at: $folder"
-    Write-Host "Open batch workspace: $workspaceUrl"
+    Write-Host "Open operator workbench: http://127.0.0.1:$port/"
     Write-Host "Single-page lab: $url"
     Write-Host "To stop this server only: Stop-Process -Id $($server.Id)"
     Write-Host "Server logs: $outLog and $errLog"
@@ -86,7 +88,7 @@ try {
     Write-Host 'Feedback autosave: the app detects a single Google Drive My Drive mount, or asks for its folder once.'
     Write-Host 'Feedback files stay in the dedicated Drive folder across launcher updates. Check the Feedback autosave panel.'
     Write-Host 'This server runs locally. Nothing was deployed or enabled in Cloudflare.'
-    Start-Process $workspaceUrl
+    Start-Process ("http://127.0.0.1:$port/")
 } catch {
     if ($server -and -not $ready) {
         Stop-Process -Id $server.Id -ErrorAction SilentlyContinue

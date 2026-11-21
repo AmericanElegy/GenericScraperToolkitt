@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 // Local release gate: no deployment, accounts, secrets, or paid bindings.
-import { build } from 'esbuild';
+import {buildToolkit} from './build.mjs';
+import {browserExecutable} from './browser-cdp.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -11,11 +12,13 @@ try { report.commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, en
 const output = join(root, '.wrangler', 'release-report.json');
 const persist = async () => { await mkdir(join(root, '.wrangler'), { recursive: true }); await writeFile(output, JSON.stringify(report, null, 2) + '\n'); };
 try {
-  await build({ entryPoints: [join(root, 'src/worker.js')], bundle: true, format: 'esm', platform: 'browser', loader: { '.txt': 'text' }, outfile: join(root, 'worker-code.txt') });
+  await buildToolkit();
   report.worker_sha256 = createHash('sha256').update(await readFile(join(root, 'worker-code.txt'))).digest('hex');
   report.checks.push({ name: 'Worker build', status: 'passed' });
+  process.env.CHROMIUM_PATH ||= await browserExecutable();
   for (const [name, args] of [
     ['Workers regression suite', ['--test']],
+    ['Operator workbench formats and downloads', ['scripts/check-workbench-browser.mjs']],
     ['Table browser workflow', ['scripts/check-browser.mjs']],
     ['Interpretation browser workflow', ['scripts/check-lab-browser.mjs']],
     ['JavaScript renderer browser workflow', ['scripts/check-renderer-browser.mjs']],

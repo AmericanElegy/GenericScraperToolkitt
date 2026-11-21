@@ -1,14 +1,18 @@
-# Web Table Toolkit — local first release
+# Table Toolkit — operator workbench
 
 **[Start here: links, downloads and PowerShell launch commands](START-HERE.md).**
 
-A standalone Cloudflare Worker for discovering HTML tables and turning pasted page text into reviewable data with CSV/JSON exports. It has no FantasyBrief dependencies or paid service bindings.
+The default page is now **Add source → Review/edit table → Download**, with website links, pasted text, Excel `.xlsx`, CSV, PDF and Word `.docx` in one input area. Technical and secondary tools live under Advanced. [Workbench behavior, format limits and verification](docs/operator-workbench.md). The workbench and source-coverage safeguards were deployed to the existing Worker on November 21, 2026. It is a personal operator tool; Cloudflare Access and task-directed AI evaluation are being completed under the [personal workbench plan](docs/personal-workbench-plan.md).
+
+The original website table explorer is retained at `/tables`; the Interpretation Lab and batch workspace retain their existing routes. The sections below describe those preserved capabilities.
+
+A standalone Cloudflare Worker for discovering HTML tables and turning captured source text into reviewable data with CSV/JSON exports. It has no FantasyBrief dependencies or paid service bindings.
 
 For pages that build their tables with JavaScript, the optional [local browser renderer](docs/javascript-rendering.md) provides a separate read-only capture and export workflow using an installed browser.
 
 ## Batch workspace
 
-The launcher opens **Your scraping workspace**: queue public URLs, reuse exact table settings, prepare multiple captured parts, review in linked Lab tabs, and combine compatible approved records with source identities. Prepared work and settings can persist in the dedicated Drive folder. See [the workspace guide](docs/batch-workspace.md).
+The launcher opens the operator workbench. Under Advanced, **Your scraping workspace** can queue public URLs, reuse exact table settings, prepare multiple captured parts, review in linked Lab tabs, and combine compatible approved records with source identities. Prepared work and settings can persist in the dedicated Drive folder. See [the workspace guide](docs/batch-workspace.md).
 
 ## Release workflow
 
@@ -36,6 +40,8 @@ npm.cmd run dev
 ```
 
 Open the local server on port 8787. Keep PowerShell open; Ctrl+C stops the server. `npm run dev` builds an editor-ready bundle and runs native workerd using Miniflare. Its local-only curl bridge respects the managed environment's proxy and CA trust. Deployment uses native Workers fetch.
+
+For the retained `/tables` explorer:
 
 1. Paste a public HTTPS page URL and click **Find tables**.
 2. Choose a discovered table. Unsupported tables show a reason.
@@ -110,4 +116,6 @@ A direct image URL explains that OCR is needed. Pages containing only possible v
 
 ## Offline paragraph interpretation prototype
 
-Run `npm.cmd run interpretation:demo` in PowerShell for the new **scripted, offline** backend lab. It exercises bounded passages, requested columns, evidence offsets/hashes, independent validation, explicit no-result accounting, raw-response replay, append-only review events, and approved/diagnostic exports. It does not infer values from arbitrary prose or call an AI service. The home page links to a browser-based [Interpretation Lab](docs/interpretation-lab.md) for pasted prose with automatic quantitative suggestions, fictional examples, evidence highlighting, candidate correction/addition, review, optional local Drive feedback persistence and downloads. Automatic mode accepts full-page text with bounded section selection, preserves original-page evidence, and suggests measure/value/unit/qualifier columns for prose or typed columns for supported tables; manual mode retains two configurable columns (text and number). These are limited rule-based suggestions, not general language understanding. The public Worker is not deployed automatically. See [the walkthrough and trust limits](docs/offline-interpretation.md).
+Run `npm.cmd run interpretation:demo` in PowerShell for the new **scripted, offline** backend lab. It exercises bounded passages, requested columns, evidence offsets/hashes, independent validation, explicit no-result accounting, raw-response replay, append-only review events, and approved/diagnostic exports. It does not infer values from arbitrary prose or call an AI service. Advanced links to a browser-based [Interpretation Lab](docs/interpretation-lab.md) for pasted prose with automatic quantitative suggestions, fictional examples, evidence highlighting, candidate correction/addition, review, optional local Drive feedback persistence and downloads. Automatic mode accepts full-page text with bounded section selection, preserves original-page evidence, and suggests measure/value/unit/qualifier columns for prose or typed columns for supported tables; manual mode retains two configurable columns (text and number). These are limited rule-based suggestions, not general language understanding. The public Worker is not deployed automatically. See [the walkthrough and trust limits](docs/offline-interpretation.md).
+
+- [Extraction benchmark and measured limitations](docs/extraction-benchmark.md) — frozen structured references, separate live checks, and the private mixed-document evaluation.
