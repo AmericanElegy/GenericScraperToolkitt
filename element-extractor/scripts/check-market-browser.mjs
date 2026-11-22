@@ -16,14 +16,15 @@ try{
  await wait('!!document.getElementById("row-42")');
  await browser.evaluate('window.purchases=0');
  const page=await (await mf.dispatchFetch('https://toolkit.example.org/market-capture')).text(),href=/class="install" href="([^"]+)"/.exec(page)[1],script=decodeURIComponent(href.slice('javascript:'.length));
+ assert.ok(!script.includes('__name('),'Bookmarklet must not depend on bundler closure helpers');
  await browser.evaluate(script);await browser.evaluate(`Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent==='Capture loaded offers').click()`);
  const before=requests;
  await browser.evaluate(`document.querySelector('tbody').insertAdjacentHTML('beforeend',${JSON.stringify(row('3'))})`);
  await browser.evaluate(`Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent==='Capture loaded offers').click()`);
  for(const label of ['Download evidence JSON','Download offers CSV','Download card coverage CSV'])await browser.evaluate(`Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent===${JSON.stringify(label)}).click()`);
- for(let i=0;i<100&&(await readdir(dir)).length<3;i++)await new Promise(r=>setTimeout(r,50));
+ for(let i=0;i<100;i++){const files=await readdir(dir);if(['market-capture.json','market-offers.csv','market-card-coverage.csv'].every(f=>files.includes(f)))break;await new Promise(r=>setTimeout(r,50));}
  const result=JSON.parse(await readFile(join(dir,'market-capture.json'),'utf8'));
- assert.equal(result.unique_cards,1);assert.equal(result.unique_observed_listings,3);assert.equal(result.observed_quantity_total,6);assert.equal(result.observations.length,2);assert.equal(result.cards[0].coverage_status,'count_matches_only');assert.ok(!JSON.stringify(result).includes('PRIVATE ACCOUNT VALUE'));
+ assert.equal(result.unique_cards,1);assert.equal(result.offers[0].card_name,'Test card');assert.equal(result.unique_observed_listings,3);assert.equal(result.observed_quantity_total,6);assert.equal(result.observations.length,2);assert.equal(result.cards[0].coverage_status,'count_matches_only');assert.ok(!JSON.stringify(result).includes('PRIVATE ACCOUNT VALUE'));
  assert.match(await readFile(join(dir,'market-offers.csv'),'utf8'),/'=Seller/);assert.equal(await browser.evaluate('window.purchases'),0);assert.equal(requests,before);
  await browser.evaluate(`document.body.insertAdjacentHTML('beforeend','<div class="js-offers-modal show"><a class="js-offers-modal-page" href="/market/character/?id=42"></a></div>');Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent==='Capture loaded offers').click()`);
  assert.match(await browser.evaluate('document.querySelector("#toolkit-market-capture p").textContent'),/still loading/);

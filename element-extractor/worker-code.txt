@@ -765,127 +765,8 @@ async function ownerAccess(request, env = {}) {
   }
 }
 
-// src/market-capture.js
-function readMarketDOM(doc, sourceURL) {
-  const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
-  const number2 = (s) => /^\d+$/.test(String(s)) && Number.isSafeInteger(Number(s)) ? Number(s) : null;
-  const cards = [], offers = [], issues = [];
-  const groups2 = Array.from(doc.querySelectorAll('[id^="row-"]')).filter((n) => /^row-\d+$/.test(n.id) && n.querySelector("tr[data-saleid]"));
-  for (const g of groups2) {
-    const id = g.id.slice(4), link = Array.from(g.querySelectorAll('a[href*="id_perso="]')).find((a) => norm(a.textContent));
-    const all = Array.from(g.querySelectorAll("a")).find((a) => /^View all [\d ,]+ offers$/i.test(norm(a.textContent)));
-    const advertised = all ? Number(norm(all.textContent).replace(/\D/g, "")) : null;
-    cards.push({ card_id: id, name: norm(link?.textContent) || null, advertised_offers: advertised });
-  }
-  const modal = doc.querySelector(".js-offers-modal.show");
-  const modalLink = modal?.querySelector("a.js-offers-modal-page");
-  const modalId = modalLink ? new URL(modalLink.getAttribute("href"), sourceURL).searchParams.get("id") : null;
-  if (modalId && !cards.some((c) => c.card_id === modalId)) cards.push({ card_id: modalId, name: norm(modal.querySelector("#market-offers-title,h3,h4,h5")?.textContent) || null, advertised_offers: null });
-  const roots = [...groups2.map((g) => ({ node: g, card_id: g.id.slice(4), view: "page-preview" })), ...modalId ? [{ node: modal, card_id: modalId, view: "offer-overlay" }] : []];
-  for (const root of roots) for (const row of root.node.querySelectorAll("tr[data-saleid]")) {
-    const cells = Array.from(row.cells), sale_id = row.getAttribute("data-saleid"), card_id = row.getAttribute("data-id");
-    const raw = cells.map((c) => norm(c.textContent));
-    if (!/^\d+$/.test(sale_id || "") || card_id !== root.card_id || cells.length !== 10) {
-      issues.push({ card_id: root.card_id, sale_id, reason: "Unexpected listing identity or column layout; retained raw cells.", raw_cells: raw });
-      continue;
-    }
-    const edition = cells[3], seller = cells[8].querySelector("a");
-    const offer = { sale_id, card_id, quantity: number2(row.getAttribute("data-quantity")), price_clintz: number2(row.getAttribute("data-price")), level: number2(row.getAttribute("data-level")), edition_text: norm(edition.textContent), edition_labels: Array.from(edition.querySelectorAll("[title],[aria-label],img[alt]")).map((e) => e.getAttribute("title") || e.getAttribute("aria-label") || e.getAttribute("alt")).filter(Boolean), edition_markup: edition.innerHTML, state: row.getAttribute("data-state"), serial: row.getAttribute("data-serial"), power: raw[5], damage: raw[6], ability: raw[7], seller: norm(seller?.textContent) || raw[8], time_remaining: raw[9], raw_cells: raw, view: root.view };
-    if (offer.quantity === null || offer.price_clintz === null || offer.level === null) issues.push({ sale_id, reason: "A numeric listing attribute was missing or invalid; values were not guessed." });
-    offers.push(offer);
-  }
-  const controls = Array.from(doc.querySelectorAll("select")).map((s) => ({ label: s.getAttribute("aria-label") || s.name || "", value: s.value, text: norm(s.selectedOptions?.[0]?.textContent) }));
-  return { format: "toolkit-market-observation-v1", captured_at: (/* @__PURE__ */ new Date()).toISOString(), source_url: sourceURL, search: doc.querySelector("#market-search")?.value || "", controls, page_numbers: Array.from(doc.querySelectorAll(".ur-pagination-page.active")).filter((n) => !n.closest(".js-offers-modal")).map((n) => norm(n.textContent)), overlay_card_id: modalId, overlay_page: modal ? norm(modal.querySelector(".ur-pagination-page.active")?.textContent) : null, overlay_loading: !!modal && !offers.some((r) => r.view === "offer-overlay"), cards, offers, issues, notice: "Loaded DOM observations only. Advertised offer counts are separate. This is not a simultaneous complete market snapshot or proof of completed sales." };
-}
-function summarizeMarket(observations) {
-  const cards = /* @__PURE__ */ new Map(), listings = /* @__PURE__ */ new Map();
-  for (const o of observations) {
-    for (const c of o.cards) if (c.advertised_offers !== null || !cards.has(c.card_id)) cards.set(c.card_id, c);
-    for (const r of o.offers) {
-      const prior = listings.get(r.sale_id);
-      listings.set(r.sale_id, { ...r, first_seen: prior?.first_seen || o.captured_at, last_seen: o.captured_at });
-    }
-  }
-  const rows = [...listings.values()], coverage = [...cards.values()].map((c) => {
-    const observed = rows.filter((r) => r.card_id === c.card_id).length;
-    return { ...c, observed_unique_listings: observed, advertised_minus_observed: c.advertised_offers === null ? null : c.advertised_offers - observed, coverage_status: c.advertised_offers === null ? "unknown" : observed < c.advertised_offers ? "partial" : observed === c.advertised_offers ? "count_matches_only" : "changed_during_capture" };
-  });
-  return { format: "toolkit-market-capture-v1", started_at: observations[0]?.captured_at, ended_at: observations.at(-1)?.captured_at, unique_cards: cards.size, unique_observed_listings: rows.length, observed_quantity_total: rows.some((r) => r.quantity === null) ? null : rows.reduce((n, r) => n + r.quantity, 0), unknown_quantity_listings: rows.filter((r) => r.quantity === null).length, cards: coverage, offers: rows, observations, notice: "Unreviewed observations over time, not current inventory or completed sales. Repeated sale IDs are counted once; original observations retain changes. Missing advertised offers remain uncollected. Count agreement alone does not prove completeness. Edition markup is retained for manual inspection; blank text does not prove an edition." };
-}
-function marketCaptureTool(read, summarize) {
-  if (location.hostname !== "www.urban-rivals.com" || !location.pathname.startsWith("/market")) {
-    alert("Open the Urban Rivals marketplace first.");
-    return;
-  }
-  if (document.getElementById("toolkit-market-capture")) {
-    document.getElementById("toolkit-market-capture").hidden = false;
-    return;
-  }
-  const observations = [], panel = document.createElement("section");
-  panel.id = "toolkit-market-capture";
-  panel.style.cssText = "position:fixed;right:12px;top:12px;z-index:2147483647;background:#fff;color:#172637;padding:18px;border:3px solid #24628a;border-radius:10px;max-width:370px;font:14px Arial;box-shadow:0 3px 18px #0008";
-  const heading = document.createElement("h3");
-  heading.textContent = "Market capture - local only";
-  const status = document.createElement("p");
-  const help = document.createElement("p");
-  help.textContent = "Capture this page, then manually open View all and each offer page; capture again. No Buy/Sell clicks or automatic requests. Keep the search and main page unchanged during a capture session.";
-  panel.append(heading, status, help);
-  document.body.append(panel);
-  const button = (label, fn) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = label;
-    b.style.cssText = "margin:4px;padding:8px;color:#172637;background:#eef5fb;border:1px solid #24628a";
-    b.onclick = fn;
-    panel.append(b);
-    return b;
-  };
-  const quote = (v) => {
-    let s = String(v ?? "");
-    if (/^[\s\u0000-\u001f]*[=+@-]/.test(s)) s = "'" + s;
-    return '"' + s.replaceAll('"', '""') + '"';
-  };
-  const save = (content, name, type) => {
-    const a = document.createElement("a"), url = URL.createObjectURL(new Blob([content], { type }));
-    a.href = url;
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1e3);
-  };
-  const report = () => summarize(observations);
-  button("Capture loaded offers", () => {
-    try {
-      const o = read(document, location.href);
-      if (o.overlay_loading) throw Error("The offer overlay is still loading or empty. Wait for listing rows, or close it before capturing.");
-      if (observations.length && JSON.stringify([o.search, o.controls, o.page_numbers, o.cards.map((c) => c.card_id)]) !== JSON.stringify([observations[0].search, observations[0].controls, observations[0].page_numbers, observations[0].cards.map((c) => c.card_id)])) throw Error("Main page or search settings changed. Download this session and reload before starting another.");
-      if (!o.cards.length || !o.offers.length) throw Error("No supported loaded market listings found.");
-      if (observations.length >= 50 || observations.reduce((n, s) => n + s.offers.length, 0) + o.offers.length > 1e4) throw Error("Capture limit reached; download before starting another session. Nothing was removed.");
-      observations.push(o);
-      const r = report();
-      status.textContent = r.unique_cards + " unique cards; " + r.unique_observed_listings + " unique observed listings; " + observations.length + " observations. " + r.cards.reduce((n, c) => n + (c.advertised_offers || 0), 0) + " advertised offers; " + r.cards.reduce((n, c) => n + Math.max(0, c.advertised_minus_observed || 0), 0) + " not yet observed. Count agreement does not prove completeness; inspect JSON issues.";
-    } catch (e) {
-      status.textContent = e.message;
-    }
-  });
-  button("Download evidence JSON", () => save(JSON.stringify(report(), null, 2), "market-capture.json", "application/json"));
-  button("Download offers CSV", () => {
-    const fields = ["sale_id", "card_id", "quantity", "price_clintz", "level", "edition_text", "power", "damage", "ability", "seller", "time_remaining", "first_seen", "last_seen"];
-    save([fields, ...report().offers.map((r) => fields.map((k) => r[k]))].map((r) => r.map(quote).join(",")).join("\r\n") + "\r\n", "market-offers.csv", "text/csv");
-  });
-  button("Download card coverage CSV", () => {
-    const fields = ["card_id", "name", "advertised_offers", "observed_unique_listings", "advertised_minus_observed", "coverage_status"];
-    save([fields, ...report().cards.map((r) => fields.map((k) => r[k]))].map((r) => r.map(quote).join(",")).join("\r\n") + "\r\n", "market-card-coverage.csv", "text/csv");
-  });
-  button("Hide helper", () => {
-    panel.hidden = true;
-  });
-  status.textContent = "No capture yet. Downloads stay on this computer. Reloading loses this session; download JSON first.";
-}
-function marketCapturePage() {
-  const script = "void (" + marketCaptureTool.toString() + ")(" + readMarketDOM.toString() + "," + summarizeMarket.toString() + ")";
-  const href = ("javascript:" + encodeURIComponent(script)).replaceAll("&", "&amp;").replaceAll('"', "&quot;");
-  return '<!doctype html><meta charset="utf-8"><title>Capture signed-in market page</title><style>body{font:18px system-ui;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}a{color:#135c92}.install{display:inline-block;background:#eaf4ff;padding:16px;border:2px solid #135c92}</style><h1>Capture the market you already opened</h1><p>This helper reads loaded Urban Rivals listings in your signed-in browser. It makes no network requests, reads no cookies or account balances, and never clicks market controls.</p><ol><li>Drag the following link to your bookmarks bar.</li><li>Open your market page, then click the saved bookmark.</li><li>Click Capture loaded offers. For more listings, manually open View all, capture each offer page, and repeat.</li><li>Download offers CSV, card coverage CSV and evidence JSON before reloading. CSV files can be imported into the workbench for review.</li></ol><a class="install" href="' + href + '">Capture Urban Rivals market</a><p>The helper reports observed listings separately from advertised totals. It does not claim complete market coverage. Stop at the current main results page; start a separate session if filters/page change. Card editions and time remaining require manual review.</p><p>If your browser or the site blocks bookmarklets, do not disable security settings; use a supported capture route instead.</p><p><a href="/">Return to workbench</a></p>';
-}
+// src/market-capture-assets.js
+var marketCaptureHTML = `<!doctype html><meta charset="utf-8"><title>Capture signed-in market page</title><style>body{font:18px system-ui;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}a{color:#135c92}.install{display:inline-block;background:#eaf4ff;padding:16px;border:2px solid #135c92}</style><h1>Capture the market you already opened</h1><p>This helper reads loaded Urban Rivals listings in your signed-in browser. It makes no network requests, reads no cookies or account balances, and never clicks market controls.</p><ol><li>Drag the following link to your bookmarks bar.</li><li>Open your market page, then click the saved bookmark.</li><li>Click Capture loaded offers. For more listings, manually open View all, capture each offer page, and repeat.</li><li>Download offers CSV, card coverage CSV and evidence JSON before reloading. CSV files can be imported into the workbench for review.</li></ol><a class="install" href="javascript:void%20(function%20marketCaptureTool(read%2Csummarize)%7B%0D%0A%20if(location.hostname!%3D%3D'www.urban-rivals.com'%7C%7C!location.pathname.startsWith('%2Fmarket'))%7Balert('Open%20the%20Urban%20Rivals%20marketplace%20first.')%3Breturn%3B%7D%0D%0A%20if(document.getElementById('toolkit-market-capture'))%7Bdocument.getElementById('toolkit-market-capture').hidden%3Dfalse%3Breturn%3B%7D%0D%0A%20const%20observations%3D%5B%5D%2Cpanel%3Ddocument.createElement('section')%3Bpanel.id%3D'toolkit-market-capture'%3B%0D%0A%20panel.style.cssText%3D'position%3Afixed%3Bright%3A12px%3Btop%3A12px%3Bz-index%3A2147483647%3Bbackground%3A%23fff%3Bcolor%3A%23172637%3Bpadding%3A18px%3Bborder%3A3px%20solid%20%2324628a%3Bborder-radius%3A10px%3Bmax-width%3A370px%3Bfont%3A14px%20Arial%3Bbox-shadow%3A0%203px%2018px%20%230008'%3B%0D%0A%20const%20heading%3Ddocument.createElement('h3')%3Bheading.textContent%3D'Market%20capture%20-%20local%20only'%3Bconst%20status%3Ddocument.createElement('p')%3B%0D%0A%20const%20help%3Ddocument.createElement('p')%3Bhelp.textContent%3D'Capture%20this%20page%2C%20then%20manually%20open%20View%20all%20and%20each%20offer%20page%3B%20capture%20again.%20No%20Buy%2FSell%20clicks%20or%20automatic%20requests.%20Keep%20the%20search%20and%20main%20page%20unchanged%20during%20a%20capture%20session.'%3B%0D%0A%20panel.append(heading%2Cstatus%2Chelp)%3Bdocument.body.append(panel)%3B%0D%0A%20const%20button%3D(label%2Cfn)%3D%3E%7Bconst%20b%3Ddocument.createElement('button')%3Bb.type%3D'button'%3Bb.textContent%3Dlabel%3Bb.style.cssText%3D'margin%3A4px%3Bpadding%3A8px%3Bcolor%3A%23172637%3Bbackground%3A%23eef5fb%3Bborder%3A1px%20solid%20%2324628a'%3Bb.onclick%3Dfn%3Bpanel.append(b)%3Breturn%20b%3B%7D%3B%0D%0A%20const%20quote%3Dv%3D%3E%7Blet%20s%3DString(v%3F%3F'')%3Bif(%2F%5E%5B%5Cs%5Cu0000-%5Cu001f%5D*%5B%3D%2B%40-%5D%2F.test(s))s%3D%22'%22%2Bs%3Breturn%20'%22'%2Bs.replaceAll('%22'%2C'%22%22')%2B'%22'%3B%7D%3B%0D%0A%20const%20save%3D(content%2Cname%2Ctype)%3D%3E%7Bconst%20a%3Ddocument.createElement('a')%2Curl%3DURL.createObjectURL(new%20Blob(%5Bcontent%5D%2C%7Btype%7D))%3Ba.href%3Durl%3Ba.download%3Dname%3Ba.click()%3BsetTimeout(()%3D%3EURL.revokeObjectURL(url)%2C1000)%3B%7D%3B%0D%0A%20const%20report%3D()%3D%3Esummarize(observations)%3B%0D%0A%20button('Capture%20loaded%20offers'%2C()%3D%3E%7Btry%7Bconst%20o%3Dread(document%2Clocation.href)%3Bif(o.overlay_loading)throw%20Error('The%20offer%20overlay%20is%20still%20loading%20or%20empty.%20Wait%20for%20listing%20rows%2C%20or%20close%20it%20before%20capturing.')%3Bif(observations.length%26%26JSON.stringify(%5Bo.search%2Co.controls%2Co.page_numbers%2Co.cards.map(c%3D%3Ec.card_id)%5D)!%3D%3DJSON.stringify(%5Bobservations%5B0%5D.search%2Cobservations%5B0%5D.controls%2Cobservations%5B0%5D.page_numbers%2Cobservations%5B0%5D.cards.map(c%3D%3Ec.card_id)%5D))throw%20Error('Main%20page%20or%20search%20settings%20changed.%20Download%20this%20session%20and%20reload%20before%20starting%20another.')%3Bif(!o.cards.length%7C%7C!o.offers.length)throw%20Error('No%20supported%20loaded%20market%20listings%20found.')%3Bif(observations.length%3E%3D50%7C%7Cobservations.reduce((n%2Cs)%3D%3En%2Bs.offers.length%2C0)%2Bo.offers.length%3E10000)throw%20Error('Capture%20limit%20reached%3B%20download%20before%20starting%20another%20session.%20Nothing%20was%20removed.')%3Bobservations.push(o)%3Bconst%20r%3Dreport()%3Bstatus.textContent%3Dr.unique_cards%2B'%20unique%20cards%3B%20'%2Br.unique_observed_listings%2B'%20unique%20observed%20listings%3B%20'%2Bobservations.length%2B'%20observations.%20'%2Br.cards.reduce((n%2Cc)%3D%3En%2B(c.advertised_offers%7C%7C0)%2C0)%2B'%20advertised%20offers%3B%20'%2Br.cards.reduce((n%2Cc)%3D%3En%2BMath.max(0%2Cc.advertised_minus_observed%7C%7C0)%2C0)%2B'%20not%20yet%20observed.%20Count%20agreement%20does%20not%20prove%20completeness%3B%20inspect%20JSON%20issues.'%3B%7Dcatch(e)%7Bstatus.textContent%3De.message%3B%7D%7D)%3B%0D%0A%20button('Download%20evidence%20JSON'%2C()%3D%3Esave(JSON.stringify(report()%2Cnull%2C2)%2C'market-capture.json'%2C'application%2Fjson'))%3B%0D%0A%20button('Download%20offers%20CSV'%2C()%3D%3E%7Bconst%20fields%3D%5B'sale_id'%2C'card_id'%2C'card_name'%2C'quantity'%2C'price_clintz'%2C'level'%2C'edition_text'%2C'power'%2C'damage'%2C'ability'%2C'seller'%2C'time_remaining'%2C'first_seen'%2C'last_seen'%5D%3Bsave(%5Bfields%2C...report().offers.map(r%3D%3Efields.map(k%3D%3Er%5Bk%5D))%5D.map(r%3D%3Er.map(quote).join('%2C')).join('%5Cr%5Cn')%2B'%5Cr%5Cn'%2C'market-offers.csv'%2C'text%2Fcsv')%3B%7D)%3B%0D%0A%20button('Download%20card%20coverage%20CSV'%2C()%3D%3E%7Bconst%20fields%3D%5B'card_id'%2C'name'%2C'advertised_offers'%2C'observed_unique_listings'%2C'advertised_minus_observed'%2C'coverage_status'%5D%3Bsave(%5Bfields%2C...report().cards.map(r%3D%3Efields.map(k%3D%3Er%5Bk%5D))%5D.map(r%3D%3Er.map(quote).join('%2C')).join('%5Cr%5Cn')%2B'%5Cr%5Cn'%2C'market-card-coverage.csv'%2C'text%2Fcsv')%3B%7D)%3B%0D%0A%20button('Hide%20helper'%2C()%3D%3E%7Bpanel.hidden%3Dtrue%3B%7D)%3Bstatus.textContent%3D'No%20capture%20yet.%20Downloads%20stay%20on%20this%20computer.%20Reloading%20loses%20this%20session%3B%20download%20JSON%20first.'%3B%0D%0A%7D)(function%20readMarketDOM(doc%2CsourceURL)%7B%0D%0A%20const%20norm%3Ds%3D%3EString(s%3F%3F'').replace(%2F%5Cs%2B%2Fg%2C'%20').trim()%3B%0D%0A%20const%20number%3Ds%3D%3E%2F%5E%5Cd%2B%24%2F.test(String(s))%26%26Number.isSafeInteger(Number(s))%3FNumber(s)%3Anull%3B%0D%0A%20const%20cards%3D%5B%5D%2Coffers%3D%5B%5D%2Cissues%3D%5B%5D%3B%0D%0A%20const%20groups%3DArray.from(doc.querySelectorAll('%5Bid%5E%3D%22row-%22%5D')).filter(n%3D%3E%2F%5Erow-%5Cd%2B%24%2F.test(n.id)%26%26n.querySelector('tr%5Bdata-saleid%5D'))%3B%0D%0A%20for(const%20g%20of%20groups)%7B%0D%0A%20%20const%20id%3Dg.id.slice(4)%2Clink%3DArray.from(g.querySelectorAll('a%5Bhref*%3D%22id_perso%3D%22%5D')).find(a%3D%3Enorm(a.textContent))%3B%0D%0A%20%20const%20all%3DArray.from(g.querySelectorAll('a')).find(a%3D%3E%2F%5EView%20all%20%5B%5Cd%20%2C%5D%2B%20offers%24%2Fi.test(norm(a.textContent)))%3B%0D%0A%20%20const%20advertised%3Dall%3FNumber(norm(all.textContent).replace(%2F%5CD%2Fg%2C''))%3Anull%3B%0D%0A%20%20cards.push(%7Bcard_id%3Aid%2Cname%3Anorm(link%3F.textContent)%7C%7Cnull%2Cadvertised_offers%3Aadvertised%7D)%3B%0D%0A%20%7D%0D%0A%20const%20modal%3Ddoc.querySelector('.js-offers-modal.show')%3B%0D%0A%20const%20modalLink%3Dmodal%3F.querySelector('a.js-offers-modal-page')%3B%0D%0A%20const%20modalId%3DmodalLink%3Fnew%20URL(modalLink.getAttribute('href')%2CsourceURL).searchParams.get('id')%3Anull%3B%0D%0A%20if(modalId%26%26!cards.some(c%3D%3Ec.card_id%3D%3D%3DmodalId))cards.push(%7Bcard_id%3AmodalId%2Cname%3Anorm(modal.querySelector('%23market-offers-title%2Ch3%2Ch4%2Ch5')%3F.textContent)%7C%7Cnull%2Cadvertised_offers%3Anull%7D)%3B%0D%0A%20const%20roots%3D%5B...groups.map(g%3D%3E(%7Bnode%3Ag%2Ccard_id%3Ag.id.slice(4)%2Cview%3A'page-preview'%7D))%2C...(modalId%3F%5B%7Bnode%3Amodal%2Ccard_id%3AmodalId%2Cview%3A'offer-overlay'%7D%5D%3A%5B%5D)%5D%3B%0D%0A%20for(const%20root%20of%20roots)for(const%20row%20of%20root.node.querySelectorAll('tr%5Bdata-saleid%5D'))%7B%0D%0A%20%20const%20cells%3DArray.from(row.cells)%2Csale_id%3Drow.getAttribute('data-saleid')%2Ccard_id%3Drow.getAttribute('data-id')%3B%0D%0A%20%20const%20raw%3Dcells.map(c%3D%3Enorm(c.textContent))%3B%0D%0A%20%20if(!%2F%5E%5Cd%2B%24%2F.test(sale_id%7C%7C'')%7C%7Ccard_id!%3D%3Droot.card_id%7C%7Ccells.length!%3D%3D10)%7Bissues.push(%7Bcard_id%3Aroot.card_id%2Csale_id%2Creason%3A'Unexpected%20listing%20identity%20or%20column%20layout%3B%20retained%20raw%20cells.'%2Craw_cells%3Araw%7D)%3Bcontinue%3B%7D%0D%0A%20%20const%20edition%3Dcells%5B3%5D%2Cseller%3Dcells%5B8%5D.querySelector('a')%3B%0D%0A%20%20const%20offer%3D%7Bsale_id%2Ccard_id%2Cquantity%3Anumber(row.getAttribute('data-quantity'))%2Cprice_clintz%3Anumber(row.getAttribute('data-price'))%2Clevel%3Anumber(row.getAttribute('data-level'))%2Cedition_text%3Anorm(edition.textContent)%2Cedition_labels%3AArray.from(edition.querySelectorAll('%5Btitle%5D%2C%5Baria-label%5D%2Cimg%5Balt%5D')).map(e%3D%3Ee.getAttribute('title')%7C%7Ce.getAttribute('aria-label')%7C%7Ce.getAttribute('alt')).filter(Boolean)%2Cedition_markup%3Aedition.innerHTML%2Cstate%3Arow.getAttribute('data-state')%2Cserial%3Arow.getAttribute('data-serial')%2Cpower%3Araw%5B5%5D%2Cdamage%3Araw%5B6%5D%2Cability%3Araw%5B7%5D%2Cseller%3Anorm(seller%3F.textContent)%7C%7Craw%5B8%5D%2Ctime_remaining%3Araw%5B9%5D%2Craw_cells%3Araw%2Cview%3Aroot.view%7D%3B%0D%0A%20%20if(offer.quantity%3D%3D%3Dnull%7C%7Coffer.price_clintz%3D%3D%3Dnull%7C%7Coffer.level%3D%3D%3Dnull)issues.push(%7Bsale_id%2Creason%3A'A%20numeric%20listing%20attribute%20was%20missing%20or%20invalid%3B%20values%20were%20not%20guessed.'%7D)%3B%0D%0A%20%20offers.push(offer)%3B%0D%0A%20%7D%0D%0A%20const%20controls%3DArray.from(doc.querySelectorAll('select')).map(s%3D%3E(%7Blabel%3As.getAttribute('aria-label')%7C%7Cs.name%7C%7C''%2Cvalue%3As.value%2Ctext%3Anorm(s.selectedOptions%3F.%5B0%5D%3F.textContent)%7D))%3B%0D%0A%20return%20%7Bformat%3A'toolkit-market-observation-v1'%2Ccaptured_at%3Anew%20Date().toISOString()%2Csource_url%3AsourceURL%2Csearch%3Adoc.querySelector('%23market-search')%3F.value%7C%7C''%2Ccontrols%2Cpage_numbers%3AArray.from(doc.querySelectorAll('.ur-pagination-page.active')).filter(n%3D%3E!n.closest('.js-offers-modal')).map(n%3D%3Enorm(n.textContent))%2Coverlay_card_id%3AmodalId%2Coverlay_page%3Amodal%3Fnorm(modal.querySelector('.ur-pagination-page.active')%3F.textContent)%3Anull%2Coverlay_loading%3A!!modal%26%26!offers.some(r%3D%3Er.view%3D%3D%3D'offer-overlay')%2Ccards%2Coffers%2Cissues%2Cnotice%3A'Loaded%20DOM%20observations%20only.%20Advertised%20offer%20counts%20are%20separate.%20This%20is%20not%20a%20simultaneous%20complete%20market%20snapshot%20or%20proof%20of%20completed%20sales.'%7D%3B%0D%0A%7D%2Cfunction%20summarizeMarket(observations)%7B%0D%0A%20const%20cards%3Dnew%20Map()%2Clistings%3Dnew%20Map()%3B%0D%0A%20for(const%20o%20of%20observations)%7Bfor(const%20c%20of%20o.cards)if(c.advertised_offers!%3D%3Dnull%7C%7C!cards.has(c.card_id))cards.set(c.card_id%2Cc)%3Bfor(const%20r%20of%20o.offers)%7Bconst%20prior%3Dlistings.get(r.sale_id)%3Blistings.set(r.sale_id%2C%7B...r%2Cfirst_seen%3Aprior%3F.first_seen%7C%7Co.captured_at%2Clast_seen%3Ao.captured_at%7D)%3B%7D%7D%0D%0A%20const%20rows%3D%5B...listings.values()%5D.map(r%3D%3E(%7B...r%2Ccard_name%3Acards.get(r.card_id)%3F.name%7C%7Cnull%7D))%2Ccoverage%3D%5B...cards.values()%5D.map(c%3D%3E%7Bconst%20observed%3Drows.filter(r%3D%3Er.card_id%3D%3D%3Dc.card_id).length%3Breturn%20%7B...c%2Cobserved_unique_listings%3Aobserved%2Cadvertised_minus_observed%3Ac.advertised_offers%3D%3D%3Dnull%3Fnull%3Ac.advertised_offers-observed%2Ccoverage_status%3Ac.advertised_offers%3D%3D%3Dnull%3F'unknown'%3Aobserved%3Cc.advertised_offers%3F'partial'%3Aobserved%3D%3D%3Dc.advertised_offers%3F'count_matches_only'%3A'changed_during_capture'%7D%3B%7D)%3B%0D%0A%20return%20%7Bformat%3A'toolkit-market-capture-v1'%2Cstarted_at%3Aobservations%5B0%5D%3F.captured_at%2Cended_at%3Aobservations.at(-1)%3F.captured_at%2Cunique_cards%3Acards.size%2Cunique_observed_listings%3Arows.length%2Cobserved_quantity_total%3Arows.some(r%3D%3Er.quantity%3D%3D%3Dnull)%3Fnull%3Arows.reduce((n%2Cr)%3D%3En%2Br.quantity%2C0)%2Cunknown_quantity_listings%3Arows.filter(r%3D%3Er.quantity%3D%3D%3Dnull).length%2Ccards%3Acoverage%2Coffers%3Arows%2Cobservations%2Cnotice%3A'Unreviewed%20observations%20over%20time%2C%20not%20current%20inventory%20or%20completed%20sales.%20Repeated%20sale%20IDs%20are%20counted%20once%3B%20original%20observations%20retain%20changes.%20Missing%20advertised%20offers%20remain%20uncollected.%20Count%20agreement%20alone%20does%20not%20prove%20completeness.%20Edition%20markup%20is%20retained%20for%20manual%20inspection%3B%20blank%20text%20does%20not%20prove%20an%20edition.'%7D%3B%0D%0A%7D)">Capture Urban Rivals market</a><p>The helper reports observed listings separately from advertised totals. It does not claim complete market coverage. Stop at the current main results page; start a separate session if filters/page change. Card editions and time remaining require manual review.</p><p>If your browser or the site blocks bookmarklets, do not disable security settings; use a supported capture route instead.</p><p><a href="/">Return to workbench</a></p>`;
 
 // src/interpretation/lab-page.js
 var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Interpretation Lab \xB7 Web Table Toolkit</title>
@@ -1756,11 +1637,11 @@ function taskResponse(job) {
 }
 
 // src/interpretation/evidence-context.js
-function evidenceContext(source, evidence, { document: document2 = false } = {}) {
-  const start = document2 ? evidence.document_start : evidence.source_start, end = document2 ? evidence.document_end : evidence.source_end;
+function evidenceContext(source, evidence, { document = false } = {}) {
+  const start = document ? evidence.document_start : evidence.source_start, end = document ? evidence.document_end : evidence.source_end;
   if (typeof source !== "string" || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > source.length || source.slice(start, end) !== evidence.quote) return null;
   const from = Math.max(0, start - 350), to = Math.min(source.length, end + 350);
-  return { before: source.slice(from, start), quote: source.slice(start, end), after: source.slice(end, to), start: from, end: to, truncated_before: from > 0, truncated_after: to < source.length, scope: document2 ? "retained page" : "current source snapshot" };
+  return { before: source.slice(from, start), quote: source.slice(start, end), after: source.slice(end, to), start: from, end: to, truncated_before: from > 0, truncated_after: to < source.length, scope: document ? "retained page" : "current source snapshot" };
 }
 
 // src/interpretation/text-rules.js
@@ -4238,7 +4119,7 @@ async function labFetch(request) {
       return reply(await selectCapturedTable(body.parent, body.options));
     }
     if (url.pathname === "/api/interpretation/start") {
-      let packet, response, parserVersion, document2, mapping;
+      let packet, response, parserVersion, document, mapping;
       if (body?.example_id === "custom-text") {
         if (!only(body, ["example_id", "source", "schema", "mode", "dataset_id", "mapping", "retrieval", "task", "proposal"]) || body.mode !== void 0 && !["auto", "pair", "requested"].includes(body.mode))
           fail5("invalid_input", "Choose automatic suggestions, manual pair columns or requested columns.");
@@ -4266,7 +4147,7 @@ async function labFetch(request) {
           const plan = planPage(body.source, PROSE_VERSION, { semantic: true, enhanced: true });
           const selected = body.dataset_id === void 0 ? plan.datasets[0] : plan.datasets.find((d) => d.id === body.dataset_id);
           if (!selected) fail5("invalid_selection", "Choose a listed full-page section.");
-          document2 = { source: body.source, dataset_id: selected.id };
+          document = { source: body.source, dataset_id: selected.id };
           packet = await createPacket({ source: { text: selected.text, url: body.source.url ?? null }, schema: selected.schema });
           parserVersion = selected.parser_version;
         } else {
@@ -4293,17 +4174,17 @@ async function labFetch(request) {
         packet,
         await scriptedInterpreter(response)
       );
-      if (body.retrieval && document2 && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail5("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
+      if (body.retrieval && document && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail5("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
       const job = {
         example_id: body.example_id,
         packet,
         cache_entry: run.cache_entry,
         events: [],
         revisions: [],
-        ...document2 ? { document: document2 } : {},
+        ...document ? { document } : {},
         ...mapping ? { mapping } : {},
         ...body.mode === "requested" ? { task: body.task, ...body.proposal ? { proposal: body.proposal } : {} } : {},
-        ...body.retrieval ? { retrieval: document2 ? { ...body.retrieval, snapshot_hash: packet.source.text_hash } : body.retrieval } : {},
+        ...body.retrieval ? { retrieval: document ? { ...body.retrieval, snapshot_hash: packet.source.text_hash } : body.retrieval } : {},
         ...body.example_id === "custom-text" ? { parser_version: parserVersion } : {}
       };
       return reply(await view(job, await checkJob(job)));
@@ -5461,10 +5342,10 @@ async function fetchPublicPage(input, ownHost) {
     await checkPublicDNS(url.hostname, signal);
     const r = await fetch(url.href, { redirect: "manual", signal, headers: { Accept: "text/html", "User-Agent": "GenericScraperToolkit/1.0 (public HTML tables)" } });
     if ([301, 302, 303, 307, 308].includes(r.status)) {
-      const location2 = r.headers.get("location");
+      const location = r.headers.get("location");
       await r.body?.cancel();
-      if (!location2 || redirects === 3) throw new InputError("Source redirected too many times or omitted its destination.", 422);
-      url = publicURL(new URL(location2, url).href);
+      if (!location || redirects === 3) throw new InputError("Source redirected too many times or omitted its destination.", 422);
+      url = publicURL(new URL(location, url).href);
       continue;
     }
     if (!r.ok) {
@@ -5831,7 +5712,7 @@ var worker_default = {
     const accessDenied = await ownerAccess(request, env);
     if (accessDenied) return accessDenied;
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/market-capture") return new Response(marketCapturePage(), { headers: { ...SECURITY, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+    if (request.method === "GET" && url.pathname === "/market-capture") return new Response(marketCaptureHTML, { headers: { ...SECURITY, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
     if (request.method === "GET" && ["/workspace", "/workspace-client.js"].includes(url.pathname)) return new Response(url.pathname === "/workspace" ? WORKSPACE_PAGE : workspace_client_default, { headers: { ...SECURITY, "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'", "Content-Type": url.pathname === "/workspace" ? "text/html; charset=utf-8" : "application/javascript; charset=utf-8" } });
     if (url.pathname === "/api/workspace") return workspaceAPI(request, env);
     if (url.pathname === "/api/interpretation/storage") return feedbackStorage(request, env);
