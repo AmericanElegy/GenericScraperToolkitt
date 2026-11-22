@@ -228,7 +228,7 @@
       row = selected(),
       field = row?.fields[state.field];
     const retrieval=state.view.job.retrieval;
-    $("source-info").textContent=packet.passages.length+" passages in current section · Source: "+(packet.source.url||"none")+ (retrieval ? ". Recorded retrieval: "+(retrieval.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML")+". This review uses the retained snapshot; revalidation does not fetch the URL again." : ". Reference only; this pasted review did not fetch the URL.");
+    $("source-info").textContent=packet.passages.length+" passages in current section · Source: "+(packet.source.url||"none")+ (retrieval ? ". Recorded retrieval: "+(retrieval.method==="browser-market"?"signed-in browser capture":retrieval.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML")+". This review uses the retained snapshot; revalidation does not fetch the URL again." : ". Reference only; this pasted review did not fetch the URL.");
     $("source-hash").textContent = "SHA-256: " + packet.source.text_hash;
     $("passages").replaceChildren(
       ...packet.passages.map((p) => {
@@ -641,11 +641,11 @@
     if(state.view?.job.retrieval?.retrieved_at===state.retrieved.retrieved_at)fileReviews.set(key(state.view.job.retrieval),state.view);
     const cached=fileReviews.get(key(retrieval));
     if(cached)state.view=cached;
-    else {const response=await request("/api/interpretation/start",{example_id:"custom-text",mode:"auto",source:{text:dataset.text,url:state.retrieved.source},retrieval});state.view=await response.json();}
+    else {const response=await request("/api/interpretation/start",{example_id:"custom-text",mode:"auto",source:{text:dataset.text,url:state.retrieved.source},...(dataset.mapping?{mapping:dataset.mapping}:{}),retrieval});state.view=await response.json();}
     state.rowId=null;state.field=null;
     $("source-text").value=dataset.text;$("source-url").value=state.retrieved.source||'';$("text-mode").value="auto";
     clearDecision();render();editCandidate();
-    say((state.retrieved.method==='browser-file'?(cached?'File review resumed':'File imported · unapproved suggestions'):"Fetched using "+(state.retrieved.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML"))+". "+(dataset.display_label||dataset.label)+". "+state.view.extraction.message);
+    say((['browser-file','browser-market'].includes(state.retrieved.method)?(cached?'File review resumed':'File imported · unapproved suggestions'):"Fetched using "+(state.retrieved.method==="local-chromium"?"local JavaScript rendering":"ordinary HTML"))+". "+(dataset.display_label||dataset.label)+". "+state.view.extraction.message);
   }
   let fileCapture=null;
   const fileReviews=new Map();
@@ -731,12 +731,12 @@
       const file=$('workbench-backup').files[0];if(!file||file.size>20*1024*1024)throw Error('Choose a workbench backup up to 20 MiB. Current work is unchanged.');
       let backup;try{backup=JSON.parse(await file.text());}catch{throw Error('Invalid backup JSON. Current work is unchanged.');}
       const s=backup.source;
-      if(backup.format!=='toolkit-workbench-v1'||!s||!['browser-file','static-html','local-chromium','pasted-text'].includes(s.method)||!Array.isArray(s.coverage)||s.coverage.length>10000||!Array.isArray(s.datasets)||!Array.isArray(backup.reviews)||backup.reviews.length>1000||!s.file||typeof s.file.name!=='string'||!Array.isArray(s.issues)||!Array.isArray(s.inventory)||s.coverage.some(p=>!p||typeof p.id!=='string'||typeof p.label!=='string'||typeof p.kind!=='string'||!['pending','reviewed','excluded','unsupported'].includes(p.status)||!Array.isArray(p.dataset_ids)||typeof p.note!=='string'||p.note.length>1000||p.text!==undefined&&typeof p.text!=='string'||p.rows!==undefined&&(!Array.isArray(p.rows)||p.rows.some(r=>!Array.isArray(r)||r.some(c=>typeof c!=='string')))||p.error&&p.status==='reviewed'||['reviewed','excluded'].includes(p.status)&&!p.note.trim()))throw Error('Invalid coverage backup. Current work is unchanged.');
+      if(backup.format!=='toolkit-workbench-v1'||!s||!['browser-file','browser-market','static-html','local-chromium','pasted-text'].includes(s.method)||!Array.isArray(s.coverage)||s.coverage.length>10000||!Array.isArray(s.datasets)||!Array.isArray(backup.reviews)||backup.reviews.length>1000||!s.file||typeof s.file.name!=='string'||!Array.isArray(s.issues)||!Array.isArray(s.inventory)||s.coverage.some(p=>!p||typeof p.id!=='string'||typeof p.label!=='string'||typeof p.kind!=='string'||!['pending','reviewed','excluded','unsupported'].includes(p.status)||!Array.isArray(p.dataset_ids)||typeof p.note!=='string'||p.note.length>1000||p.text!==undefined&&typeof p.text!=='string'||p.rows!==undefined&&(!Array.isArray(p.rows)||p.rows.some(r=>!Array.isArray(r)||r.some(c=>typeof c!=='string')))||p.error&&p.status==='reviewed'||['reviewed','excluded'].includes(p.status)&&!p.note.trim()))throw Error('Invalid coverage backup. Current work is unchanged.');
       if(new Set(s.coverage.map(p=>p.id)).size!==s.coverage.length||new Set(s.datasets.map(d=>d.id)).size!==s.datasets.length||s.coverage.some(p=>p.dataset_ids.some(id=>!s.datasets.some(d=>d.id===id))))throw Error('Coverage references do not match the source. Current work is unchanged.');
       const restored=[];for(const session of backup.reviews){const response=await request('/api/interpretation/action',{action:'restore',session});const view=await response.json();if(s.method!=='pasted-text'&&view.job.retrieval?.retrieved_at!==s.retrieved_at)throw Error('A review belongs to a different source capture. Current work is unchanged.');restored.push(view);}
       // Validate every selection before replacing the current source or reviews.
       for(const d of s.datasets){if(typeof d.text!=='string'||await ToolkitFiles.digest(d.text)!==d.snapshot_hash)throw Error('Backup source snapshot mismatch. Current work is unchanged.');}
-      sourceAudit=s;state.retrieved=s.method==='browser-file'?s:{...s,file:undefined};fileCapture=s.captured_source;fileReviews.clear();for(const v of restored)fileReviews.set(v.job.retrieval?v.job.retrieval.snapshot_hash+'|'+v.job.retrieval.label:v.job.packet.hash,v);
+      sourceAudit=s;state.retrieved=['browser-file','browser-market'].includes(s.method)?s:{...s,file:undefined};fileCapture=s.captured_source;fileReviews.clear();for(const v of restored)fileReviews.set(v.job.retrieval?v.job.retrieval.snapshot_hash+'|'+v.job.retrieval.label:v.job.packet.hash,v);
       if(fileCapture)fileCapture.coverage=s.coverage;
       state.partSelection=null;state.partDirty=false;
       $('retrieved-panel').hidden=false;$('retrieved-method').textContent='Restored captured source';$('retrieved-source').textContent=s.file.name;$('retrieved-source').removeAttribute('href');
@@ -751,22 +751,47 @@
       if(!fileCapture)return;
       const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(fileCapture,null,2)],{type:'application/json'}));a.href=url;a.download='captured-source.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     };
-    $("import-file").onclick=()=>perform(async()=>{
-      const file=$("source-file").files[0];if(!file)throw Error('Choose a file first.');
-      say('Reading file locally. Your existing review stays available until a selection opens…');
-      const value=await globalThis.ToolkitFiles.importFile(file);
+    async function openImported(value){
       sourceAudit=value;fileCapture=value.captured_source;fileReviews.clear();
       showFileReport({...value.file,issues:value.issues,inventory:value.inventory});
       state.retrieved=value;state.partSelection=null;state.partDirty=false;
-      $("retrieved-panel").hidden=false;$("retrieved-method").textContent='Imported file · choose a sheet or document section';
-      $("retrieved-source").textContent=file.name;$("retrieved-source").removeAttribute('href');
+      $("retrieved-panel").hidden=false;$("retrieved-method").textContent=value.method==='browser-market'?'Browser capture · unreviewed market listings':'Imported file · choose a sheet or document section';
+      $("retrieved-source").textContent=value.file.name;$("retrieved-source").removeAttribute('href');
       $("retrieved-summary").textContent=value.datasets.length+' review selections. Each has its own approvals and download. Reviews stay while switching selections in this file; save sessions before reading another file or reloading. Check source coverage notes above.';
       $("retrieval-checks").textContent=value.issues.join('\n');
       $("retrieved-dataset").replaceChildren(...value.datasets.map(d=>{const o=text('option',d.display_label||d.label);o.value=d.id;return o;}));
       configureTablePart();
       if(value.datasets.length)await openRetrieved();
       else {controls();say('No supported selections. '+value.issues.join(' ')+(state.view?' Previous review is still open.':''));}
+    }
+    $("import-file").onclick=()=>perform(async()=>{
+      const file=$("source-file").files[0];if(!file)throw Error('Choose a file first.');
+      say('Reading file locally. Your existing review stays available until a selection opens…');
+      await openImported(await globalThis.ToolkitFiles.importFile(file));
     });
+    const bridgeToken=new URLSearchParams(location.search).get('market_capture');
+    if(bridgeToken&&/^[a-f0-9-]{36}$/.test(bridgeToken)&&window.opener){
+      const owner=window.opener;let accepted=false;
+      say('Waiting for your market capture. Finish sign-in if required. No rows will be approved automatically.');
+      const ready=()=>owner.postMessage({channel:'toolkit-market-bridge-v1',token:bridgeToken,action:'ready'},'https://www.urban-rivals.com');
+      const timer=setInterval(ready,1000);ready();
+      const expiry=setTimeout(()=>{clearInterval(timer);if(!accepted)say('No capture received. Retry from the market helper, or open its evidence JSON below.');},120000);
+      window.addEventListener('message',event=>{
+        if(accepted||event.source!==owner||event.origin!=='https://www.urban-rivals.com'||event.data?.channel!=='toolkit-market-bridge-v1'||event.data.token!==bridgeToken||event.data.action!=='capture')return;
+        accepted=true;clearInterval(timer);clearTimeout(expiry);
+        perform(async()=>{
+          try {
+          if(state.view||sourceAudit)throw Error('This tab already has a review. Open a fresh handoff tab; nothing was replaced.');
+          const value=await globalThis.ToolkitFiles.importMarketCapture(event.data.capture);
+          await openImported(value);
+          owner.postMessage({channel:'toolkit-market-bridge-v1',token:bridgeToken,action:'received'},event.origin);
+          history.replaceState(null,'',location.pathname);
+          say('Browser capture received: '+value.captured_source.market_capture.unique_observed_listings+' listings. Check source coverage, review each batch, then download approved rows. No automatic approvals.');
+          $('workspace').scrollIntoView({behavior:'smooth'});
+          } catch(error) {owner.postMessage({channel:'toolkit-market-bridge-v1',token:bridgeToken,action:'failed'},event.origin);throw error;}
+        });
+      });
+    }
     for(const type of ['dragover','drop'])$("file-drop").addEventListener(type,event=>{
       event.preventDefault();if(state.busy)return;
       if(type==='drop'){

@@ -7,6 +7,7 @@ import {tableDatasets,proseDatasets} from './source-fetch.js';
 import {capturedTableCatalog} from './table-selection.js';
 import {digest} from './pipeline.js';
 import {sourceCoverage} from './source-coverage.js';
+import {summarizeMarket} from '../market-capture.js';
 
 GlobalWorkerOptions.workerSrc='/pdf.worker.mjs';
 const MAX_FILE=10*1024*1024,MAX_TEXT=500000;
@@ -43,6 +44,7 @@ function pdfText(items) {
 export async function importFile(file) {
   if(!file||file.size>MAX_FILE)fail('Choose a file up to 10 MiB. Nothing was imported.');
   const ext=file.name.toLowerCase().split('.').pop();
+  if(ext==='json')return importMarketCapture(JSON.parse(await file.text()));
   if(!['xlsx','csv','pdf','docx','txt','tsv'].includes(ext))fail('Unsupported file. Use .xlsx, .csv, .pdf, .docx, .txt or .tsv. Save older .xls / .doc documents in the newer format first.');
   const data=await file.arrayBuffer(),issues=[],tables=[],blocks=[],inventory=[],retained=[],sourceParts=[];
   if(ext==='xlsx') {
@@ -166,4 +168,34 @@ export async function importFile(file) {
   return {source:null,method:'browser-file',retrieved_at:new Date().toISOString(),datasets,table_catalog,issues,inventory,
     file:{name:file.name,format:ext},coverage,captured_source:{file:file.name,format:ext,inventory,issues,content:retained,coverage}};
 }
-globalThis.ToolkitFiles={importFile,digest};
+export async function importMarketCapture(capture) {
+  if(!capture||JSON.stringify(capture).length>MAX_TEXT||capture.format!=='toolkit-market-capture-v1'||!Array.isArray(capture.observations)||!capture.observations.length||capture.observations.length>50)fail('Unsupported or oversized market capture. Use the helper evidence JSON; nothing was imported.');
+  let count=0;
+  const scalar=v=>v===null||typeof v==='string'||typeof v==='number';
+  for(const o of capture.observations){
+    if(!Array.isArray(o.cards)||!Array.isArray(o.offers)||!Array.isArray(o.issues)||!Number.isFinite(Date.parse(o.captured_at)))fail('Invalid market observation; nothing was imported.');
+    const url=new URL(o.source_url);if(url.origin!=='https://www.urban-rivals.com'||!url.pathname.startsWith('/market')||url.username||url.password)fail('Unsupported capture source; nothing was imported.');
+    if((count+=o.offers.length)>10000)fail('Market capture exceeds 10,000 observed rows; nothing was imported.');
+    for(const c of o.cards)if(typeof c.card_id!=='string'||!/^\d+$/.test(c.card_id)||!(c.name===null||typeof c.name==='string')||!(c.advertised_offers===null||Number.isSafeInteger(c.advertised_offers)&&c.advertised_offers>=0))fail('Invalid card coverage; nothing was imported.');
+    for(const r of o.offers){
+      if(typeof r.sale_id!=='string'||typeof r.card_id!=='string'||!/^\d+$/.test(r.sale_id)||!/^\d+$/.test(r.card_id)||!o.cards.some(c=>c.card_id===r.card_id)||!['quantity','price_clintz','level'].every(k=>r[k]===null||Number.isSafeInteger(r[k])&&r[k]>=0)||!['seller','power','damage','ability','time_remaining','edition_text'].every(k=>scalar(r[k])))fail('Invalid listing values; nothing was imported.');
+    }
+  }
+  const report=summarizeMarket(capture.observations);
+  if(!report.offers.length)fail('The capture has no supported listings; nothing was imported.');
+  const fields=['sale_id','card_name','quantity','price_clintz','level','seller'];
+  const quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';
+  const csv=[fields,...report.offers.map(r=>fields.map(k=>r[k]))].map(row=>row.map(quote).join(',')).join('\r\n');
+  const result=await importFile(new File([csv],'Market listings.csv',{type:'text/csv'}));
+  const notes=[report.unique_cards+' cards; '+report.unique_observed_listings+' unique observed listings. Unreviewed capture from '+report.started_at+' to '+report.ended_at+'.',...report.cards.map(c=>(c.name||c.card_id)+': '+c.observed_unique_listings+' observed / '+(c.advertised_offers??'unknown')+' advertised; '+c.coverage_status+'.'),report.notice,'Review shows six core columns. All other fields, raw cells, changes and capture issues remain in Download captured source and workbench backups.',...report.observations.flatMap(o=>o.issues.map(i=>'Capture issue: '+JSON.stringify(i)))];
+  if(notes.some(n=>n.length>2048)||notes.length+result.issues.length>512||notes.length+result.inventory.length>512)fail('Market coverage notes exceed the review limits. Use a smaller capture; nothing was imported.');
+  result.issues.push(...notes);result.inventory.push(...notes);
+  result.file={name:'Browser market capture',format:'market-capture'};
+  result.method='browser-market';result.source=report.observations[0].source_url;
+  result.captured_source={...result.captured_source,market_capture:report,issues:result.issues,inventory:result.inventory};
+  for(const d of result.datasets)d.mapping=fields.map(name=>({name,kind:['quantity','price_clintz','level'].includes(name)?'number':'text'}));
+  // Coverage notes stay visible even when there are no parser errors.
+  result.coverage.push(...notes.map((note,i)=>({id:'market-note-'+i,label:'Market coverage '+(i+1),kind:'limitation',text:note,dataset_ids:[],status:'pending',note:''})));
+  return result;
+}
+globalThis.ToolkitFiles={importFile,importMarketCapture,digest};

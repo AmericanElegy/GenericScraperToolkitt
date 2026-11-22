@@ -61,3 +61,7 @@ npm.cmd run release:check
 ```
 
 This runs the regression suite, the workbench format checks and existing browser workflows and a Cloudflare bundle dry run. It requires Chromium on the test path (`CHROMIUM_PATH` may select an executable); the release gate finds installed Edge/Chrome on Windows, or accepts `CHROMIUM_PATH`. It performs no deployment. No paid inference, paid browser service or FantasyBrief dependency is enabled.
+
+## Signed-in Urban Rivals capture
+
+Open [market capture setup](https://genericscrapertoolkit.jamesjustice95.workers.dev/market-capture), replace any older capture bookmark, then capture on the market and click **Review in workbench**. It opens captured listings directly in a new review tab. No extension or paid API is required. [Coverage, backup and fallback details](docs/market-capture.md).
