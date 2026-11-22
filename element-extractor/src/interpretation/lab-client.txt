@@ -696,7 +696,9 @@
     if(!$("file-report"))return;
     $("file-report").hidden=!file;
     if(!file)return;
-    $("file-summary").textContent=file.name+' · '+file.format+' · review coverage before downloading.';
+    const market=file.format==='market-capture';
+    $("file-summary").textContent=market?'Browser capture received. Listings below were transferred for review. “Not yet captured” means additional source offers remain; it is not a transfer error.':file.name+' · '+file.format+' · review coverage before downloading.';
+    $("file-issues").classList.toggle('capture-notes',market);
     $("file-issues").replaceChildren(...file.issues.map(i=>text('li',i)));
     $("file-inventory").replaceChildren(...file.inventory.map(i=>text('li',i)));
     $("download-capture").disabled=!fileCapture||!captureMatches;
