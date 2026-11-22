@@ -37,7 +37,8 @@
     "benchmark:mixed": "npm run build && node scripts/evaluate-mixed-document.mjs",
     "benchmark:report": "node scripts/report-extraction-benchmark.mjs",
     "ai:compare": "npm run build && node scripts/compare-ai.mjs",
-    "verify:source": "node scripts/verify-release-source.mjs"
+    "verify:source": "node scripts/verify-release-source.mjs",
+    "check:market-browser": "npm run build && node scripts/check-market-browser.mjs"
   },
   "repository": {
     "type": "git",

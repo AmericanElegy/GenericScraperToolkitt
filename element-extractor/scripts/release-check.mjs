@@ -19,6 +19,7 @@ try {
   for (const [name, args] of [
     ['Workers regression suite', ['--test']],
     ['Operator workbench formats and downloads', ['scripts/check-workbench-browser.mjs']],
+    ['Signed-in market capture helper', ['scripts/check-market-browser.mjs']],
     ['Table browser workflow', ['scripts/check-browser.mjs']],
     ['Interpretation browser workflow', ['scripts/check-lab-browser.mjs']],
     ['JavaScript renderer browser workflow', ['scripts/check-renderer-browser.mjs']],

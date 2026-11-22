@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {readFile,mkdir,mkdtemp,readdir,rm,writeFile}from 'node:fs/promises';
+import {tmpdir}from 'node:os';import {join}from 'node:path';
+import {launchBrowser}from './browser-cdp.mjs';
+import {summarizeMarket}from '../src/market-capture.js';
+import {Miniflare,convertV4MiniflareOptions}from 'miniflare';
+const row=(id,price='123')=>`<tr data-saleid="${id}" data-id="42" data-price="${price}" data-quantity="2" data-level="3" data-state="" data-serial="0"><td><button onclick="window.purchases++">Buy</button></td><td>x2</td><td>${price}</td><td><img alt="Special edition"></td><td>stars</td><td>6</td><td>4</td><td>Ability</td><td><a>=Seller</a></td><td>2 days</td></tr>`;
+const html=`<main><input id="market-search" value="Card test"><button id="balance">PRIVATE ACCOUNT VALUE</button><div id="row-42"><a href="/game/characters/?id_perso=42">Test card</a><a>View all 3 offers</a><table><tbody>${row('1')}${row('2')}</tbody></table></div></main>`;
+const dir=await mkdtemp(join(tmpdir(),'market-browser-'));let browser;let requests=0;
+const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile('worker-code.txt','utf8'),compatibilityDate:'2026-10-01'}));
+try{
+ browser=await launchBrowser({guardNetwork:false});await browser.send('Page.enable');await browser.send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:dir});
+ browser.on(async m=>{if(m.method==='Fetch.requestPaused'){requests++;await browser.send('Fetch.fulfillRequest',{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'text/html'}],body:Buffer.from(html).toString('base64')});}});
+ await browser.send('Fetch.enable',{patterns:[{urlPattern:'*'}]});await browser.send('Page.navigate',{url:'https://www.urban-rivals.com/market/'});
+ const wait=async expression=>{for(let i=0;i<100;i++){if(await browser.evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw Error('Timed out: '+expression);};
+ await wait('!!document.getElementById("row-42")');
+ await browser.evaluate('window.purchases=0');
+ const page=await (await mf.dispatchFetch('https://toolkit.example.org/market-capture')).text(),href=/class="install" href="([^"]+)"/.exec(page)[1],script=decodeURIComponent(href.slice('javascript:'.length));
+ await browser.evaluate(script);await browser.evaluate(`Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent==='Capture loaded offers').click()`);
+ const before=requests;
+ await browser.evaluate(`document.querySelector('tbody').insertAdjacentHTML('beforeend',${JSON.stringify(row('3'))})`);
+ await browser.evaluate(`Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent==='Capture loaded offers').click()`);
+ for(const label of ['Download evidence JSON','Download offers CSV','Download card coverage CSV'])await browser.evaluate(`Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent===${JSON.stringify(label)}).click()`);
+ for(let i=0;i<100&&(await readdir(dir)).length<3;i++)await new Promise(r=>setTimeout(r,50));
+ const result=JSON.parse(await readFile(join(dir,'market-capture.json'),'utf8'));
+ assert.equal(result.unique_cards,1);assert.equal(result.unique_observed_listings,3);assert.equal(result.observed_quantity_total,6);assert.equal(result.observations.length,2);assert.equal(result.cards[0].coverage_status,'count_matches_only');assert.ok(!JSON.stringify(result).includes('PRIVATE ACCOUNT VALUE'));
+ assert.match(await readFile(join(dir,'market-offers.csv'),'utf8'),/'=Seller/);assert.equal(await browser.evaluate('window.purchases'),0);assert.equal(requests,before);
+ await browser.evaluate(`document.body.insertAdjacentHTML('beforeend','<div class="js-offers-modal show"><a class="js-offers-modal-page" href="/market/character/?id=42"></a></div>');Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent==='Capture loaded offers').click()`);
+ assert.match(await browser.evaluate('document.querySelector("#toolkit-market-capture p").textContent'),/still loading/);
+ await browser.evaluate(`document.querySelector('.js-offers-modal').remove();document.getElementById('market-search').value='changed';Array.from(document.querySelectorAll('#toolkit-market-capture button')).find(b=>b.textContent==='Capture loaded offers').click()`);
+ assert.match(await browser.evaluate('document.querySelector("#toolkit-market-capture p").textContent'),/settings changed/);
+ const partial=summarizeMarket(result.observations.slice(0,1));assert.equal(partial.cards[0].advertised_minus_observed,1);assert.equal(partial.cards[0].coverage_status,'partial');
+ await mkdir('.wrangler',{recursive:true});await writeFile('.wrangler/market-helper-test.png',Buffer.from((await browser.send('Page.captureScreenshot')).data,'base64'));
+ console.log('PASS market bookmarklet, distinct sale IDs, repeat-capture deduplication, coverage, no requests/purchases/account data, loading/filter guards and actual CSV/JSON downloads.');
+}finally{await browser?.close();await mf.dispose();await rm(dir,{recursive:true,force:true});}

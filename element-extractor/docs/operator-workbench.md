@@ -12,6 +12,8 @@ Technical extraction settings are collapsed under **Advanced**. Saved reviews, b
 
 ## Source preview and coverage
 
+For Urban Rivals pages already open in your signed-in browser, Advanced includes **Capture a signed-in market page**. This separate, operator-triggered helper reads loaded listings and downloads locally without transferring login cookies to the toolkit. See [market capture and its coverage limits](market-capture.md). It is not automatic authenticated URL fetching.
+
 Website tables split into batches now show a whole-table summary immediately above the review grid: total captured source rows, current row range, batch navigation, and approved/pending/rejected/unopened counts across the table. Original row numbers continue across batches. Reviews remain in the tab while switching; save a full workbench backup before reloading or changing sources.
 
 **Download approved rows · whole table CSV/JSON** combines independently revalidated approvals across compatible batches of the current captured table, in original row order. It never approves unopened rows. The status reports exclusions; JSON retains source packets, review history and detailed coverage counts. Individual-selection downloads remain available. Different column mappings, overlapping/missing ranges and changed record positions stop combined export instead of silently merging. Wide column groups and custom slices are not joined. Source positions/grouping remain descriptive capture metadata, not authenticated provenance.

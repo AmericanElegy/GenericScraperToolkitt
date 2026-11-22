@@ -1,5 +1,6 @@
 import {WORKSPACE_PAGE} from './interpretation/workspace-page.js';
 import {ownerAccess} from './owner-access.js';
+import {marketCapturePage} from './market-capture.js';
 import {WORKBENCH_PAGE} from './interpretation/workbench-page.js';
 import {fileClient,pdfWorker} from './interpretation/file-assets.js';
 import workspaceClient from './interpretation/workspace-client.txt';
@@ -351,6 +352,7 @@ export default {
   async fetch(request, env, ctx) {
     const accessDenied=await ownerAccess(request,env);if(accessDenied)return accessDenied;
     const url = new URL(request.url);
+    if(request.method==='GET'&&url.pathname==='/market-capture')return new Response(marketCapturePage(),{headers:{...SECURITY,'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});
     if(request.method==='GET'&&['/workspace','/workspace-client.js'].includes(url.pathname))return new Response(url.pathname==='/workspace'?WORKSPACE_PAGE:workspaceClient,{headers:{...SECURITY,'Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",'Content-Type':url.pathname==='/workspace'?'text/html; charset=utf-8':'application/javascript; charset=utf-8'}});
     if(url.pathname==='/api/workspace')return workspaceAPI(request,env);
     if(url.pathname==='/api/interpretation/storage')return feedbackStorage(request,env);

@@ -765,6 +765,128 @@ async function ownerAccess(request, env = {}) {
   }
 }
 
+// src/market-capture.js
+function readMarketDOM(doc, sourceURL) {
+  const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+  const number2 = (s) => /^\d+$/.test(String(s)) && Number.isSafeInteger(Number(s)) ? Number(s) : null;
+  const cards = [], offers = [], issues = [];
+  const groups2 = Array.from(doc.querySelectorAll('[id^="row-"]')).filter((n) => /^row-\d+$/.test(n.id) && n.querySelector("tr[data-saleid]"));
+  for (const g of groups2) {
+    const id = g.id.slice(4), link = Array.from(g.querySelectorAll('a[href*="id_perso="]')).find((a) => norm(a.textContent));
+    const all = Array.from(g.querySelectorAll("a")).find((a) => /^View all [\d ,]+ offers$/i.test(norm(a.textContent)));
+    const advertised = all ? Number(norm(all.textContent).replace(/\D/g, "")) : null;
+    cards.push({ card_id: id, name: norm(link?.textContent) || null, advertised_offers: advertised });
+  }
+  const modal = doc.querySelector(".js-offers-modal.show");
+  const modalLink = modal?.querySelector("a.js-offers-modal-page");
+  const modalId = modalLink ? new URL(modalLink.getAttribute("href"), sourceURL).searchParams.get("id") : null;
+  if (modalId && !cards.some((c) => c.card_id === modalId)) cards.push({ card_id: modalId, name: norm(modal.querySelector("#market-offers-title,h3,h4,h5")?.textContent) || null, advertised_offers: null });
+  const roots = [...groups2.map((g) => ({ node: g, card_id: g.id.slice(4), view: "page-preview" })), ...modalId ? [{ node: modal, card_id: modalId, view: "offer-overlay" }] : []];
+  for (const root of roots) for (const row of root.node.querySelectorAll("tr[data-saleid]")) {
+    const cells = Array.from(row.cells), sale_id = row.getAttribute("data-saleid"), card_id = row.getAttribute("data-id");
+    const raw = cells.map((c) => norm(c.textContent));
+    if (!/^\d+$/.test(sale_id || "") || card_id !== root.card_id || cells.length !== 10) {
+      issues.push({ card_id: root.card_id, sale_id, reason: "Unexpected listing identity or column layout; retained raw cells.", raw_cells: raw });
+      continue;
+    }
+    const edition = cells[3], seller = cells[8].querySelector("a");
+    const offer = { sale_id, card_id, quantity: number2(row.getAttribute("data-quantity")), price_clintz: number2(row.getAttribute("data-price")), level: number2(row.getAttribute("data-level")), edition_text: norm(edition.textContent), edition_labels: Array.from(edition.querySelectorAll("[title],[aria-label],img[alt]")).map((e) => e.getAttribute("title") || e.getAttribute("aria-label") || e.getAttribute("alt")).filter(Boolean), edition_markup: edition.innerHTML, state: row.getAttribute("data-state"), serial: row.getAttribute("data-serial"), power: raw[5], damage: raw[6], ability: raw[7], seller: norm(seller?.textContent) || raw[8], time_remaining: raw[9], raw_cells: raw, view: root.view };
+    if (offer.quantity === null || offer.price_clintz === null || offer.level === null) issues.push({ sale_id, reason: "A numeric listing attribute was missing or invalid; values were not guessed." });
+    offers.push(offer);
+  }
+  const controls = Array.from(doc.querySelectorAll("select")).map((s) => ({ label: s.getAttribute("aria-label") || s.name || "", value: s.value, text: norm(s.selectedOptions?.[0]?.textContent) }));
+  return { format: "toolkit-market-observation-v1", captured_at: (/* @__PURE__ */ new Date()).toISOString(), source_url: sourceURL, search: doc.querySelector("#market-search")?.value || "", controls, page_numbers: Array.from(doc.querySelectorAll(".ur-pagination-page.active")).filter((n) => !n.closest(".js-offers-modal")).map((n) => norm(n.textContent)), overlay_card_id: modalId, overlay_page: modal ? norm(modal.querySelector(".ur-pagination-page.active")?.textContent) : null, overlay_loading: !!modal && !offers.some((r) => r.view === "offer-overlay"), cards, offers, issues, notice: "Loaded DOM observations only. Advertised offer counts are separate. This is not a simultaneous complete market snapshot or proof of completed sales." };
+}
+function summarizeMarket(observations) {
+  const cards = /* @__PURE__ */ new Map(), listings = /* @__PURE__ */ new Map();
+  for (const o of observations) {
+    for (const c of o.cards) if (c.advertised_offers !== null || !cards.has(c.card_id)) cards.set(c.card_id, c);
+    for (const r of o.offers) {
+      const prior = listings.get(r.sale_id);
+      listings.set(r.sale_id, { ...r, first_seen: prior?.first_seen || o.captured_at, last_seen: o.captured_at });
+    }
+  }
+  const rows = [...listings.values()], coverage = [...cards.values()].map((c) => {
+    const observed = rows.filter((r) => r.card_id === c.card_id).length;
+    return { ...c, observed_unique_listings: observed, advertised_minus_observed: c.advertised_offers === null ? null : c.advertised_offers - observed, coverage_status: c.advertised_offers === null ? "unknown" : observed < c.advertised_offers ? "partial" : observed === c.advertised_offers ? "count_matches_only" : "changed_during_capture" };
+  });
+  return { format: "toolkit-market-capture-v1", started_at: observations[0]?.captured_at, ended_at: observations.at(-1)?.captured_at, unique_cards: cards.size, unique_observed_listings: rows.length, observed_quantity_total: rows.some((r) => r.quantity === null) ? null : rows.reduce((n, r) => n + r.quantity, 0), unknown_quantity_listings: rows.filter((r) => r.quantity === null).length, cards: coverage, offers: rows, observations, notice: "Unreviewed observations over time, not current inventory or completed sales. Repeated sale IDs are counted once; original observations retain changes. Missing advertised offers remain uncollected. Count agreement alone does not prove completeness. Edition markup is retained for manual inspection; blank text does not prove an edition." };
+}
+function marketCaptureTool(read, summarize) {
+  if (location.hostname !== "www.urban-rivals.com" || !location.pathname.startsWith("/market")) {
+    alert("Open the Urban Rivals marketplace first.");
+    return;
+  }
+  if (document.getElementById("toolkit-market-capture")) {
+    document.getElementById("toolkit-market-capture").hidden = false;
+    return;
+  }
+  const observations = [], panel = document.createElement("section");
+  panel.id = "toolkit-market-capture";
+  panel.style.cssText = "position:fixed;right:12px;top:12px;z-index:2147483647;background:#fff;color:#172637;padding:18px;border:3px solid #24628a;border-radius:10px;max-width:370px;font:14px Arial;box-shadow:0 3px 18px #0008";
+  const heading = document.createElement("h3");
+  heading.textContent = "Market capture - local only";
+  const status = document.createElement("p");
+  const help = document.createElement("p");
+  help.textContent = "Capture this page, then manually open View all and each offer page; capture again. No Buy/Sell clicks or automatic requests. Keep the search and main page unchanged during a capture session.";
+  panel.append(heading, status, help);
+  document.body.append(panel);
+  const button = (label, fn) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.style.cssText = "margin:4px;padding:8px;color:#172637;background:#eef5fb;border:1px solid #24628a";
+    b.onclick = fn;
+    panel.append(b);
+    return b;
+  };
+  const quote = (v) => {
+    let s = String(v ?? "");
+    if (/^[\s\u0000-\u001f]*[=+@-]/.test(s)) s = "'" + s;
+    return '"' + s.replaceAll('"', '""') + '"';
+  };
+  const save = (content, name, type) => {
+    const a = document.createElement("a"), url = URL.createObjectURL(new Blob([content], { type }));
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1e3);
+  };
+  const report = () => summarize(observations);
+  button("Capture loaded offers", () => {
+    try {
+      const o = read(document, location.href);
+      if (o.overlay_loading) throw Error("The offer overlay is still loading or empty. Wait for listing rows, or close it before capturing.");
+      if (observations.length && JSON.stringify([o.search, o.controls, o.page_numbers, o.cards.map((c) => c.card_id)]) !== JSON.stringify([observations[0].search, observations[0].controls, observations[0].page_numbers, observations[0].cards.map((c) => c.card_id)])) throw Error("Main page or search settings changed. Download this session and reload before starting another.");
+      if (!o.cards.length || !o.offers.length) throw Error("No supported loaded market listings found.");
+      if (observations.length >= 50 || observations.reduce((n, s) => n + s.offers.length, 0) + o.offers.length > 1e4) throw Error("Capture limit reached; download before starting another session. Nothing was removed.");
+      observations.push(o);
+      const r = report();
+      status.textContent = r.unique_cards + " unique cards; " + r.unique_observed_listings + " unique observed listings; " + observations.length + " observations. " + r.cards.reduce((n, c) => n + (c.advertised_offers || 0), 0) + " advertised offers; " + r.cards.reduce((n, c) => n + Math.max(0, c.advertised_minus_observed || 0), 0) + " not yet observed. Count agreement does not prove completeness; inspect JSON issues.";
+    } catch (e) {
+      status.textContent = e.message;
+    }
+  });
+  button("Download evidence JSON", () => save(JSON.stringify(report(), null, 2), "market-capture.json", "application/json"));
+  button("Download offers CSV", () => {
+    const fields = ["sale_id", "card_id", "quantity", "price_clintz", "level", "edition_text", "power", "damage", "ability", "seller", "time_remaining", "first_seen", "last_seen"];
+    save([fields, ...report().offers.map((r) => fields.map((k) => r[k]))].map((r) => r.map(quote).join(",")).join("\r\n") + "\r\n", "market-offers.csv", "text/csv");
+  });
+  button("Download card coverage CSV", () => {
+    const fields = ["card_id", "name", "advertised_offers", "observed_unique_listings", "advertised_minus_observed", "coverage_status"];
+    save([fields, ...report().cards.map((r) => fields.map((k) => r[k]))].map((r) => r.map(quote).join(",")).join("\r\n") + "\r\n", "market-card-coverage.csv", "text/csv");
+  });
+  button("Hide helper", () => {
+    panel.hidden = true;
+  });
+  status.textContent = "No capture yet. Downloads stay on this computer. Reloading loses this session; download JSON first.";
+}
+function marketCapturePage() {
+  const script = "void (" + marketCaptureTool.toString() + ")(" + readMarketDOM.toString() + "," + summarizeMarket.toString() + ")";
+  const href = ("javascript:" + encodeURIComponent(script)).replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+  return '<!doctype html><meta charset="utf-8"><title>Capture signed-in market page</title><style>body{font:18px system-ui;max-width:800px;margin:40px auto;padding:20px;line-height:1.6}a{color:#135c92}.install{display:inline-block;background:#eaf4ff;padding:16px;border:2px solid #135c92}</style><h1>Capture the market you already opened</h1><p>This helper reads loaded Urban Rivals listings in your signed-in browser. It makes no network requests, reads no cookies or account balances, and never clicks market controls.</p><ol><li>Drag the following link to your bookmarks bar.</li><li>Open your market page, then click the saved bookmark.</li><li>Click Capture loaded offers. For more listings, manually open View all, capture each offer page, and repeat.</li><li>Download offers CSV, card coverage CSV and evidence JSON before reloading. CSV files can be imported into the workbench for review.</li></ol><a class="install" href="' + href + '">Capture Urban Rivals market</a><p>The helper reports observed listings separately from advertised totals. It does not claim complete market coverage. Stop at the current main results page; start a separate session if filters/page change. Card editions and time remaining require manual review.</p><p>If your browser or the site blocks bookmarklets, do not disable security settings; use a supported capture route instead.</p><p><a href="/">Return to workbench</a></p>';
+}
+
 // src/interpretation/lab-page.js
 var LAB_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Interpretation Lab \xB7 Web Table Toolkit</title>
 <style>
@@ -803,7 +925,7 @@ var downloads = take('<div class="bar between toolbar">', '<div class="review-la
 page = page.replace(/<title>.*?<\/title>/, "<title>Operator workbench \xB7 Table Toolkit</title>").replace(/<header class="top">.*?<\/header>/, `<header class="top"><div><p class="eyebrow">Table Toolkit \xB7 operator use</p><h1>Your table workbench</h1><p>Add a source, check the table, download your work.</p><nav class="bar" aria-label="Workflow"><a href="#input-panel">Add source</a><span aria-hidden="true">\u2192</span><a href="#workspace">Review/edit table</a><span aria-hidden="true">\u2192</span><a href="#downloads">Download</a></nav></div><span class="badge">Local / preview</span></header>`).replace("Local / preview", "Operator workspace").replace("1. Add source text", "1. Add source").replace('<form id="custom-input">', `<form id="custom-input"><p>Use a website link, paste text, or choose a file below. Sources are alternatives; opening one starts a new review.</p><label for="source-file">Excel, CSV, PDF, Word or text file</label><div id="file-drop" class="file-drop"><input id="source-file" type="file" accept=".xlsx,.csv,.tsv,.pdf,.docx,.txt"><button id="import-file" type="button">Read file</button><span class="hint">Or drop one file here \xB7 up to 10 MiB</span></div><p class="hint">Excel .xlsx includes multiple sheets. Word uses .docx. Scanned PDFs need OCR outside this tool; no paid service is used.</p>`).replace("Source URL \xB7 reference unless you click Fetch page", "Website link").replace("Or paste a passage or full page", "Pasted text \xB7 also editable after a file import").replace("Source and extraction options", "Advanced \xB7 extraction settings").replace("Preview suggested records", "Review pasted text").replace("Paste text or load an example to begin.", "Add a website link, text or a file to begin.").replace('<p id="status"', `<section id="file-report" class="card" hidden aria-label="Source coverage"><h2>Check source coverage</h2><p id="file-summary"></p><ul id="file-issues" class="coverage"></ul><details><summary>All sheets, pages and document parts</summary><ul id="file-inventory"></ul></details><button id="download-capture" type="button" class="secondary">Download captured source</button><p class="hint">Captured source keeps parsed text and cells, including unsupported selections. Keep the original file too: images, formatting and unreadable content are not included.</p></section><p id="status"`).replace("2. Review records", "2. Review/edit table").replace('<div class="scroll"><table><caption>Records in requested column order</caption>', `<section id="whole-table" hidden><h3 id="whole-table-title"></h3><p id="whole-table-summary" role="status"></p><div class="bar"><button id="table-previous" type="button">Previous rows</button><button id="table-next" type="button">Next rows</button></div><p>Reviews stay while switching batches in this tab. Save source and all reviews before reloading.</p><div class="bar"><button id="table-csv" type="button">Download approved rows - whole table CSV</button><button id="table-json" type="button">Download approved rows - whole table JSON</button></div><p class="hint">Whole-table downloads combine approved rows across batches with the same columns. Pending, rejected and unopened rows are excluded and counted. Column groups and custom selections are not joined.</p></section><div class="scroll"><table><caption>Records in requested column order</caption>`).replace('<section id="workspace" hidden>', `<section id="workspace" hidden><section id="task-panel" class="card"><h2>What do you want from this source?</h2><p>Automatic extraction stays available. Use requested columns for a specific output, then add records manually or open an AI proposal generated by the local evaluator.</p><label for="task-template">Starting point</label><select id="task-template"><option value="custom">Custom output</option><option value="materials">Materials list</option><option value="quantities">Amounts and durations</option></select><label for="task-description">Describe the requested result</label><textarea id="task-description" maxlength="2000" placeholder="For example: list the named materials, without procedure steps."></textarea><label for="task-columns">Output columns \xB7 one per line, name:text or name:number; add :required when needed</label><textarea id="task-columns" spellcheck="false">material:text:required
 amount:number
 unit:text
-qualifier:text</textarea><label for="task-diagrams">Diagram relevance for this task</label><select id="task-diagrams"><option value="undecided">Not decided</option><option value="supplementary">Supplementary visual context</option><option value="include">Relevant \xB7 inspect original manually</option><option value="exclude">Exclude from this task \xB7 reason required</option></select><label for="task-relevance-note">Relevance note</label><input id="task-relevance-note" maxlength="1000"><button id="start-task" type="button">Prepare requested columns</button><p class="hint">This starts a new unapproved review of the current source selection. No API call or automatic approval is made. Relevance does not change capture warnings or mark source coverage checked.</p><details><summary>Open a locally generated AI proposal</summary><input id="ai-proposal-file" type="file" accept=".json,application/json"><button id="open-ai-proposal" type="button" class="secondary">Open proposal for review</button><p class="hint">Proposal files include source text and evidence. Importing them makes no paid call. Keys remain in the local evaluator; this hosted page never receives provider credentials.</p></details></section>`).replace('<button id="download-capture"', `<section aria-label="Captured source preview"><h3>Preview and account for the source</h3><p id="coverage-counts" role="status"></p><label for="source-part">Source part \xB7 original order where available</label><select id="source-part"></select><p id="source-part-scope" class="hint"></p><div id="source-part-preview" class="scroll" style="max-height:360px;white-space:pre-wrap"></div><p id="source-part-links" class="hint"></p><label for="coverage-note">Coverage note \xB7 required for checked or excluded content</label><input id="coverage-note" maxlength="1000" placeholder="What did you check, or why is this excluded?"><div class="bar"><button id="coverage-reviewed" type="button" class="secondary">Mark checked</button><button id="coverage-exclude" type="button" class="secondary">Exclude with reason</button><button id="coverage-reset" type="button" class="secondary">Reset status</button></div><p class="hint">Checked means you examined this captured part. It does not approve records or certify complete extraction. Unreadable content remains unsupported even if you exclude it intentionally.</p></section><button id="save-workbench" type="button">Save source and all reviews</button><button id="download-capture"`).replace('<details id="mapping-panel" class="card">', '<details id="mapping-panel" class="card" open>').replace("</aside></div>", '</aside></div><section id="downloads" class="card"><h2>3. Download</h2><p>CSV and JSON include only approved rows in the current selection. Other sheets, pages, sections and pending rows are excluded. Save the review session under Advanced to keep evidence, corrections and decisions.</p>' + downloads + "</section>").replace("<footer>", `<details class="card" id="advanced"><summary>Advanced \xB7 saved reviews, batch tools and feedback</summary><p><a href="/workspace">Batch workspace</a> \xB7 <a href="/tables">Website table explorer</a> \xB7 <a href="/interpretation">Interpretation Lab</a> \xB7 <a href="/example">Elements example</a></p>${sessions}${extras}</details><footer>`).replace("<summary>Advanced \xB7 saved reviews, batch tools and feedback</summary>", `<summary>Advanced \xB7 saved reviews, batch tools and feedback</summary><label for="workbench-backup">Restore source and all reviews</label><input id="workbench-backup" type="file" accept=".json,application/json"><button id="restore-workbench" type="button" class="secondary">Restore workbench backup</button><p class="hint">Backups contain captured source text, coverage decisions and reviews. Keep original files for unread images and formatting. Nothing calls an AI provider.</p>`).replace("no general AI interpretation, OCR, JavaScript rendering or paid inference", "no general AI interpretation, OCR or paid inference. Website links can use the existing local JavaScript renderer when indicated").replace('<script src="/interpretation-client.js"', '<script src="/file-import.js" defer><\/script><script src="/interpretation-client.js"').replace("</style>", `.file-drop{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:2px dashed #a2b9ce;border-radius:10px;padding:18px;background:#f3f8fc}.file-drop input{flex:1;min-width:200px}.coverage{border-left:4px solid #b97816;padding:8px 12px 8px 28px;background:#fff8e8}body{font-size:16px}label,.hint,table,summary,td button.value{font-size:14px}#downloads{margin-top:20px}nav a{font-weight:600}#file-report{overflow-wrap:anywhere}</style>`);
+qualifier:text</textarea><label for="task-diagrams">Diagram relevance for this task</label><select id="task-diagrams"><option value="undecided">Not decided</option><option value="supplementary">Supplementary visual context</option><option value="include">Relevant \xB7 inspect original manually</option><option value="exclude">Exclude from this task \xB7 reason required</option></select><label for="task-relevance-note">Relevance note</label><input id="task-relevance-note" maxlength="1000"><button id="start-task" type="button">Prepare requested columns</button><p class="hint">This starts a new unapproved review of the current source selection. No API call or automatic approval is made. Relevance does not change capture warnings or mark source coverage checked.</p><details><summary>Open a locally generated AI proposal</summary><input id="ai-proposal-file" type="file" accept=".json,application/json"><button id="open-ai-proposal" type="button" class="secondary">Open proposal for review</button><p class="hint">Proposal files include source text and evidence. Importing them makes no paid call. Keys remain in the local evaluator; this hosted page never receives provider credentials.</p></details></section>`).replace('<button id="download-capture"', `<section aria-label="Captured source preview"><h3>Preview and account for the source</h3><p id="coverage-counts" role="status"></p><label for="source-part">Source part \xB7 original order where available</label><select id="source-part"></select><p id="source-part-scope" class="hint"></p><div id="source-part-preview" class="scroll" style="max-height:360px;white-space:pre-wrap"></div><p id="source-part-links" class="hint"></p><label for="coverage-note">Coverage note \xB7 required for checked or excluded content</label><input id="coverage-note" maxlength="1000" placeholder="What did you check, or why is this excluded?"><div class="bar"><button id="coverage-reviewed" type="button" class="secondary">Mark checked</button><button id="coverage-exclude" type="button" class="secondary">Exclude with reason</button><button id="coverage-reset" type="button" class="secondary">Reset status</button></div><p class="hint">Checked means you examined this captured part. It does not approve records or certify complete extraction. Unreadable content remains unsupported even if you exclude it intentionally.</p></section><button id="save-workbench" type="button">Save source and all reviews</button><button id="download-capture"`).replace('<details id="mapping-panel" class="card">', '<details id="mapping-panel" class="card" open>').replace("</aside></div>", '</aside></div><section id="downloads" class="card"><h2>3. Download</h2><p>CSV and JSON include only approved rows in the current selection. Other sheets, pages, sections and pending rows are excluded. Save the review session under Advanced to keep evidence, corrections and decisions.</p>' + downloads + "</section>").replace("<footer>", `<details class="card" id="advanced"><summary>Advanced \xB7 saved reviews, batch tools and feedback</summary><p><a href="/workspace">Batch workspace</a> \xB7 <a href="/tables">Website table explorer</a> - <a href="/market-capture">Capture a signed-in market page</a> \xB7 <a href="/interpretation">Interpretation Lab</a> \xB7 <a href="/example">Elements example</a></p>${sessions}${extras}</details><footer>`).replace("<summary>Advanced \xB7 saved reviews, batch tools and feedback</summary>", `<summary>Advanced \xB7 saved reviews, batch tools and feedback</summary><label for="workbench-backup">Restore source and all reviews</label><input id="workbench-backup" type="file" accept=".json,application/json"><button id="restore-workbench" type="button" class="secondary">Restore workbench backup</button><p class="hint">Backups contain captured source text, coverage decisions and reviews. Keep original files for unread images and formatting. Nothing calls an AI provider.</p>`).replace("no general AI interpretation, OCR, JavaScript rendering or paid inference", "no general AI interpretation, OCR or paid inference. Website links can use the existing local JavaScript renderer when indicated").replace('<script src="/interpretation-client.js"', '<script src="/file-import.js" defer><\/script><script src="/interpretation-client.js"').replace("</style>", `.file-drop{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:2px dashed #a2b9ce;border-radius:10px;padding:18px;background:#f3f8fc}.file-drop input{flex:1;min-width:200px}.coverage{border-left:4px solid #b97816;padding:8px 12px 8px 28px;background:#fff8e8}body{font-size:16px}label,.hint,table,summary,td button.value{font-size:14px}#downloads{margin-top:20px}nav a{font-weight:600}#file-report{overflow-wrap:anywhere}</style>`);
 var WORKBENCH_PAGE = page;
 
 // src/interpretation/file-assets.js
@@ -1634,11 +1756,11 @@ function taskResponse(job) {
 }
 
 // src/interpretation/evidence-context.js
-function evidenceContext(source, evidence, { document = false } = {}) {
-  const start = document ? evidence.document_start : evidence.source_start, end = document ? evidence.document_end : evidence.source_end;
+function evidenceContext(source, evidence, { document: document2 = false } = {}) {
+  const start = document2 ? evidence.document_start : evidence.source_start, end = document2 ? evidence.document_end : evidence.source_end;
   if (typeof source !== "string" || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > source.length || source.slice(start, end) !== evidence.quote) return null;
   const from = Math.max(0, start - 350), to = Math.min(source.length, end + 350);
-  return { before: source.slice(from, start), quote: source.slice(start, end), after: source.slice(end, to), start: from, end: to, truncated_before: from > 0, truncated_after: to < source.length, scope: document ? "retained page" : "current source snapshot" };
+  return { before: source.slice(from, start), quote: source.slice(start, end), after: source.slice(end, to), start: from, end: to, truncated_before: from > 0, truncated_after: to < source.length, scope: document2 ? "retained page" : "current source snapshot" };
 }
 
 // src/interpretation/text-rules.js
@@ -4116,7 +4238,7 @@ async function labFetch(request) {
       return reply(await selectCapturedTable(body.parent, body.options));
     }
     if (url.pathname === "/api/interpretation/start") {
-      let packet, response, parserVersion, document, mapping;
+      let packet, response, parserVersion, document2, mapping;
       if (body?.example_id === "custom-text") {
         if (!only(body, ["example_id", "source", "schema", "mode", "dataset_id", "mapping", "retrieval", "task", "proposal"]) || body.mode !== void 0 && !["auto", "pair", "requested"].includes(body.mode))
           fail5("invalid_input", "Choose automatic suggestions, manual pair columns or requested columns.");
@@ -4144,7 +4266,7 @@ async function labFetch(request) {
           const plan = planPage(body.source, PROSE_VERSION, { semantic: true, enhanced: true });
           const selected = body.dataset_id === void 0 ? plan.datasets[0] : plan.datasets.find((d) => d.id === body.dataset_id);
           if (!selected) fail5("invalid_selection", "Choose a listed full-page section.");
-          document = { source: body.source, dataset_id: selected.id };
+          document2 = { source: body.source, dataset_id: selected.id };
           packet = await createPacket({ source: { text: selected.text, url: body.source.url ?? null }, schema: selected.schema });
           parserVersion = selected.parser_version;
         } else {
@@ -4171,17 +4293,17 @@ async function labFetch(request) {
         packet,
         await scriptedInterpreter(response)
       );
-      if (body.retrieval && document && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail5("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
+      if (body.retrieval && document2 && body.retrieval.snapshot_hash !== await digest(body.source.text.replace(/\r\n?/g, "\n"))) fail5("retrieval_metadata", "The retained page differs from the recorded retrieved snapshot.");
       const job = {
         example_id: body.example_id,
         packet,
         cache_entry: run.cache_entry,
         events: [],
         revisions: [],
-        ...document ? { document } : {},
+        ...document2 ? { document: document2 } : {},
         ...mapping ? { mapping } : {},
         ...body.mode === "requested" ? { task: body.task, ...body.proposal ? { proposal: body.proposal } : {} } : {},
-        ...body.retrieval ? { retrieval: document ? { ...body.retrieval, snapshot_hash: packet.source.text_hash } : body.retrieval } : {},
+        ...body.retrieval ? { retrieval: document2 ? { ...body.retrieval, snapshot_hash: packet.source.text_hash } : body.retrieval } : {},
         ...body.example_id === "custom-text" ? { parser_version: parserVersion } : {}
       };
       return reply(await view(job, await checkJob(job)));
@@ -5339,10 +5461,10 @@ async function fetchPublicPage(input, ownHost) {
     await checkPublicDNS(url.hostname, signal);
     const r = await fetch(url.href, { redirect: "manual", signal, headers: { Accept: "text/html", "User-Agent": "GenericScraperToolkit/1.0 (public HTML tables)" } });
     if ([301, 302, 303, 307, 308].includes(r.status)) {
-      const location = r.headers.get("location");
+      const location2 = r.headers.get("location");
       await r.body?.cancel();
-      if (!location || redirects === 3) throw new InputError("Source redirected too many times or omitted its destination.", 422);
-      url = publicURL(new URL(location, url).href);
+      if (!location2 || redirects === 3) throw new InputError("Source redirected too many times or omitted its destination.", 422);
+      url = publicURL(new URL(location2, url).href);
       continue;
     }
     if (!r.ok) {
@@ -5709,6 +5831,7 @@ var worker_default = {
     const accessDenied = await ownerAccess(request, env);
     if (accessDenied) return accessDenied;
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/market-capture") return new Response(marketCapturePage(), { headers: { ...SECURITY, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
     if (request.method === "GET" && ["/workspace", "/workspace-client.js"].includes(url.pathname)) return new Response(url.pathname === "/workspace" ? WORKSPACE_PAGE : workspace_client_default, { headers: { ...SECURITY, "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'", "Content-Type": url.pathname === "/workspace" ? "text/html; charset=utf-8" : "application/javascript; charset=utf-8" } });
     if (url.pathname === "/api/workspace") return workspaceAPI(request, env);
     if (url.pathname === "/api/interpretation/storage") return feedbackStorage(request, env);
